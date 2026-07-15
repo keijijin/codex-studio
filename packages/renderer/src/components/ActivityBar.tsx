@@ -23,6 +23,7 @@ export function ActivityBar() {
           key={item.id}
           type="button"
           title={item.label}
+          aria-label={item.label}
           onClick={() => {
             if (item.id === 'chat') {
               toggleAiPanel()

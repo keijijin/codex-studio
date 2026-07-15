@@ -4,7 +4,7 @@
 |------|------|
 | 版 | 1.0 |
 | 作成日 | 2026-07-15 |
-| 更新日 | 2026-07-15 |
+| 更新日 | 2026-07-15（Sprint 6 同期） |
 
 > ステータス: `[ ]` 未着手 / `[~]` 進行中 / `[x]` 完了 / `[-]` キャンセル
 
@@ -14,7 +14,7 @@
 
 ### リポジトリ・環境
 
-- [x] GitHub リポジトリ作成（ローカル）
+- [x] GitHub リポジトリ作成（Public: keijijin/codex-studio）
 - [x] pnpm monorepo 初期化
 - [x] `packages/` 構成作成（app, renderer, shared）
 - [x] TypeScript 設定（各パッケージ tsconfig）
@@ -64,7 +64,7 @@
 - [x] ファイル read handler
 - [x] ファイル write handler
 - [x] ファイルツリー生成 API
-- [ ] chokidar ファイルウォッチャー
+- [x] chokidar ファイルウォッチャー
 - [ ] .gitignore パーサー統合
 
 ### Renderer UI
@@ -79,13 +79,13 @@
 - [x] TabBar コンポーネント
 - [x] StatusBar コンポーネント
 - [x] ウェルカム画面（フォルダ選択）
-- [ ] 最近のワークスペース一覧
+- [x] 最近のワークスペース一覧
 
 ### 設定
 
 - [x] AppSettings 型定義
 - [x] 設定ファイル読み書き（Main）
-- [ ] 設定画面 UI（基本項目）
+- [x] 設定画面 UI（基本項目）
 
 ---
 
@@ -266,16 +266,17 @@
 
 ---
 
-## 進捗サマリー
+## 進捗サマリー（2026-07-15 時点）
 
-| Phase | 総タスク | 完了 | 進捗率 |
-|-------|----------|------|--------|
-| Phase 0 | 22 | 7 | 32% |
-| Phase 1 | 22 | 0 | 0% |
-| Phase 2 | 24 | 0 | 0% |
-| Phase 3 | 28 | 0 | 0% |
-| Phase 4 | 26 | 0 | 0% |
-| **MVP 合計** | **122** | **7** | **6%** |
+| Phase | 状態 | 備考 |
+|-------|------|------|
+| Phase 0 基盤 | ほぼ完了 | husky / CONTRIBUTING 残 |
+| Phase 1 エディタ | ほぼ完了 | ウォッチャー完了 |
+| Phase 2 索引+チャット | ほぼ完了 | SQLite は Post-MVP |
+| Phase 3 Agent+ツール | 完了 | Worker Thread 分離は未 |
+| Phase 4 リリース | 進行中 | CI Release 完了、署名・公証は未 |
+
+> 詳細は [README.md](../README.md) の Sprint 6 セクションを参照
 
 ---
 

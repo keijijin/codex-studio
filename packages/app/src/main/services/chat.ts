@@ -47,6 +47,10 @@ export class ChatService {
   }
 
   async send(params: ChatSendParams, webContents: WebContents): Promise<void> {
+    if (process.env.CODEX_E2E_MOCK_CHAT === '1') {
+      return this.sendAskMock(params, webContents)
+    }
+
     const session = sessionService.getSession(params.sessionId)
     const mode = params.mode ?? session?.mode ?? 'ask'
 
@@ -61,8 +65,27 @@ export class ChatService {
     return this.sendAsk(params, webContents)
   }
 
+  private async sendAskMock(params: ChatSendParams, webContents: WebContents): Promise<void> {
+    const { sessionId, content, attachments = [] } = params
+    sessionService.addMessage(sessionId, {
+      sessionId,
+      role: 'user',
+      content,
+      attachments: attachments.map(({ type, path, name }) => ({ type, path, name })),
+    })
+    this.updateSessionTitle(sessionId, content)
+    this.emit(webContents, sessionId, { type: 'text_delta', content: 'E2E mock response' })
+    const saved = sessionService.addMessage(sessionId, {
+      sessionId,
+      role: 'assistant',
+      content: 'E2E mock response',
+    })
+    this.emit(webContents, sessionId, { type: 'done', messageId: saved.id })
+  }
+
   private async sendAsk(params: ChatSendParams, webContents: WebContents): Promise<void> {
     const { sessionId, content, attachments = [] } = params
+
     const settings = settingsService.get()
     const runtime = getLlmRuntimeConfig(settings, 'chat')
 

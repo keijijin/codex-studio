@@ -9,18 +9,24 @@ pnpm install
 pnpm dev
 ```
 
-## 現在の実装状況（Sprint 5 / α リリース準備）
+## 現在の実装状況（Sprint 6 / 安定化 + 配布準備）
 
 - [x] pnpm monorepo + Electron + Monaco + 型安全 IPC
 - [x] ワークスペース + 索引 + ripgrep 検索
+- [x] **chokidar ファイルウォッチャー** + 索引増分更新
 - [x] OpenAI / Anthropic / **Ollama** チャット + Agent モード
 - [x] Agent ツール（Read / Grep / Glob / Write / StrReplace / Delete / Shell）
 - [x] 承認ダイアログ + Diff + YOLO モード設定
 - [x] `.md` プレビュー / 編集切替
+- [x] **組み込みターミナル**（node-pty + xterm）
+- [x] **XML / Java シンタックスハイライト**
 - [x] 最近開いたワークスペース
-- [x] Playwright E2E（起動・ワークスペース）
+- [x] Playwright E2E（起動・ワークスペース・チャット・ターミナル）
 - [x] electron-builder（macOS / Windows / Linux）
-- [x] [ユーザーガイド](./docs/user/guide.md) / [セキュリティチェックリスト](./docs/security-checklist.md)
+- [x] **GitHub Releases 自動化**（tag push）
+- [x] [ユーザーガイド](./docs/user/guide.md) / [セキュリティチェックリスト](./docs/security-checklist.md) / [リリース手順](./docs/release.md)
+
+**リポジトリ**: https://github.com/keijijin/codex-studio
 
 ## コマンド
 
@@ -29,10 +35,15 @@ pnpm dev          # 開発サーバー
 pnpm build        # ビルド
 pnpm test         # ユニットテスト
 pnpm test:e2e     # E2E（ビルド後 Playwright）
-pnpm package:mac  # macOS .dmg
-pnpm package:win  # Windows インストーラー
+pnpm package:mac    # macOS .dmg
+pnpm package:win    # Windows インストーラー
+pnpm package:linux  # Linux AppImage + .deb
 pnpm typecheck
 ```
+
+## リリース
+
+`v*` 形式の tag を push すると GitHub Actions が各 OS 向けインストーラをビルドし、Releases に公開します。詳細は [docs/release.md](./docs/release.md)。
 
 ## LLM 設定
 

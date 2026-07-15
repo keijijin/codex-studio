@@ -21,7 +21,8 @@
     "postinstall": "electron-rebuild -f -w node-pty",
     "package": "pnpm build && electron-builder",
     "package:mac": "pnpm build && electron-builder --mac",
-    "package:win": "pnpm build && electron-builder --win"
+    "package:win": "pnpm build && electron-builder --win",
+    "package:linux": "pnpm build && electron-builder --linux"
   },
   "devDependencies": {
     "@eslint/js": "^9.28.0",

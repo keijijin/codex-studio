@@ -75,6 +75,61 @@ export class IndexService {
     this.status = { state: 'idle', totalFiles: 0, indexedFiles: 0 }
   }
 
+  async upsertFile(rootPath: string, filePath: string): Promise<void> {
+    if (this.rootPath !== rootPath) {
+      return
+    }
+
+    let fileStat
+    try {
+      fileStat = await stat(filePath)
+    } catch {
+      this.removeFile(filePath)
+      return
+    }
+
+    if (!fileStat.isFile() || fileStat.size > MAX_FILE_SIZE) {
+      this.removeFile(filePath)
+      return
+    }
+
+    const indexed: IndexedFile = {
+      path: filePath,
+      relativePath: relative(rootPath, filePath),
+      size: fileStat.size,
+      mtime: fileStat.mtimeMs,
+    }
+
+    const existingIndex = this.files.findIndex((file) => file.path === filePath)
+    if (existingIndex >= 0) {
+      this.files[existingIndex] = indexed
+    } else {
+      this.files.push(indexed)
+    }
+
+    this.status = {
+      state: 'ready',
+      totalFiles: this.files.length,
+      indexedFiles: this.files.length,
+    }
+    this.emitProgress()
+  }
+
+  removeFile(filePath: string): void {
+    const nextLength = this.files.length
+    this.files = this.files.filter((file) => file.path !== filePath)
+    if (this.files.length === nextLength) {
+      return
+    }
+
+    this.status = {
+      state: this.rootPath ? 'ready' : 'idle',
+      totalFiles: this.files.length,
+      indexedFiles: this.files.length,
+    }
+    this.emitProgress()
+  }
+
   async search(query: string): Promise<SearchResult[]> {
     if (!this.rootPath || !query.trim()) {
       return []

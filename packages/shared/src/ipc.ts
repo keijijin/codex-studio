@@ -45,6 +45,7 @@ export const IPC_EVENTS = {
   CHAT_STREAM: 'chat:stream',
   INDEX_PROGRESS: 'index:progress',
   FILE_CHANGED: 'file:changed',
+  WORKSPACE_TREE_CHANGED: 'workspace:treeChanged',
   TERMINAL_OUTPUT: 'terminal:output',
   TERMINAL_EXIT: 'terminal:exit',
 } as const
@@ -85,6 +86,7 @@ export interface IpcEventMap {
   [IPC_EVENTS.CHAT_STREAM]: ChatStreamEvent & { sessionId: string }
   [IPC_EVENTS.INDEX_PROGRESS]: IndexStatus
   [IPC_EVENTS.FILE_CHANGED]: { path: string; relativePath: string }
+  [IPC_EVENTS.WORKSPACE_TREE_CHANGED]: undefined
   [IPC_EVENTS.TERMINAL_OUTPUT]: { id: string; data: string }
   [IPC_EVENTS.TERMINAL_EXIT]: { id: string; exitCode: number }
 }

@@ -6,6 +6,7 @@ import { registerIpcHandlers } from './ipc/handlers'
 import { settingsService } from './services/settings'
 import { workspaceService } from './services/workspace'
 import { terminalService } from './services/terminal-service'
+import { fileWatcherService } from './services/file-watcher'
 import { resolvePreloadPath } from './utils/paths'
 
 let mainWindow: BrowserWindow | null = null
@@ -61,6 +62,7 @@ app.whenReady().then(async () => {
   const e2eWorkspace = process.env.CODEX_E2E_WORKSPACE
   if (e2eWorkspace) {
     await workspaceService.open(e2eWorkspace)
+    fileWatcherService.start(e2eWorkspace)
     void indexService.scan(e2eWorkspace)
   }
 
@@ -87,6 +89,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  fileWatcherService.stop()
   terminalService.destroyAll()
   settingsService.save()
 })

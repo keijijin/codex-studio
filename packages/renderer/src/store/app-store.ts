@@ -109,6 +109,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       const fileTree = await window.codex.invoke(IPC_CHANNELS.WORKSPACE_GET_TREE)
       set({ workspace, fileTree })
       await get().loadSessions()
+      if (get().sessions.length === 0) {
+        await get().createSession()
+      }
       await get().refreshIndexStatus()
     }
   },
@@ -191,6 +194,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     window.codex.on(IPC_EVENTS.FILE_CHANGED, (payload) => {
       void get().openChangedFile(payload.path)
+    })
+
+    window.codex.on(IPC_EVENTS.WORKSPACE_TREE_CHANGED, () => {
+      void get().refreshFileTree()
     })
 
     set({ listenersSetup: true })

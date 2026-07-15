@@ -6,6 +6,7 @@ import { sessionService, settingsService } from '../services/settings'
 import { chatService } from '../services/chat'
 import { agentService } from '../services/agent'
 import { auditLog } from '../services/audit-log'
+import { fileWatcherService } from '../services/file-watcher'
 import { terminalService } from '../services/terminal-service'
 import { assertFilePath, assertNonEmptyString, assertSessionId, assertTerminalId } from '../utils/validate-ipc'
 
@@ -20,11 +21,13 @@ export function registerIpcHandlers(): void {
     const target = assertFilePath(path)
     const workspace = await workspaceService.open(target)
     settingsService.addRecentWorkspace(target)
+    fileWatcherService.start(target)
     void indexService.scan(target)
     return workspace
   })
 
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_CLOSE, () => {
+    fileWatcherService.stop()
     terminalService.destroyAll()
     workspaceService.close()
     indexService.reset()
@@ -52,6 +55,7 @@ export function registerIpcHandlers(): void {
       throw new Error('Invalid file content')
     }
     await workspaceService.writeFile(target, content)
+    fileWatcherService.markInternalWrite(target)
     void auditLog('file:write', { path: target, bytes: content.length })
   })
 
