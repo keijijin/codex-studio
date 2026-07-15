@@ -131,10 +131,13 @@ body {
   margin: 1.5em 0;
 }
 
+.markdown-body .table-wrapper {
+  margin: 0.75em 0;
+  overflow-x: auto;
+}
+
 .markdown-body table {
   border-collapse: collapse;
-  display: block;
-  overflow: auto;
   width: 100%;
 }
 
@@ -142,11 +145,35 @@ body {
 .markdown-body td {
   border: 1px solid #3c3c3c;
   padding: 0.4em 0.75em;
+  text-align: left;
+  vertical-align: top;
 }
 
 .markdown-body th {
   background: #252526;
   font-weight: 600;
+}
+
+.markdown-body tbody tr:nth-child(even) {
+  background: #25252680;
+}
+
+.mermaid-diagram svg {
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+}
+
+.mermaid-error {
+  background: #1a1a1a;
+  border: 1px solid #3c3c3c;
+  border-radius: 6px;
+  color: #f48771;
+  font-family: Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  overflow: auto;
+  padding: 0.75em;
+  white-space: pre-wrap;
 }
 
 .prose.prose-invert.prose-sm {
@@ -179,4 +206,24 @@ body {
 
 .prose.prose-invert.prose-sm :where(a):not(:where([class~='not-prose'] *)) {
   color: #4daafc;
+}
+
+.prose.prose-invert.prose-sm .table-wrapper {
+  margin: 0.5em 0;
+  overflow-x: auto;
+}
+
+.prose.prose-invert.prose-sm table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.prose.prose-invert.prose-sm th,
+.prose.prose-invert.prose-sm td {
+  border: 1px solid #3c3c3c;
+  padding: 0.35em 0.6em;
+}
+
+.prose.prose-invert.prose-sm th {
+  background: #252526;
 }

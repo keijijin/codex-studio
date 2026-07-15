@@ -1,11 +1,25 @@
 import { _electron as electron } from '@playwright/test'
 import { test, expect } from '@playwright/test'
 import { join } from 'path'
-import { writeFile, rm } from 'fs/promises'
+import { mkdtemp, writeFile, rm } from 'fs/promises'
+import { tmpdir } from 'os'
 
 const baseEnv = {
   ...process.env,
   ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
+}
+
+async function launchApp(extraEnv: Record<string, string> = {}) {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'codex-e2e-user-'))
+  const app = await electron.launch({
+    args: ['.'],
+    env: {
+      ...baseEnv,
+      ELECTRON_USER_DATA: userDataDir,
+      ...extraEnv,
+    },
+  })
+  return { app, userDataDir }
 }
 
 test('welcome screen is shown on launch', async () => {
@@ -77,6 +91,41 @@ test('toggles terminal panel', async () => {
   await page.getByRole('button', { name: 'Terminal' }).click()
   await expect(page.getByText('Terminal', { exact: true })).toBeVisible()
   await app.close()
+})
+
+test('completes agent write task with approval', async () => {
+  const fixturePath = join(process.cwd(), 'e2e/fixtures/sample-workspace')
+  const outputFile = join(fixturePath, 'e2e-agent-output.txt')
+
+  await rm(outputFile, { force: true })
+
+  const { app } = await launchApp({
+    CODEX_E2E_WORKSPACE: fixturePath,
+    CODEX_E2E_MOCK_AGENT: '1',
+  })
+
+  try {
+    const page = await app.firstWindow()
+    await expect(page.getByText('AI Chat')).toBeVisible({ timeout: 15_000 })
+
+    await page.getByRole('button', { name: 'Agent', exact: true }).click()
+    await expect(page.getByText(/^Agent · /)).toBeVisible()
+
+    const textarea = page.getByPlaceholder('メッセージを入力... (@file で添付、Enter で送信)')
+    await textarea.fill('write e2e test file')
+    await page.getByRole('button', { name: '送信' }).click()
+
+    await expect(page.getByRole('heading', { name: '変更の承認' })).toBeVisible({ timeout: 15_000 })
+    await page.getByRole('button', { name: '適用' }).click()
+
+    await expect(page.getByText('E2E agent task complete.').last()).toBeVisible({ timeout: 15_000 })
+
+    const { readFile } = await import('fs/promises')
+    expect(await readFile(outputFile, 'utf-8')).toBe('hello from agent e2e')
+  } finally {
+    await app.close()
+    await rm(outputFile, { force: true })
+  }
 })
 
 test('reflects external file changes via watcher', async () => {

@@ -14,6 +14,7 @@ import {
   type ToolCallRecord,
 } from '@codex/shared'
 import { approvalService } from './approval'
+import { createE2eMockAgentProvider } from './e2e-mock-agent'
 import { getLlmRuntimeConfig, missingApiKeyMessage } from './llm-config'
 import { sessionService, settingsService } from './settings'
 import { workspaceService } from './workspace'
@@ -48,8 +49,9 @@ export class AgentService {
     }
 
     const runtime = getLlmRuntimeConfig(settings, 'agent')
+    const isE2eMock = process.env.CODEX_E2E_MOCK_AGENT === '1'
 
-    if (!runtime.apiKey) {
+    if (!runtime.apiKey && !isE2eMock) {
       this.emit(webContents, sessionId, {
         type: 'error',
         message: missingApiKeyMessage(runtime.provider),
@@ -57,7 +59,7 @@ export class AgentService {
       return
     }
 
-    const llm = getProviderInstance(runtime.provider)
+    const llm = isE2eMock ? createE2eMockAgentProvider() : getProviderInstance(runtime.provider)
     this.orchestrator = new AgentOrchestrator(llm, defaultToolRegistry)
 
     const existingAbort = this.abortControllers.get(sessionId)
@@ -97,7 +99,7 @@ export class AgentService {
         baseUrl: runtime.baseUrl,
         maxIterations: settings.agent.maxIterations,
         enabledTools: ALL_AGENT_TOOLS,
-        yoloMode: settings.agent.yoloMode,
+        yoloMode: isE2eMock ? false : settings.agent.yoloMode,
         signal: abortController.signal,
         resolvePath: (p) => workspaceService.resolveWithinWorkspace(p),
         getRelativePath: (p) => workspaceService.getRelativePath(p),

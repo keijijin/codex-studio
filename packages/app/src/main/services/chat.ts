@@ -47,12 +47,12 @@ export class ChatService {
   }
 
   async send(params: ChatSendParams, webContents: WebContents): Promise<void> {
-    if (process.env.CODEX_E2E_MOCK_CHAT === '1') {
-      return this.sendAskMock(params, webContents)
-    }
-
     const session = sessionService.getSession(params.sessionId)
     const mode = params.mode ?? session?.mode ?? 'ask'
+
+    if (process.env.CODEX_E2E_MOCK_CHAT === '1' && mode !== 'agent') {
+      return this.sendAskMock(params, webContents)
+    }
 
     if (mode === 'agent' && session && session.mode !== 'agent') {
       sessionService.setMode(params.sessionId, 'agent')

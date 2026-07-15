@@ -1,5 +1,5 @@
-import ReactMarkdown from 'react-markdown'
 import type { Message, ToolCallRecord } from '@codex/shared'
+import { MarkdownRenderer } from './MarkdownRenderer'
 import { ToolCallList } from './ToolCallCard'
 
 interface MessageListProps {
@@ -55,7 +55,7 @@ export function MessageList({
           )}
           {m.content && (
             <div className="prose prose-invert prose-sm max-w-none">
-              <ReactMarkdown>{m.content}</ReactMarkdown>
+              <MarkdownRenderer content={m.content} />
             </div>
           )}
         </div>
@@ -67,7 +67,7 @@ export function MessageList({
           {streamingToolCalls.length > 0 && <ToolCallList toolCalls={streamingToolCalls} />}
           {streamingContent && (
             <div className="prose prose-invert prose-sm max-w-none">
-              <ReactMarkdown>{streamingContent}</ReactMarkdown>
+              <MarkdownRenderer content={streamingContent} />
             </div>
           )}
           <span className="inline-block h-4 w-1 animate-pulse bg-accent" />
