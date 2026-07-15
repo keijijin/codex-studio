@@ -58,13 +58,17 @@ jobs:
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
+        if: success()
         with:
           name: codex-studio-${{ matrix.platform }}
-          path: ${{ matrix.artifact_glob }}
+          path: |
+            ${{ matrix.artifact_glob }}
+            release/*.deb
           if-no-files-found: error
 
   release:
     needs: build
+    if: always() && needs.build.result != 'cancelled'
     runs-on: ubuntu-latest
 
     steps:

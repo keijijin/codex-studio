@@ -125,7 +125,7 @@ export class FileWatcherService {
     broadcastFileChanged(path, workspaceService.getRelativePath(path))
   }
 
-  private async handleFileRemove(path: string, rootPath: string): Promise<void> {
+  private async handleFileRemove(path: string, _rootPath: string): Promise<void> {
     if (this.isSuppressed(path)) {
       return
     }

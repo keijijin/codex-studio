@@ -5,7 +5,10 @@
   "type": "module",
   "description": "AI-native development environment",
   "main": "./out/main/index.js",
-  "author": "Codex Studio",
+  "author": {
+    "name": "Codex Studio",
+    "email": "codex-studio@users.noreply.github.com"
+  },
   "dependencies": {
     "node-pty": "^1.1.0"
   },

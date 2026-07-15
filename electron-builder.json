@@ -36,7 +36,8 @@
   },
   "linux": {
     "target": ["AppImage", "deb"],
-    "category": "Development"
+    "category": "Development",
+    "maintainer": "Codex Studio <codex-studio@users.noreply.github.com>"
   },
   "nsis": {
     "oneClick": false,
