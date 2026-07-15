@@ -11,7 +11,7 @@ export function FileEditor() {
 
   if (!activeTab) {
     return (
-      <div className="flex h-full items-center justify-center text-text-secondary">
+      <div className="flex h-full min-h-0 items-center justify-center text-text-secondary">
         <div className="text-center">
           <p className="text-lg">Codex Studio</p>
           <p className="mt-2 text-sm">左の Explorer からファイルを開いてください</p>
@@ -22,8 +22,16 @@ export function FileEditor() {
   }
 
   if (isMarkdownFile(activeTab.name) && (activeTab.mdViewMode ?? 'preview') === 'preview') {
-    return <MarkdownPreview content={activeTab.content} />
+    return (
+      <div className="h-full min-h-0">
+        <MarkdownPreview content={activeTab.content} />
+      </div>
+    )
   }
 
-  return <MonacoEditor />
+  return (
+    <div className="h-full min-h-0">
+      <MonacoEditor />
+    </div>
+  )
 }

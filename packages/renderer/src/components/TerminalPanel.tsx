@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -18,9 +18,10 @@ export function TerminalPanel() {
   const toggleTerminalPanel = useAppStore((s) => s.toggleTerminalPanel)
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalIdRef = useRef<string | null>(null)
+  const [containerReady, setContainerReady] = useState(false)
 
   useEffect(() => {
-    if (!hasCodexApi() || !workspace || !containerRef.current) {
+    if (!hasCodexApi() || !workspace || !containerReady || !containerRef.current) {
       return
     }
 
@@ -40,6 +41,9 @@ export function TerminalPanel() {
 
     const fitAndResize = () => {
       if (disposed || !containerRef.current) return
+      if (containerRef.current.clientWidth === 0 || containerRef.current.clientHeight === 0) {
+        return
+      }
       fitAddon.fit()
       const id = terminalIdRef.current
       if (id) {
@@ -51,6 +55,9 @@ export function TerminalPanel() {
       fitAndResize()
     })
     resizeObserver.observe(container)
+    requestAnimationFrame(() => {
+      fitAndResize()
+    })
 
     const setup = async () => {
       try {
@@ -102,10 +109,10 @@ export function TerminalPanel() {
       terminalIdRef.current = null
       term.dispose()
     }
-  }, [workspace?.id])
+  }, [workspace?.id, containerReady])
 
   return (
-    <section className="flex h-64 shrink-0 flex-col border-t border-surface-border bg-[#1e1e1e]">
+    <section className="flex h-64 min-h-48 shrink-0 flex-col border-t border-surface-border bg-[#1e1e1e]">
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-surface-border bg-surface-raised px-3">
         <span className="text-xs font-medium text-text-primary">Terminal</span>
         <div className="flex items-center gap-2">
@@ -120,7 +127,13 @@ export function TerminalPanel() {
           </button>
         </div>
       </div>
-      <div ref={containerRef} className="min-h-0 flex-1 overflow-hidden p-1" />
+      <div
+        ref={(node) => {
+          containerRef.current = node
+          setContainerReady(node !== null)
+        }}
+        className="min-h-0 flex-1 overflow-hidden p-1"
+      />
     </section>
   )
 }

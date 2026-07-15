@@ -14,7 +14,7 @@ export function EditorArea() {
   const showMdToggle = activeTab ? isMarkdownFile(activeTab.name) : false
 
   return (
-    <main className="flex min-w-0 flex-1 flex-col bg-surface">
+    <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface">
       {tabs.length > 0 && (
         <div className="flex h-9 shrink-0 items-end overflow-x-auto border-b border-surface-border bg-surface-raised">
           {tabs.map((tab) => (
@@ -75,7 +75,7 @@ export function EditorArea() {
           </button>
         </div>
       )}
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1 overflow-hidden">
         <FileEditor />
       </div>
     </main>

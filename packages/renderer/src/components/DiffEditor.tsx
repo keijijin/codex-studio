@@ -1,4 +1,6 @@
 import { DiffEditor } from '@monaco-editor/react'
+import { CODEX_EDITOR_THEME } from '@renderer/monaco-setup'
+import { guessMonacoLanguage } from '@renderer/utils/language'
 
 interface FileDiffViewProps {
   oldContent: string
@@ -12,7 +14,7 @@ export function FileDiffView({ oldContent, newContent, language = 'plaintext' }:
       <DiffEditor
         height="100%"
         language={language}
-        theme="vs-dark"
+        theme={CODEX_EDITOR_THEME}
         original={oldContent}
         modified={newContent}
         loading={
@@ -27,6 +29,7 @@ export function FileDiffView({ oldContent, newContent, language = 'plaintext' }:
           scrollBeyondLastLine: false,
           automaticLayout: true,
           fontSize: 12,
+          bracketPairColorization: { enabled: true },
         }}
       />
     </div>
@@ -34,11 +37,6 @@ export function FileDiffView({ oldContent, newContent, language = 'plaintext' }:
 }
 
 export function guessLanguageFromPath(path: string): string {
-  const ext = path.split('.').pop()?.toLowerCase()
-  const map: Record<string, string> = {
-    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-    json: 'json', md: 'markdown', css: 'css', html: 'html', py: 'python',
-    rs: 'rust', go: 'go', yaml: 'yaml', yml: 'yaml', sh: 'shell',
-  }
-  return map[ext ?? ''] ?? 'plaintext'
+  const filename = path.split(/[/\\]/).pop() ?? path
+  return guessMonacoLanguage(filename)
 }
