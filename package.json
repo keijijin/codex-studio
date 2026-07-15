@@ -30,7 +30,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.28.0",
-    "@electron/rebuild": "^3.7.2",
+    "@electron/rebuild": "^4.2.0",
     "@types/node": "^22.15.29",
     "@vitejs/plugin-react": "^4.5.2",
     "electron": "^35.5.0",
