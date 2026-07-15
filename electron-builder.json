@@ -1,0 +1,34 @@
+{
+  "appId": "com.codex.studio",
+  "productName": "Codex Studio",
+  "directories": {
+    "output": "release",
+    "buildResources": "build"
+  },
+  "files": [
+    "out/**/*",
+    "package.json",
+    "!**/*.map"
+  ],
+  "asar": true,
+  "asarUnpack": [
+    "**/node_modules/@vscode/ripgrep/**",
+    "**/node_modules/node-pty/**"
+  ],
+  "mac": {
+    "category": "public.app-category.developer-tools",
+    "target": ["dmg", "zip"],
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false
+  },
+  "win": {
+    "target": ["nsis"]
+  },
+  "linux": {
+    "target": ["AppImage"]
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true
+  }
+}

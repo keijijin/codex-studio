@@ -1,0 +1,182 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #1e1e1e;
+  color: #cccccc;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3c3c3c;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #6e6e6e;
+}
+
+.markdown-body {
+  color: #cccccc;
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  color: #ffffff;
+  font-weight: 600;
+  line-height: 1.3;
+  margin-top: 1.5em;
+  margin-bottom: 0.6em;
+}
+
+.markdown-body h1 {
+  font-size: 1.75rem;
+  border-bottom: 1px solid #3c3c3c;
+  padding-bottom: 0.3em;
+}
+
+.markdown-body h2 {
+  font-size: 1.35rem;
+  border-bottom: 1px solid #3c3c3c;
+  padding-bottom: 0.25em;
+}
+
+.markdown-body h3 {
+  font-size: 1.15rem;
+}
+
+.markdown-body h4 {
+  font-size: 1rem;
+}
+
+.markdown-body p,
+.markdown-body ul,
+.markdown-body ol,
+.markdown-body blockquote,
+.markdown-body pre {
+  margin: 0.75em 0;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 1.5em;
+}
+
+.markdown-body li + li {
+  margin-top: 0.25em;
+}
+
+.markdown-body blockquote {
+  border-left: 3px solid #0078d4;
+  color: #858585;
+  padding-left: 1em;
+}
+
+.markdown-body code {
+  background: #2d2d2d;
+  border-radius: 4px;
+  font-family: Menlo, Monaco, Consolas, monospace;
+  font-size: 0.9em;
+  padding: 0.15em 0.35em;
+}
+
+.markdown-body pre {
+  background: #1a1a1a;
+  border: 1px solid #3c3c3c;
+  border-radius: 6px;
+  overflow: auto;
+  padding: 1em;
+}
+
+.markdown-body pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.markdown-body a {
+  color: #4daafc;
+  text-decoration: underline;
+}
+
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid #3c3c3c;
+  margin: 1.5em 0;
+}
+
+.markdown-body table {
+  border-collapse: collapse;
+  display: block;
+  overflow: auto;
+  width: 100%;
+}
+
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid #3c3c3c;
+  padding: 0.4em 0.75em;
+}
+
+.markdown-body th {
+  background: #252526;
+  font-weight: 600;
+}
+
+.prose.prose-invert.prose-sm {
+  color: #cccccc;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.prose.prose-invert.prose-sm :where(h1, h2, h3, h4):not(:where([class~='not-prose'] *)) {
+  color: #ffffff;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+}
+
+.prose.prose-invert.prose-sm :where(p, ul, ol):not(:where([class~='not-prose'] *)) {
+  margin: 0.5em 0;
+}
+
+.prose.prose-invert.prose-sm :where(code):not(:where([class~='not-prose'] *)) {
+  background: #2d2d2d;
+  border-radius: 4px;
+  padding: 0.1em 0.3em;
+}
+
+.prose.prose-invert.prose-sm :where(pre):not(:where([class~='not-prose'] *)) {
+  background: #1a1a1a;
+  border: 1px solid #3c3c3c;
+  border-radius: 6px;
+}
+
+.prose.prose-invert.prose-sm :where(a):not(:where([class~='not-prose'] *)) {
+  color: #4daafc;
+}

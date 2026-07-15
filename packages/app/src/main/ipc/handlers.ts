@@ -1,0 +1,143 @@
+import { BrowserWindow, ipcMain } from 'electron'
+import { IPC_CHANNELS, IPC_EVENTS, type IndexStatus } from '@codex/shared'
+import { indexService } from '@codex/indexer'
+import { workspaceService } from '../services/workspace'
+import { sessionService, settingsService } from '../services/settings'
+import { chatService } from '../services/chat'
+import { agentService } from '../services/agent'
+import { auditLog } from '../services/audit-log'
+import { terminalService } from '../services/terminal-service'
+import { assertFilePath, assertNonEmptyString, assertSessionId, assertTerminalId } from '../utils/validate-ipc'
+
+export function registerIpcHandlers(): void {
+  indexService.setProgressCallback((status: IndexStatus) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send(IPC_EVENTS.INDEX_PROGRESS, status)
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.WORKSPACE_OPEN, async (_event, path: string) => {
+    const target = assertFilePath(path)
+    const workspace = await workspaceService.open(target)
+    settingsService.addRecentWorkspace(target)
+    void indexService.scan(target)
+    return workspace
+  })
+
+  ipcMain.handle(IPC_CHANNELS.WORKSPACE_CLOSE, () => {
+    terminalService.destroyAll()
+    workspaceService.close()
+    indexService.reset()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.WORKSPACE_GET, () => {
+    return workspaceService.get()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.WORKSPACE_GET_TREE, async () => {
+    return workspaceService.getFileTree()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.WORKSPACE_RECENT_LIST, () => {
+    return settingsService.getRecentWorkspaces()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.FILE_READ, async (_event, path: string) => {
+    return workspaceService.readFile(assertFilePath(path))
+  })
+
+  ipcMain.handle(IPC_CHANNELS.FILE_WRITE, async (_event, path: string, content: string) => {
+    const target = assertFilePath(path)
+    if (typeof content !== 'string') {
+      throw new Error('Invalid file content')
+    }
+    await workspaceService.writeFile(target, content)
+    void auditLog('file:write', { path: target, bytes: content.length })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_GET, () => {
+    return settingsService.get()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_SET, (_event, partial) => {
+    return settingsService.set(partial)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SESSION_LIST, () => {
+    return sessionService.list()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SESSION_CREATE, () => {
+    const workspace = workspaceService.get()
+    if (!workspace) {
+      throw new Error('Open a workspace first')
+    }
+    return sessionService.create(workspace.id)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SESSION_SELECT, (_event, sessionId: string) => {
+    return sessionService.getMessages(assertSessionId(sessionId))
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SESSION_GET_MESSAGES, (_event, sessionId: string) => {
+    return sessionService.getMessages(assertSessionId(sessionId))
+  })
+
+  ipcMain.handle(IPC_CHANNELS.INDEX_STATUS, () => {
+    return indexService.getStatus()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.INDEX_SEARCH, async (_event, query: string) => {
+    return indexService.search(query)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.CHAT_SEND, async (event, params) => {
+    await chatService.send(params, event.sender)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.CHAT_CANCEL, (_event, sessionId: string) => {
+    chatService.cancel(assertSessionId(sessionId))
+  })
+
+  ipcMain.handle(IPC_CHANNELS.MODELS_LIST, async (_event, provider) => {
+    return chatService.listModels(provider)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SESSION_SET_MODE, (_event, sessionId: string, mode) => {
+    return sessionService.setMode(assertSessionId(sessionId), mode)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_APPROVAL_RESPOND, (_event, sessionId: string, toolCallId: string, approved: boolean) => {
+    const sid = assertSessionId(sessionId)
+    const tid = assertNonEmptyString(toolCallId, 'toolCallId')
+    agentService.respondApproval(sid, tid, approved)
+    void auditLog('agent:approval', { sessionId: sid, toolCallId: tid, approved })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.TERMINAL_CREATE, (event, cwd?: string) => {
+    if (cwd !== undefined && typeof cwd !== 'string') {
+      throw new Error('Invalid terminal cwd')
+    }
+    return terminalService.create(event.sender, cwd)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.TERMINAL_WRITE, (_event, id: string, data: string) => {
+    const terminalId = assertTerminalId(id)
+    if (typeof data !== 'string') {
+      throw new Error('Invalid terminal data')
+    }
+    terminalService.write(terminalId, data)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.TERMINAL_RESIZE, (_event, id: string, cols: number, rows: number) => {
+    const terminalId = assertTerminalId(id)
+    if (typeof cols !== 'number' || typeof rows !== 'number') {
+      throw new Error('Invalid terminal size')
+    }
+    terminalService.resize(terminalId, cols, rows)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.TERMINAL_DESTROY, (_event, id: string) => {
+    terminalService.destroy(assertTerminalId(id))
+  })
+}

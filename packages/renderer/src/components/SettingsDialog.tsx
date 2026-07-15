@@ -1,0 +1,403 @@
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
+import { createPortal } from 'react-dom'
+import { IPC_CHANNELS, DEFAULT_OLLAMA_BASE_URL, type LLMProviderId, type ModelInfo } from '@codex/shared'
+import { useAppStore } from '@renderer/store/app-store'
+import { hasCodexApi } from './ErrorBoundary'
+
+const overlayStyle: CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 99999,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: 'rgba(0, 0, 0, 0.75)',
+  padding: 16,
+}
+
+const panelStyle: CSSProperties = {
+  width: '100%',
+  maxWidth: 480,
+  backgroundColor: '#252526',
+  border: '1px solid #3c3c3c',
+  borderRadius: 8,
+  padding: 24,
+  color: '#cccccc',
+  boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+}
+
+const inputStyle: CSSProperties = {
+  width: '100%',
+  marginTop: 6,
+  padding: '8px 12px',
+  fontSize: 14,
+  color: '#cccccc',
+  backgroundColor: '#1e1e1e',
+  border: '1px solid #3c3c3c',
+  borderRadius: 4,
+  boxSizing: 'border-box',
+}
+
+const labelStyle: CSSProperties = {
+  display: 'block',
+  fontSize: 12,
+  color: '#858585',
+  marginTop: 16,
+}
+
+const btnPrimary: CSSProperties = {
+  padding: '8px 16px',
+  fontSize: 14,
+  color: '#fff',
+  backgroundColor: '#0078d4',
+  border: 'none',
+  borderRadius: 4,
+  cursor: 'pointer',
+}
+
+const selectStyle: CSSProperties = {
+  ...inputStyle,
+  cursor: 'pointer',
+}
+
+const btnSecondary: CSSProperties = {
+  padding: '8px 16px',
+  fontSize: 14,
+  color: '#858585',
+  backgroundColor: 'transparent',
+  border: '1px solid #3c3c3c',
+  borderRadius: 4,
+  cursor: 'pointer',
+}
+
+interface FetchModelsOptions {
+  preferredModel?: string
+  resetModel?: boolean
+}
+
+interface SettingsFormProps {
+  onSaved?: () => void
+  onCancel?: () => void
+  compact?: boolean
+}
+
+export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) {
+  const [openaiKey, setOpenaiKey] = useState('')
+  const [anthropicKey, setAnthropicKey] = useState('')
+  const [ollamaBaseUrl, setOllamaBaseUrl] = useState(DEFAULT_OLLAMA_BASE_URL)
+  const [yoloMode, setYoloMode] = useState(false)
+  const [provider, setProvider] = useState<LLMProviderId>('openai')
+  const [model, setModel] = useState('gpt-4o')
+  const [models, setModels] = useState<ModelInfo[]>([])
+  const [saved, setSaved] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [loadingModels, setLoadingModels] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const modelRef = useRef(model)
+  modelRef.current = model
+
+  const fetchModels = useCallback(async (
+    p: LLMProviderId,
+    oKey: string,
+    aKey: string,
+    ollamaUrl: string,
+    options?: FetchModelsOptions,
+  ) => {
+    if (!hasCodexApi()) return
+    setLoadingModels(true)
+    setError(null)
+    try {
+      const current = await window.codex.invoke(IPC_CHANNELS.SETTINGS_GET)
+      await window.codex.invoke(IPC_CHANNELS.SETTINGS_SET, {
+        models: {
+          ...current.models,
+          openaiApiKey: oKey || current.models.openaiApiKey,
+          anthropicApiKey: aKey || current.models.anthropicApiKey,
+          ollamaBaseUrl: ollamaUrl || current.models.ollamaBaseUrl,
+        },
+      })
+      const list = await window.codex.invoke(IPC_CHANNELS.MODELS_LIST, p)
+      setModels(list)
+      if (list.length === 0) return
+
+      const preferred = options?.preferredModel ?? modelRef.current
+      if (options?.resetModel || !list.some((m) => m.id === preferred)) {
+        setModel(list[0].id)
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'モデル一覧の取得に失敗しました')
+    } finally {
+      setLoadingModels(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!hasCodexApi()) {
+      setError('IPC が利用できません。アプリを再起動してください。')
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    void window.codex
+      .invoke(IPC_CHANNELS.SETTINGS_GET)
+      .then(async (settings) => {
+        const p = settings.models.defaultProvider ?? 'openai'
+        const oKey = settings.models.openaiApiKey ?? ''
+        const aKey = settings.models.anthropicApiKey ?? ''
+        const savedModel = settings.models.defaultChatModel
+        const ollamaUrl = settings.models.ollamaBaseUrl ?? DEFAULT_OLLAMA_BASE_URL
+        setProvider(p)
+        setModel(savedModel)
+        setOpenaiKey(oKey)
+        setAnthropicKey(aKey)
+        setOllamaBaseUrl(ollamaUrl)
+        setYoloMode(settings.agent.yoloMode)
+        await fetchModels(p, oKey, aKey, ollamaUrl, { preferredModel: savedModel })
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : '設定の読み込みに失敗しました')
+      })
+      .finally(() => setLoading(false))
+  }, [fetchModels])
+
+  const handleProviderChange = (p: LLMProviderId) => {
+    setProvider(p)
+    void fetchModels(p, openaiKey, anthropicKey, ollamaBaseUrl, { resetModel: true })
+  }
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!hasCodexApi()) return
+    setError(null)
+    try {
+      const current = await window.codex.invoke(IPC_CHANNELS.SETTINGS_GET)
+      await window.codex.invoke(IPC_CHANNELS.SETTINGS_SET, {
+        models: {
+          defaultProvider: provider,
+          openaiApiKey: openaiKey,
+          anthropicApiKey: anthropicKey,
+          ollamaBaseUrl,
+          defaultChatModel: model,
+          defaultAgentModel: model,
+        },
+        agent: {
+          ...current.agent,
+          yoloMode,
+        },
+      })
+      setSaved(true)
+      onSaved?.()
+      setTimeout(() => setSaved(false), 2000)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '保存に失敗しました')
+    }
+  }
+
+  const wrapperStyle: CSSProperties = compact
+    ? { ...panelStyle, maxWidth: 520, margin: '0 auto', textAlign: 'left' }
+    : panelStyle
+
+  return (
+    <form style={wrapperStyle} onSubmit={(e) => void handleSubmit(e)}>
+      <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: '#ffffff' }}>設定</h2>
+      <p style={{ margin: '8px 0 0', fontSize: 13, color: '#858585' }}>
+        API キーとチャットモデルを設定します
+      </p>
+
+      {error && (
+        <p style={{ marginTop: 12, padding: 8, fontSize: 12, color: '#fca5a5', backgroundColor: '#450a0a', border: '1px solid #991b1b', borderRadius: 4 }}>
+          {error}
+        </p>
+      )}
+
+      {loading ? (
+        <p style={{ marginTop: 16, fontSize: 13, color: '#858585' }}>読み込み中...</p>
+      ) : (
+        <>
+          <label style={labelStyle} htmlFor="openai-api-key">OpenAI API Key</label>
+          <input
+            id="openai-api-key"
+            type="password"
+            style={inputStyle}
+            placeholder="sk-..."
+            value={openaiKey}
+            onChange={(e) => setOpenaiKey(e.target.value)}
+            autoComplete="off"
+          />
+
+          <label style={labelStyle} htmlFor="anthropic-api-key">Anthropic API Key</label>
+          <input
+            id="anthropic-api-key"
+            type="password"
+            style={inputStyle}
+            placeholder="sk-ant-..."
+            value={anthropicKey}
+            onChange={(e) => setAnthropicKey(e.target.value)}
+            autoComplete="off"
+          />
+
+          <label style={labelStyle} htmlFor="provider">プロバイダ</label>
+          <select
+            id="provider"
+            style={selectStyle}
+            value={provider}
+            onChange={(e) => handleProviderChange(e.target.value as LLMProviderId)}
+          >
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="ollama">Ollama (Local)</option>
+          </select>
+
+          {provider === 'ollama' && (
+            <>
+              <label style={labelStyle} htmlFor="ollama-base-url">Ollama Base URL</label>
+              <input
+                id="ollama-base-url"
+                type="text"
+                style={inputStyle}
+                placeholder="http://localhost:11434"
+                value={ollamaBaseUrl}
+                onChange={(e) => setOllamaBaseUrl(e.target.value)}
+              />
+            </>
+          )}
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 16 }}>
+            <label style={{ ...labelStyle, marginTop: 0 }} htmlFor="chat-model">Chat Model</label>
+            <button
+              type="button"
+              style={{ ...btnSecondary, padding: '4px 10px', fontSize: 12 }}
+              disabled={loadingModels}
+              onClick={() => void fetchModels(provider, openaiKey, anthropicKey, ollamaBaseUrl)}
+            >
+              {loadingModels ? '取得中...' : 'モデル一覧を更新'}
+            </button>
+          </div>
+          <select
+            id="chat-model"
+            style={selectStyle}
+            value={model}
+            disabled={loadingModels}
+            onChange={(e) => setModel(e.target.value)}
+          >
+            {models.length === 0 ? (
+              <option value={model}>{model}</option>
+            ) : (
+              models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name !== m.id ? `${m.name} (${m.id})` : m.id}
+                </option>
+              ))
+            )}
+          </select>
+          <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6e6e6e' }}>
+            {models.length} 件のモデル · 環境変数 OPENAI_API_KEY / ANTHROPIC_API_KEY / OLLAMA_BASE_URL も利用可
+          </p>
+
+          <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8, marginTop: 16 }}>
+            <input
+              type="checkbox"
+              checked={yoloMode}
+              onChange={(e) => setYoloMode(e.target.checked)}
+            />
+            YOLO モード（Agent の書込・Shell を承認なしで実行）
+          </label>
+          <p style={{ margin: '4px 0 0', fontSize: 11, color: '#f87171' }}>
+            有効にするとファイル変更やコマンド実行が自動適用されます。自己責任で使用してください。
+          </p>
+        </>
+      )}
+
+      <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+        {onCancel && (
+          <button type="button" style={btnSecondary} onClick={onCancel}>閉じる</button>
+        )}
+        <button type="submit" style={btnPrimary} disabled={loading}>
+          {saved ? '保存しました' : '保存'}
+        </button>
+      </div>
+    </form>
+  )
+}
+
+export function SettingsDialog({
+  open,
+  onClose,
+  onSaved,
+}: {
+  open: boolean
+  onClose: () => void
+  onSaved?: () => void
+}) {
+  if (!open) return null
+
+  return createPortal(
+    <div
+      style={overlayStyle}
+      role="dialog"
+      aria-modal="true"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose()
+      }}
+    >
+      <SettingsForm onSaved={onSaved} onCancel={onClose} />
+    </div>,
+    document.body,
+  )
+}
+
+function GearIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+    </svg>
+  )
+}
+
+export function SettingsButton({
+  variant = 'icon',
+  className = '',
+}: {
+  variant?: 'icon' | 'text'
+  className?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const loadSettings = useAppStore((s) => s.loadSettings)
+
+  return (
+    <>
+      <button
+        type="button"
+        title="設定"
+        aria-label="設定"
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen(true)
+        }}
+        style={
+          variant === 'text'
+            ? { padding: '6px 12px', fontSize: 14, color: '#cccccc', backgroundColor: 'transparent', border: '1px solid #3c3c3c', borderRadius: 4, cursor: 'pointer' }
+            : { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 40, height: 40, color: '#cccccc', backgroundColor: 'transparent', border: 'none', borderRadius: 4, cursor: 'pointer' }
+        }
+        className={className}
+      >
+        {variant === 'text' ? '設定' : <GearIcon />}
+      </button>
+      <SettingsDialog open={open} onClose={() => setOpen(false)} onSaved={() => void loadSettings()} />
+    </>
+  )
+}
+
+export function useSettingsDialog() {
+  const [open, setOpen] = useState(false)
+  const loadSettings = useAppStore((s) => s.loadSettings)
+  return {
+    openSettings: () => setOpen(true),
+    settingsDialog: (
+      <SettingsDialog open={open} onClose={() => setOpen(false)} onSaved={() => void loadSettings()} />
+    ),
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "name": "codex-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AI-native development environment",
+  "main": "./out/main/index.js",
+  "author": "Codex Studio",
+  "dependencies": {
+    "node-pty": "^1.1.0"
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "pnpm build && playwright test",
+    "postinstall": "electron-rebuild -f -w node-pty",
+    "package": "pnpm build && electron-builder",
+    "package:mac": "pnpm build && electron-builder --mac",
+    "package:win": "pnpm build && electron-builder --win"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.28.0",
+    "@electron/rebuild": "^3.7.2",
+    "@types/node": "^22.15.29",
+    "@vitejs/plugin-react": "^4.5.2",
+    "electron": "^35.5.0",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^3.1.0",
+    "eslint": "^9.28.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.20",
+    "@playwright/test": "^1.52.0",
+    "globals": "^16.2.0",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.33.1",
+    "vite": "^6.0.0",
+    "vitest": "^3.2.1"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@10.4.1",
+  "pnpm": {
+    "onlyBuiltDependencies": ["electron", "esbuild", "node-pty"]
+  }
+}

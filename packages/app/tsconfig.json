@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@codex/shared": ["../shared/src/index.ts"],
+      "@codex/shared/*": ["../shared/src/*"]
+    }
+  },
+  "include": ["src"]
+}

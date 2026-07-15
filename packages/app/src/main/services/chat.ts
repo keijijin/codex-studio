@@ -1,0 +1,172 @@
+import {
+  getProviderInstance,
+  listModels,
+  type ChatMessage,
+} from '@codex/llm-adapters'
+import type { WebContents } from 'electron'
+import {
+  IPC_EVENTS,
+  type Attachment,
+  type ChatSendParams,
+  type ChatStreamEvent,
+  type LLMProviderId,
+  type Message,
+} from '@codex/shared'
+import { sessionService, settingsService } from './settings'
+import { agentService } from './agent'
+import {
+  getApiKeyForProvider,
+  getLlmRuntimeConfig,
+  missingApiKeyMessage,
+} from './llm-config'
+import { DEFAULT_OLLAMA_BASE_URL } from '@codex/shared'
+
+const SYSTEM_PROMPT = `You are Codex Studio, an AI coding assistant integrated into a developer IDE.
+Help the user with code understanding, debugging, refactoring, and general programming questions.
+When file attachments are provided, use them as context for your answers.
+Respond in the same language the user writes in (Japanese or English).
+Use markdown for code blocks and formatting.`
+
+export class ChatService {
+  private abortControllers = new Map<string, AbortController>()
+
+  cancel(sessionId: string): void {
+    this.abortControllers.get(sessionId)?.abort()
+    this.abortControllers.delete(sessionId)
+    agentService.cancel(sessionId)
+  }
+
+  async listModels(provider: LLMProviderId) {
+    const settings = settingsService.get()
+    const apiKey = getApiKeyForProvider(provider, settings.models)
+    if (!apiKey && provider !== 'ollama') {
+      throw new Error(missingApiKeyMessage(provider))
+    }
+    const baseUrl = settings.models.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || DEFAULT_OLLAMA_BASE_URL
+    return listModels(provider, apiKey ?? 'ollama', { baseUrl })
+  }
+
+  async send(params: ChatSendParams, webContents: WebContents): Promise<void> {
+    const session = sessionService.getSession(params.sessionId)
+    const mode = params.mode ?? session?.mode ?? 'ask'
+
+    if (mode === 'agent' && session && session.mode !== 'agent') {
+      sessionService.setMode(params.sessionId, 'agent')
+    }
+
+    if (mode === 'agent') {
+      return agentService.run({ ...params, mode: 'agent' }, webContents)
+    }
+
+    return this.sendAsk(params, webContents)
+  }
+
+  private async sendAsk(params: ChatSendParams, webContents: WebContents): Promise<void> {
+    const { sessionId, content, attachments = [] } = params
+    const settings = settingsService.get()
+    const runtime = getLlmRuntimeConfig(settings, 'chat')
+
+    if (!runtime.apiKey) {
+      this.emit(webContents, sessionId, {
+        type: 'error',
+        message: missingApiKeyMessage(runtime.provider),
+      })
+      return
+    }
+
+    const existingAbort = this.abortControllers.get(sessionId)
+    if (existingAbort) existingAbort.abort()
+
+    const abortController = new AbortController()
+    this.abortControllers.set(sessionId, abortController)
+
+    sessionService.addMessage(sessionId, {
+      sessionId,
+      role: 'user',
+      content,
+      attachments: attachments.map(({ type, path, name }) => ({ type, path, name })),
+    })
+
+    this.updateSessionTitle(sessionId, content)
+
+    const history = sessionService.getMessages(sessionId)
+    const llmMessages = this.buildMessages(history, attachments)
+    const llm = getProviderInstance(runtime.provider)
+
+    let assistantContent = ''
+
+    try {
+      for await (const chunk of llm.chat(llmMessages, {
+        model: runtime.model,
+        apiKey: runtime.apiKey,
+        baseUrl: runtime.baseUrl,
+        signal: abortController.signal,
+      })) {
+        if (chunk.type === 'text') {
+          assistantContent += chunk.delta
+          this.emit(webContents, sessionId, { type: 'text_delta', content: chunk.delta })
+        } else if (chunk.type === 'error') {
+          this.emit(webContents, sessionId, { type: 'error', message: chunk.error })
+          return
+        }
+      }
+
+      const saved = sessionService.addMessage(sessionId, {
+        sessionId,
+        role: 'assistant',
+        content: assistantContent,
+      })
+
+      this.emit(webContents, sessionId, { type: 'done', messageId: saved.id })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Chat failed'
+      this.emit(webContents, sessionId, { type: 'error', message })
+    } finally {
+      this.abortControllers.delete(sessionId)
+    }
+  }
+
+  private buildMessages(history: Message[], latestAttachments: Attachment[]): ChatMessage[] {
+    const messages: ChatMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }]
+
+    for (const msg of history) {
+      if (msg.role === 'user' || msg.role === 'assistant') {
+        let content = msg.content
+        if (msg.role === 'user' && msg.attachments?.length) {
+          const attachmentText = msg.attachments
+            .filter((a) => a.content)
+            .map((a) => `\n\n--- Attached file: ${a.name} (${a.path}) ---\n${a.content}\n--- End ---`)
+            .join('')
+          if (attachmentText) content = content + attachmentText
+        }
+        messages.push({ role: msg.role, content })
+      }
+    }
+
+    if (latestAttachments.length > 0) {
+      const last = messages[messages.length - 1]
+      if (last?.role === 'user') {
+        const extra = latestAttachments
+          .filter((a) => a.content)
+          .map((a) => `\n\n--- Attached file: ${a.name} (${a.path}) ---\n${a.content}\n--- End ---`)
+          .join('')
+        if (extra && !last.content.includes(extra)) {
+          last.content += extra
+        }
+      }
+    }
+
+    return messages
+  }
+
+  private updateSessionTitle(sessionId: string, content: string): void {
+    const title = content.slice(0, 40) + (content.length > 40 ? '...' : '')
+    sessionService.updateTitle(sessionId, title)
+  }
+
+  private emit(webContents: WebContents, sessionId: string, event: ChatStreamEvent): void {
+    webContents.send(IPC_EVENTS.CHAT_STREAM, { sessionId, ...event })
+  }
+}
+
+export const chatService = new ChatService()
