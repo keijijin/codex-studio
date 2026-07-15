@@ -274,7 +274,7 @@
 | Phase 1 エディタ | ほぼ完了 | ウォッチャー完了 |
 | Phase 2 索引+チャット | ほぼ完了 | SQLite は Post-MVP |
 | Phase 3 Agent+ツール | 完了 | Worker Thread 分離は未 |
-| Phase 4 リリース | 進行中 | CI Release 完了、署名・公証は未 |
+| Phase 4 リリース | 進行中 | v0.1.0 tag、Agent benchmark 20、α 計画 |
 
 > 詳細は [README.md](../README.md) の Sprint 6 セクションを参照
 

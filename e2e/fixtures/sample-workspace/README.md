@@ -1,7 +1,8 @@
 # Sample workspace for E2E tests
 
-This folder is used by Playwright smoke tests.
+This folder is used by Playwright smoke tests and agent benchmarks.
 
-## Usage
+## Files
 
-Open this folder in Codex Studio during automated testing.
+- `src/greet.ts` — simple greeting utility
+- `src/math.ts` — add function used in benchmark cases

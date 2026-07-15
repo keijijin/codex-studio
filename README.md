@@ -9,7 +9,7 @@ pnpm install
 pnpm dev
 ```
 
-## 現在の実装状況（Sprint 6 / 安定化 + 配布準備）
+## 現在の実装状況（v0.1.0 α リリース）
 
 - [x] pnpm monorepo + Electron + Monaco + 型安全 IPC
 - [x] ワークスペース + 索引 + ripgrep 検索
@@ -21,9 +21,11 @@ pnpm dev
 - [x] **組み込みターミナル**（node-pty + xterm）
 - [x] **XML / Java シンタックスハイライト**
 - [x] 最近開いたワークスペース
-- [x] Playwright E2E（起動・ワークスペース・チャット・ターミナル）
+- [x] Playwright E2E（5 件）
+- [x] **Agent ベンチマーク 20 件**（mock LLM）
 - [x] electron-builder（macOS / Windows / Linux）
-- [x] **GitHub Releases 自動化**（tag push）
+- [x] GitHub Releases 自動化（`v*` tag）
+- [x] [α テスト計画](./docs/alpha-test-plan.md) / [フィードバック](./docs/alpha-feedback-template.md)
 - [x] [ユーザーガイド](./docs/user/guide.md) / [セキュリティチェックリスト](./docs/security-checklist.md) / [リリース手順](./docs/release.md)
 
 **リポジトリ**: https://github.com/keijijin/codex-studio
@@ -33,8 +35,9 @@ pnpm dev
 ```bash
 pnpm dev          # 開発サーバー
 pnpm build        # ビルド
-pnpm test         # ユニットテスト
-pnpm test:e2e     # E2E（ビルド後 Playwright）
+pnpm test         # ユニット + ベンチマーク（27 件）
+pnpm test:benchmark  # Agent ベンチマーク 20 件
+pnpm test:e2e     # E2E（5 件）
 pnpm package:mac    # macOS .dmg
 pnpm package:win    # Windows インストーラー
 pnpm package:linux  # Linux AppImage + .deb
@@ -71,6 +74,8 @@ packages/
 | 文書 | パス |
 |------|------|
 | ユーザーガイド | [docs/user/guide.md](./docs/user/guide.md) |
+| α テスト計画 | [docs/alpha-test-plan.md](./docs/alpha-test-plan.md) |
+| リリース | [docs/release.md](./docs/release.md) / [Releases](https://github.com/keijijin/codex-studio/releases) |
 | セキュリティ | [docs/security-checklist.md](./docs/security-checklist.md) |
 | アーキテクチャ | [docs/03-アーキテクチャ定義書.md](./docs/03-アーキテクチャ定義書.md) |
 
