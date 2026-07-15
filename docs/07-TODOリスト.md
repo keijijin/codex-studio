@@ -207,22 +207,22 @@
 
 ### パッケージング
 
-- [ ] electron-builder 設定
-- [ ] macOS .dmg ビルド
+- [x] electron-builder 設定
+- [x] macOS .dmg ビルド
 - [ ] macOS 公証
-- [ ] Windows .exe ビルド
-- [ ] Linux AppImage ビルド
-- [ ] GitHub Releases 自動化
+- [~] Windows .exe ビルド（CI: node-pty / MSVC 修正中）
+- [x] Linux AppImage ビルド
+- [x] GitHub Releases 自動化
 - [ ] electron-updater 設定
 
 ### リリース
 
 - [ ] ユーザーガイド（docs/user/）
-- [ ] α テスト計画書
-- [ ] 社内 α 配布（10名）
+- [x] α テスト計画書
+- [~] 社内 α 配布（10名）— mac/Linux ビルド配布可能
 - [ ] フィードバック収集
 - [ ] 重大バグ修正
-- [ ] α リリース判定
+- [~] α リリース判定（v0.1.0 公開済み、Windows 待ち）
 
 ---
 
@@ -274,7 +274,7 @@
 | Phase 1 エディタ | ほぼ完了 | ウォッチャー完了 |
 | Phase 2 索引+チャット | ほぼ完了 | SQLite は Post-MVP |
 | Phase 3 Agent+ツール | 完了 | Worker Thread 分離は未 |
-| Phase 4 リリース | 進行中 | v0.1.0 tag、Agent benchmark 20、α 計画 |
+| Phase 4 リリース | 進行中 | v0.1.0 公開（mac/Linux）、Windows CI 修正中 |
 
 > 詳細は [README.md](../README.md) の Sprint 6 セクションを参照
 

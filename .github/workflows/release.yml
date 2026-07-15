@@ -36,8 +36,17 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - name: Setup MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          vsversion: '2022'
+          arch: x64
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+        env:
+          GYP_MSVS_VERSION: '2022'
 
       - name: Lint
         run: pnpm lint

@@ -1,5 +1,5 @@
 import { stat } from 'fs/promises'
-import { basename, relative } from 'path'
+import { basename } from 'path'
 import type { FSWatcher } from 'chokidar'
 import chokidar from 'chokidar'
 import { BrowserWindow } from 'electron'
