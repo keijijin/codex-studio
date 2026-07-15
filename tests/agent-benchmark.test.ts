@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, beforeAll, afterAll } from 'vitest'
+import { cp, mkdtemp, rm } from 'fs/promises'
+import { tmpdir } from 'os'
 import { join } from 'path'
 import { AgentOrchestrator } from '@codex/agent-core'
 import type { AgentStreamChunk, LLMProvider } from '@codex/llm-adapters'
@@ -46,7 +48,18 @@ function buildProviderForCase(
 }
 
 describe('Agent benchmark (20 cases, mock LLM)', () => {
-  const workspaceRoot = join(process.cwd(), 'e2e/fixtures/sample-workspace')
+  let workspaceRoot: string
+
+  beforeAll(async () => {
+    const fixture = join(process.cwd(), 'e2e/fixtures/sample-workspace')
+    workspaceRoot = await mkdtemp(join(tmpdir(), 'codex-bench-'))
+    await cp(fixture, workspaceRoot, { recursive: true })
+  })
+
+  afterAll(async () => {
+    await rm(workspaceRoot, { recursive: true, force: true })
+  })
+
   const registry = new ToolRegistry([
     readTool, grepTool, globTool, writeTool, strReplaceTool, deleteTool, shellTool,
   ])
