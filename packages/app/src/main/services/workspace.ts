@@ -1,7 +1,21 @@
-import { readdir, readFile, stat, writeFile } from 'fs/promises'
+import { createHash } from 'crypto'
+import { realpath, readdir, readFile, stat, writeFile } from 'fs/promises'
 import { join, relative, resolve } from 'path'
 import type { FileNode, Workspace } from '@codex/shared'
-import { randomUUID } from 'crypto'
+
+export function workspaceIdFromPath(resolvedPath: string): string {
+  return createHash('sha256').update(resolvedPath).digest('hex').slice(0, 24)
+}
+
+/** Normalize folder path for stable per-workspace session keys. */
+export async function normalizeWorkspaceRoot(path: string): Promise<string> {
+  const resolved = resolve(path)
+  try {
+    return await realpath(resolved)
+  } catch {
+    return resolved
+  }
+}
 
 const IGNORED_DIRS = new Set([
   'node_modules',
@@ -26,14 +40,14 @@ export class WorkspaceService {
   }
 
   async open(path: string): Promise<Workspace> {
-    const resolved = resolve(path)
+    const resolved = await normalizeWorkspaceRoot(path)
     const stats = await stat(resolved)
     if (!stats.isDirectory()) {
       throw new Error('Path is not a directory')
     }
 
     this.workspace = {
-      id: randomUUID(),
+      id: workspaceIdFromPath(resolved),
       rootPaths: [resolved],
       name: resolved.split(/[/\\]/).pop() ?? resolved,
       openedAt: new Date().toISOString(),
@@ -71,17 +85,32 @@ export class WorkspaceService {
     if (!root) {
       return []
     }
-    return this.buildTree(root, root, 0)
+    return this.buildTree(root, root, 0, new Set())
   }
 
   private async buildTree(
     root: string,
     dirPath: string,
     depth: number,
+    visited: Set<string>,
   ): Promise<FileNode[]> {
-    if (depth > 6) {
+    // Safety cap only (symlink loops / pathological trees). Do not treat
+    // normal project depth as a hard UX limit — previously depth > 6 hid
+    // everything past ~7 nested folders.
+    if (depth > 256) {
       return []
     }
+
+    let realDir: string
+    try {
+      realDir = await realpath(dirPath)
+    } catch {
+      realDir = resolve(dirPath)
+    }
+    if (visited.has(realDir)) {
+      return []
+    }
+    visited.add(realDir)
 
     let entries: string[]
     try {
@@ -107,7 +136,7 @@ export class WorkspaceService {
 
       if (entryStat.isDirectory()) {
         if (IGNORED_DIRS.has(entry)) continue
-        const children = await this.buildTree(root, fullPath, depth + 1)
+        const children = await this.buildTree(root, fullPath, depth + 1, visited)
         nodes.push({
           name: entry,
           path: fullPath,

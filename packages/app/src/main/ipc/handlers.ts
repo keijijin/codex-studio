@@ -8,6 +8,7 @@ import { agentService } from '../services/agent'
 import { auditLog } from '../services/audit-log'
 import { fileWatcherService } from '../services/file-watcher'
 import { terminalService } from '../services/terminal-service'
+import { rulesService } from '../services/rules-service'
 import { assertFilePath, assertNonEmptyString, assertSessionId, assertTerminalId } from '../utils/validate-ipc'
 
 export function registerIpcHandlers(): void {
@@ -20,9 +21,11 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_OPEN, async (_event, path: string) => {
     const target = assertFilePath(path)
     const workspace = await workspaceService.open(target)
-    settingsService.addRecentWorkspace(target)
-    fileWatcherService.start(target)
-    void indexService.scan(target)
+    const root = workspace.rootPaths[0]
+    settingsService.addRecentWorkspace(root)
+    sessionService.rememberWorkspaceId(root, workspace.id)
+    fileWatcherService.start(root)
+    void indexService.scan(root)
     return workspace
   })
 
@@ -68,7 +71,9 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle(IPC_CHANNELS.SESSION_LIST, () => {
-    return sessionService.list()
+    const workspace = workspaceService.get()
+    if (!workspace) return []
+    return sessionService.listForWorkspace(workspace.id, workspace.rootPaths[0])
   })
 
   ipcMain.handle(IPC_CHANNELS.SESSION_CREATE, () => {
@@ -76,7 +81,7 @@ export function registerIpcHandlers(): void {
     if (!workspace) {
       throw new Error('Open a workspace first')
     }
-    return sessionService.create(workspace.id)
+    return sessionService.create(workspace.id, workspace.rootPaths[0])
   })
 
   ipcMain.handle(IPC_CHANNELS.SESSION_SELECT, (_event, sessionId: string) => {
@@ -143,5 +148,17 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.TERMINAL_DESTROY, (_event, id: string) => {
     terminalService.destroy(assertTerminalId(id))
+  })
+
+  ipcMain.handle(IPC_CHANNELS.RULES_LIST, async () => {
+    return rulesService.list()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.RULES_SAVE, async (_event, params) => {
+    return rulesService.save(params)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.RULES_DELETE, async (_event, absolutePath: string) => {
+    await rulesService.remove(assertFilePath(absolutePath))
   })
 }

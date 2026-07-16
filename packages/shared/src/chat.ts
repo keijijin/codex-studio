@@ -13,6 +13,8 @@ export interface ChatSendParams {
   content: string
   attachments?: Attachment[]
   mode?: 'ask' | 'agent'
+  /** Open editor paths for Rules glob matching */
+  contextPaths?: string[]
 }
 
 export type ChatStreamEvent =

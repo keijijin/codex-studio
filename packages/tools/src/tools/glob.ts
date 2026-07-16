@@ -35,7 +35,7 @@ async function walkFiles(
   depth: number,
   results: string[],
 ): Promise<void> {
-  if (depth > 8 || results.length >= MAX_RESULTS * 2) return
+  if (depth > 256 || results.length >= MAX_RESULTS * 2) return
 
   let entries: string[]
   try {

@@ -15,6 +15,8 @@ export interface FileNode {
 export interface Session {
   id: string
   workspaceId: string
+  /** Absolute workspace root path — used to restore chats per folder */
+  workspaceRoot?: string
   title: string
   mode: 'ask' | 'agent' | 'plan'
   modelId: string
@@ -82,7 +84,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     ollamaBaseUrl: DEFAULT_OLLAMA_BASE_URL,
   },
   agent: {
-    maxIterations: 25,
+    maxIterations: 100,
     yoloMode: false,
   },
 }

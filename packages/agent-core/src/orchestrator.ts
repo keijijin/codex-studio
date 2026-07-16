@@ -19,6 +19,8 @@ export interface AgentRunContext {
   getRelativePath: (absolutePath: string) => string
   onFileChanged?: (absolutePath: string) => void
   requestApproval?: (request: ApprovalRequest) => Promise<boolean>
+  /** Prebuilt rules prompt (global + workspace). Falls back to workspace .codex/rules only. */
+  rulesPrompt?: string
 }
 
 export type AgentOrchestratorEvent =
@@ -52,7 +54,7 @@ export class AgentOrchestrator {
     history: AgentMessage[],
     ctx: AgentRunContext,
   ): AsyncGenerator<AgentOrchestratorEvent> {
-    const rules = await loadRules(ctx.workspaceRoot)
+    const rules = ctx.rulesPrompt ?? (await loadRules(ctx.workspaceRoot))
     let messages: AgentMessage[] = [
       { role: 'system', content: buildSystemPrompt(ctx.workspaceRoot, rules) },
       ...history,
@@ -180,6 +182,9 @@ export class AgentOrchestrator {
       }
     }
 
-    yield { type: 'error', message: `Max iterations (${ctx.maxIterations}) reached` }
+    yield {
+      type: 'error',
+      message: `ツール呼び出しの上限（${ctx.maxIterations}回）に達しました。設定の「最大イテレーション」を引き上げて再実行してください。`,
+    }
   }
 }

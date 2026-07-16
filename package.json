@@ -1,6 +1,6 @@
 {
   "name": "codex-studio",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "AI-native development environment",
@@ -23,7 +23,8 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "pnpm build && playwright test",
     "test:benchmark": "vitest run tests/agent-benchmark.test.ts",
-    "postinstall": "electron-rebuild -f -w node-pty",
+    "postinstall": "electron-rebuild -f -w node-pty && node scripts/patch-electron-name.mjs",
+    "patch:electron-name": "node scripts/patch-electron-name.mjs",
     "package": "pnpm build && electron-builder",
     "package:mac": "pnpm build && electron-builder --mac",
     "package:win": "pnpm build && electron-builder --win",

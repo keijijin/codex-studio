@@ -58,6 +58,7 @@ interface AppState {
   openFile: (path: string, name: string) => Promise<void>
   openChangedFile: (path: string) => Promise<void>
   closeTab: (path: string) => void
+  closeAllTabs: () => void
   setActiveTab: (path: string) => void
   setTabMdViewMode: (path: string, mode: MdViewMode) => void
   updateTabContent: (path: string, content: string) => void
@@ -200,6 +201,18 @@ export const useAppStore = create<AppState>((set, get) => ({
       void get().refreshFileTree()
     })
 
+    window.codex.on(IPC_EVENTS.MENU_OPEN_FOLDER, () => {
+      void get().openWorkspace()
+    })
+
+    window.codex.on(IPC_EVENTS.MENU_CLOSE_FOLDER, () => {
+      void get().closeWorkspace()
+    })
+
+    window.codex.on(IPC_EVENTS.MENU_CLOSE_ALL_TABS, () => {
+      get().closeAllTabs()
+    })
+
     set({ listenersSetup: true })
   },
 
@@ -222,12 +235,48 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       if (!targetPath) return
 
+      // Cancel in-flight chat for the previous folder (history is kept in store)
+      if (get().activeSessionId) {
+        try {
+          await window.codex.invoke(IPC_CHANNELS.CHAT_CANCEL, get().activeSessionId!)
+        } catch {
+          // ignore
+        }
+      }
+      if (get().workspace) {
+        await window.codex.invoke(IPC_CHANNELS.WORKSPACE_CLOSE)
+      }
+
       const workspace = await window.codex.invoke(IPC_CHANNELS.WORKSPACE_OPEN, targetPath)
       const fileTree = await window.codex.invoke(IPC_CHANNELS.WORKSPACE_GET_TREE)
-      set({ workspace, fileTree, tabs: [], activeTabPath: null, indexStatus: { state: 'indexing', totalFiles: 0, indexedFiles: 0 } })
-      await get().loadSessions()
-      if (get().sessions.length === 0) {
+      const sessions = await window.codex.invoke(IPC_CHANNELS.SESSION_LIST)
+
+      set({
+        workspace,
+        fileTree,
+        tabs: [],
+        activeTabPath: null,
+        sessions,
+        activeSessionId: null,
+        messages: [],
+        streamingContent: '',
+        streamingToolCalls: [],
+        isStreaming: false,
+        chatError: null,
+        pendingApproval: null,
+        sessionMode: 'ask',
+        indexStatus: { state: 'indexing', totalFiles: 0, indexedFiles: 0 },
+      })
+
+      if (sessions.length === 0) {
+        // First time in this folder → start a fresh chat
         await get().createSession()
+      } else {
+        // Restore this folder's previous conversations
+        const latest = [...sessions].sort(
+          (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+        )[0]
+        await get().selectSession(latest.id)
       }
     } finally {
       set({ isLoading: false })
@@ -306,6 +355,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ tabs: next, activeTabPath: nextActive })
   },
 
+  closeAllTabs: () => {
+    const { tabs } = get()
+    if (tabs.length === 0) return
+    const dirtyCount = tabs.filter((t) => t.isDirty).length
+    if (dirtyCount > 0) {
+      const ok = window.confirm(
+        `未保存の変更が ${dirtyCount} 件あります。すべて閉じますか？（変更は破棄されます）`,
+      )
+      if (!ok) return
+    }
+    set({ tabs: [], activeTabPath: null })
+  },
+
   setActiveTab: (path: string) => {
     set({ activeTabPath: path })
   },
@@ -350,11 +412,27 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   loadSessions: async () => {
     const sessions = await window.codex.invoke(IPC_CHANNELS.SESSION_LIST)
-    set({ sessions })
+    const activeStillValid = sessions.some((s) => s.id === get().activeSessionId)
+
+    set({
+      sessions,
+      ...(activeStillValid
+        ? {}
+        : {
+            activeSessionId: null,
+            messages: [],
+            streamingContent: '',
+            streamingToolCalls: [],
+            isStreaming: false,
+            chatError: null,
+            pendingApproval: null,
+            sessionMode: 'ask' as const,
+          }),
+    })
+
     if (sessions.length === 0) return
 
-    const { activeSessionId } = get()
-    if (!activeSessionId) {
+    if (!get().activeSessionId) {
       const latest = [...sessions].sort(
         (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
       )[0]
@@ -444,11 +522,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       chatError: null,
     })
 
+    const contextPaths = get().tabs.map((t) => t.path)
+
     await window.codex.invoke(IPC_CHANNELS.CHAT_SEND, {
       sessionId: activeSessionId,
       content,
       attachments,
       mode: sessionMode === 'agent' ? 'agent' : 'ask',
+      contextPaths,
     })
   },
 

@@ -1,6 +1,7 @@
 {
   "appId": "com.codex.studio",
   "productName": "Codex Studio",
+  "executableName": "CodexStudio",
   "directories": {
     "output": "release",
     "buildResources": "build"
@@ -36,7 +37,12 @@
     "gatekeeperAssess": false,
     "entitlements": "build/entitlements.mac.plist",
     "entitlementsInherit": "build/entitlements.mac.plist",
-    "notarize": false
+    "notarize": false,
+    "extendInfo": {
+      "CFBundleDisplayName": "Codex Studio",
+      "CFBundleName": "Codex Studio",
+      "CFBundleIdentifier": "com.codex.studio"
+    }
   },
   "win": {
     "icon": "icon.ico",
@@ -46,10 +52,16 @@
     "icon": "icon.png",
     "target": ["AppImage", "deb"],
     "category": "Development",
-    "maintainer": "Codex Studio <codex-studio@users.noreply.github.com>"
+    "maintainer": "Codex Studio <codex-studio@users.noreply.github.com>",
+    "desktop": {
+      "Name": "Codex Studio",
+      "Comment": "AI-native development environment",
+      "StartupWMClass": "Codex Studio"
+    }
   },
   "nsis": {
     "oneClick": false,
-    "allowToChangeInstallationDirectory": true
+    "allowToChangeInstallationDirectory": true,
+    "shortcutName": "Codex Studio"
   }
 }

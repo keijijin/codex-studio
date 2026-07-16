@@ -1,12 +1,14 @@
+import './bootstrap-app'
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, session, shell } from 'electron'
 import { join } from 'path'
-import { IPC_CHANNELS } from '@codex/shared'
+import { APP_NAME, IPC_CHANNELS } from '@codex/shared'
 import { indexService } from '@codex/indexer'
 import { registerIpcHandlers } from './ipc/handlers'
 import { settingsService } from './services/settings'
 import { workspaceService } from './services/workspace'
 import { terminalService } from './services/terminal-service'
 import { fileWatcherService } from './services/file-watcher'
+import { setupApplicationMenu } from './menu'
 import { resolveAppIconPath, resolvePreloadPath } from './utils/paths'
 
 let mainWindow: BrowserWindow | null = null
@@ -21,6 +23,7 @@ function createWindow(): void {
     minWidth: 900,
     minHeight: 600,
     show: false,
+    title: APP_NAME,
     ...(icon && !icon.isEmpty() ? { icon } : {}),
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
@@ -35,7 +38,14 @@ function createWindow(): void {
     app.dock.setIcon(icon)
   }
 
+  // Keep native title as Codex Studio (Vite / document title must not revert to Electron).
+  mainWindow.on('page-title-updated', (event) => {
+    event.preventDefault()
+    mainWindow?.setTitle(APP_NAME)
+  })
+
   mainWindow.on('ready-to-show', () => {
+    mainWindow?.setTitle(APP_NAME)
     mainWindow?.show()
   })
 
@@ -52,6 +62,12 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
+  app.setAboutPanelOptions({
+    applicationName: APP_NAME,
+    applicationVersion: app.getVersion(),
+    copyright: `Copyright © ${new Date().getFullYear()} ${APP_NAME}`,
+  })
+
   if (!process.env.ELECTRON_RENDERER_URL) {
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
       callback({
@@ -66,6 +82,7 @@ app.whenReady().then(async () => {
   }
 
   registerIpcHandlers()
+  setupApplicationMenu()
 
   const e2eWorkspace = process.env.CODEX_E2E_WORKSPACE
   if (e2eWorkspace) {
@@ -75,9 +92,15 @@ app.whenReady().then(async () => {
   }
 
   ipcMain.handle(IPC_CHANNELS.DIALOG_OPEN_DIRECTORY, async () => {
-    const result = await dialog.showOpenDialog(mainWindow!, {
-      properties: ['openDirectory', 'createDirectory'],
-    })
+    const win = mainWindow ?? BrowserWindow.getFocusedWindow()
+    const options = {
+      properties: ['openDirectory', 'createDirectory'] as Array<'openDirectory' | 'createDirectory'>,
+      title: 'フォルダーを開く',
+      buttonLabel: '開く',
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options)
     return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
   })
 

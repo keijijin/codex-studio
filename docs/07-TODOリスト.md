@@ -144,7 +144,7 @@
 - [ ] Tool Registry 基盤
 - [ ] Context Builder 実装
 - [ ] トークン予算 trim ロジック
-- [ ] Rules Loader（.codex/rules/）
+- [x] Rules Loader（.codex/rules + .cursor/rules + global + UI）
 
 ### ツール
 

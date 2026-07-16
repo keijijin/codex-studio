@@ -7,6 +7,7 @@ export function EditorArea() {
   const activeTabPath = useAppStore((s) => s.activeTabPath)
   const setActiveTab = useAppStore((s) => s.setActiveTab)
   const closeTab = useAppStore((s) => s.closeTab)
+  const closeAllTabs = useAppStore((s) => s.closeAllTabs)
   const saveActiveFile = useAppStore((s) => s.saveActiveFile)
   const setTabMdViewMode = useAppStore((s) => s.setTabMdViewMode)
 
@@ -66,13 +67,23 @@ export function EditorArea() {
               </button>
             </div>
           )}
-          <button
-            type="button"
-            className="ml-auto shrink-0 px-3 text-xs text-text-secondary hover:text-text-primary"
-            onClick={() => void saveActiveFile()}
-          >
-            Save
-          </button>
+          <div className="ml-auto flex shrink-0 items-center">
+            <button
+              type="button"
+              className="px-3 text-xs text-text-secondary hover:text-text-primary"
+              title="タブをすべて閉じる"
+              onClick={() => closeAllTabs()}
+            >
+              すべて閉じる
+            </button>
+            <button
+              type="button"
+              className="px-3 text-xs text-text-secondary hover:text-text-primary"
+              onClick={() => void saveActiveFile()}
+            >
+              Save
+            </button>
+          </div>
         </div>
       )}
       <div className="min-h-0 flex-1 overflow-hidden">

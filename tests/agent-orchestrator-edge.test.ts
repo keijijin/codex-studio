@@ -97,7 +97,7 @@ describe('AgentOrchestrator edge cases', () => {
       )
 
       const error = events.find((e) => e.type === 'error')
-      expect(error?.message).toMatch(/Max iterations \(2\) reached/)
+      expect(error?.message).toMatch(/上限（2回）に達しました/)
     } finally {
       await rm(root, { recursive: true, force: true })
     }

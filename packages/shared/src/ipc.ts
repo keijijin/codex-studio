@@ -10,6 +10,7 @@ import type { ChatSendParams, SearchResult } from './chat'
 import type { ChatStreamEvent } from './chat'
 import type { LLMProviderId, ModelInfo } from './types'
 import type { SessionMode } from './agent'
+import type { RuleFile, RuleSaveParams } from './rules'
 
 /** IPC channel names (invoke) */
 export const IPC_CHANNELS = {
@@ -38,6 +39,9 @@ export const IPC_CHANNELS = {
   TERMINAL_WRITE: 'terminal:write',
   TERMINAL_RESIZE: 'terminal:resize',
   TERMINAL_DESTROY: 'terminal:destroy',
+  RULES_LIST: 'rules:list',
+  RULES_SAVE: 'rules:save',
+  RULES_DELETE: 'rules:delete',
 } as const
 
 /** IPC event names (push) */
@@ -48,6 +52,9 @@ export const IPC_EVENTS = {
   WORKSPACE_TREE_CHANGED: 'workspace:treeChanged',
   TERMINAL_OUTPUT: 'terminal:output',
   TERMINAL_EXIT: 'terminal:exit',
+  MENU_OPEN_FOLDER: 'menu:openFolder',
+  MENU_CLOSE_FOLDER: 'menu:closeFolder',
+  MENU_CLOSE_ALL_TABS: 'menu:closeAllTabs',
 } as const
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
@@ -80,6 +87,9 @@ export interface IpcInvokeMap {
   [IPC_CHANNELS.TERMINAL_WRITE]: { args: [id: string, data: string]; result: void }
   [IPC_CHANNELS.TERMINAL_RESIZE]: { args: [id: string, cols: number, rows: number]; result: void }
   [IPC_CHANNELS.TERMINAL_DESTROY]: { args: [id: string]; result: void }
+  [IPC_CHANNELS.RULES_LIST]: { args: []; result: RuleFile[] }
+  [IPC_CHANNELS.RULES_SAVE]: { args: [params: RuleSaveParams]; result: RuleFile }
+  [IPC_CHANNELS.RULES_DELETE]: { args: [absolutePath: string]; result: void }
 }
 
 export interface IpcEventMap {
@@ -89,6 +99,9 @@ export interface IpcEventMap {
   [IPC_EVENTS.WORKSPACE_TREE_CHANGED]: undefined
   [IPC_EVENTS.TERMINAL_OUTPUT]: { id: string; data: string }
   [IPC_EVENTS.TERMINAL_EXIT]: { id: string; exitCode: number }
+  [IPC_EVENTS.MENU_OPEN_FOLDER]: undefined
+  [IPC_EVENTS.MENU_CLOSE_FOLDER]: undefined
+  [IPC_EVENTS.MENU_CLOSE_ALL_TABS]: undefined
 }
 
 export type IpcArgs<C extends keyof IpcInvokeMap> = IpcInvokeMap[C]['args']

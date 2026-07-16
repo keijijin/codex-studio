@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { IPC_CHANNELS, DEFAULT_OLLAMA_BASE_URL, type LLMProviderId, type ModelInfo } from '@codex/shared'
 import { useAppStore } from '@renderer/store/app-store'
 import { hasCodexApi } from './ErrorBoundary'
+import { RulesSettings } from './RulesSettings'
 
 const overlayStyle: CSSProperties = {
   position: 'fixed',
@@ -17,7 +18,9 @@ const overlayStyle: CSSProperties = {
 
 const panelStyle: CSSProperties = {
   width: '100%',
-  maxWidth: 480,
+  maxWidth: 560,
+  maxHeight: '90vh',
+  overflow: 'auto',
   backgroundColor: '#252526',
   border: '1px solid #3c3c3c',
   borderRadius: 8,
@@ -82,10 +85,12 @@ interface SettingsFormProps {
 }
 
 export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) {
+  const [tab, setTab] = useState<'models' | 'rules'>('models')
   const [openaiKey, setOpenaiKey] = useState('')
   const [anthropicKey, setAnthropicKey] = useState('')
   const [ollamaBaseUrl, setOllamaBaseUrl] = useState(DEFAULT_OLLAMA_BASE_URL)
   const [yoloMode, setYoloMode] = useState(false)
+  const [maxIterations, setMaxIterations] = useState(100)
   const [provider, setProvider] = useState<LLMProviderId>('openai')
   const [model, setModel] = useState('gpt-4o')
   const [models, setModels] = useState<ModelInfo[]>([])
@@ -153,6 +158,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
         setAnthropicKey(aKey)
         setOllamaBaseUrl(ollamaUrl)
         setYoloMode(settings.agent.yoloMode)
+        setMaxIterations(settings.agent.maxIterations)
         await fetchModels(p, oKey, aKey, ollamaUrl, { preferredModel: savedModel })
       })
       .catch((err: unknown) => {
@@ -184,6 +190,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
         agent: {
           ...current.agent,
           yoloMode,
+          maxIterations: Math.min(500, Math.max(5, Math.floor(maxIterations) || 100)),
         },
       })
       setSaved(true)
@@ -195,128 +202,177 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
   }
 
   const wrapperStyle: CSSProperties = compact
-    ? { ...panelStyle, maxWidth: 520, margin: '0 auto', textAlign: 'left' }
+    ? { ...panelStyle, maxWidth: 560, margin: '0 auto', textAlign: 'left' }
     : panelStyle
+
+  const tabBtn = (id: 'models' | 'rules', label: string): CSSProperties => ({
+    flex: 1,
+    padding: '8px 12px',
+    fontSize: 13,
+    cursor: 'pointer',
+    border: '1px solid #3c3c3c',
+    borderRadius: 4,
+    backgroundColor: tab === id ? '#0078d4' : 'transparent',
+    color: tab === id ? '#fff' : '#858585',
+  })
 
   return (
     <form style={wrapperStyle} onSubmit={(e) => void handleSubmit(e)}>
       <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: '#ffffff' }}>設定</h2>
-      <p style={{ margin: '8px 0 0', fontSize: 13, color: '#858585' }}>
-        API キーとチャットモデルを設定します
-      </p>
 
-      {error && (
-        <p style={{ marginTop: 12, padding: 8, fontSize: 12, color: '#fca5a5', backgroundColor: '#450a0a', border: '1px solid #991b1b', borderRadius: 4 }}>
-          {error}
-        </p>
-      )}
+      <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+        <button type="button" style={tabBtn('models', 'モデル')} onClick={() => setTab('models')}>
+          モデル
+        </button>
+        <button type="button" style={tabBtn('rules', 'Rules')} onClick={() => setTab('rules')}>
+          Rules
+        </button>
+      </div>
 
-      {loading ? (
-        <p style={{ marginTop: 16, fontSize: 13, color: '#858585' }}>読み込み中...</p>
+      {tab === 'rules' ? (
+        <div style={{ marginTop: 16 }}>
+          <RulesSettings />
+          <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}>
+            {onCancel && (
+              <button type="button" style={btnSecondary} onClick={onCancel}>閉じる</button>
+            )}
+          </div>
+        </div>
       ) : (
         <>
-          <label style={labelStyle} htmlFor="openai-api-key">OpenAI API Key</label>
-          <input
-            id="openai-api-key"
-            type="password"
-            style={inputStyle}
-            placeholder="sk-..."
-            value={openaiKey}
-            onChange={(e) => setOpenaiKey(e.target.value)}
-            autoComplete="off"
-          />
+          <p style={{ margin: '12px 0 0', fontSize: 13, color: '#858585' }}>
+            API キーとチャットモデルを設定します
+          </p>
 
-          <label style={labelStyle} htmlFor="anthropic-api-key">Anthropic API Key</label>
-          <input
-            id="anthropic-api-key"
-            type="password"
-            style={inputStyle}
-            placeholder="sk-ant-..."
-            value={anthropicKey}
-            onChange={(e) => setAnthropicKey(e.target.value)}
-            autoComplete="off"
-          />
+          {error && (
+            <p style={{ marginTop: 12, padding: 8, fontSize: 12, color: '#fca5a5', backgroundColor: '#450a0a', border: '1px solid #991b1b', borderRadius: 4 }}>
+              {error}
+            </p>
+          )}
 
-          <label style={labelStyle} htmlFor="provider">プロバイダ</label>
-          <select
-            id="provider"
-            style={selectStyle}
-            value={provider}
-            onChange={(e) => handleProviderChange(e.target.value as LLMProviderId)}
-          >
-            <option value="openai">OpenAI</option>
-            <option value="anthropic">Anthropic</option>
-            <option value="ollama">Ollama (Local)</option>
-          </select>
-
-          {provider === 'ollama' && (
+          {loading ? (
+            <p style={{ marginTop: 16, fontSize: 13, color: '#858585' }}>読み込み中...</p>
+          ) : (
             <>
-              <label style={labelStyle} htmlFor="ollama-base-url">Ollama Base URL</label>
+              <label style={labelStyle} htmlFor="openai-api-key">OpenAI API Key</label>
               <input
-                id="ollama-base-url"
-                type="text"
+                id="openai-api-key"
+                type="password"
                 style={inputStyle}
-                placeholder="http://localhost:11434"
-                value={ollamaBaseUrl}
-                onChange={(e) => setOllamaBaseUrl(e.target.value)}
+                placeholder="sk-..."
+                value={openaiKey}
+                onChange={(e) => setOpenaiKey(e.target.value)}
+                autoComplete="off"
               />
+
+              <label style={labelStyle} htmlFor="anthropic-api-key">Anthropic API Key</label>
+              <input
+                id="anthropic-api-key"
+                type="password"
+                style={inputStyle}
+                placeholder="sk-ant-..."
+                value={anthropicKey}
+                onChange={(e) => setAnthropicKey(e.target.value)}
+                autoComplete="off"
+              />
+
+              <label style={labelStyle} htmlFor="provider">プロバイダ</label>
+              <select
+                id="provider"
+                style={selectStyle}
+                value={provider}
+                onChange={(e) => handleProviderChange(e.target.value as LLMProviderId)}
+              >
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+                <option value="ollama">Ollama (Local)</option>
+              </select>
+
+              {provider === 'ollama' && (
+                <>
+                  <label style={labelStyle} htmlFor="ollama-base-url">Ollama Base URL</label>
+                  <input
+                    id="ollama-base-url"
+                    type="text"
+                    style={inputStyle}
+                    placeholder="http://localhost:11434"
+                    value={ollamaBaseUrl}
+                    onChange={(e) => setOllamaBaseUrl(e.target.value)}
+                  />
+                </>
+              )}
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 16 }}>
+                <label style={{ ...labelStyle, marginTop: 0 }} htmlFor="chat-model">Chat Model</label>
+                <button
+                  type="button"
+                  style={{ ...btnSecondary, padding: '4px 10px', fontSize: 12 }}
+                  disabled={loadingModels}
+                  onClick={() => void fetchModels(provider, openaiKey, anthropicKey, ollamaBaseUrl)}
+                >
+                  {loadingModels ? '取得中...' : 'モデル一覧を更新'}
+                </button>
+              </div>
+              <select
+                id="chat-model"
+                style={selectStyle}
+                value={model}
+                disabled={loadingModels}
+                onChange={(e) => setModel(e.target.value)}
+              >
+                {models.length === 0 ? (
+                  <option value={model}>{model}</option>
+                ) : (
+                  models.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name !== m.id ? `${m.name} (${m.id})` : m.id}
+                    </option>
+                  ))
+                )}
+              </select>
+              <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6e6e6e' }}>
+                {models.length} 件のモデル · 環境変数 OPENAI_API_KEY / ANTHROPIC_API_KEY / OLLAMA_BASE_URL も利用可
+              </p>
+
+              <label style={labelStyle} htmlFor="max-iterations">最大イテレーション（Agent）</label>
+              <input
+                id="max-iterations"
+                type="number"
+                min={5}
+                max={500}
+                step={5}
+                style={inputStyle}
+                value={maxIterations}
+                onChange={(e) => setMaxIterations(Number(e.target.value) || 100)}
+              />
+              <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6e6e6e' }}>
+                1 回の Agent 実行で許可するツール呼び出しループの上限（5〜500）
+              </p>
+
+              <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8, marginTop: 16 }}>
+                <input
+                  type="checkbox"
+                  checked={yoloMode}
+                  onChange={(e) => setYoloMode(e.target.checked)}
+                />
+                YOLO モード（Agent の書込・Shell を承認なしで実行）
+              </label>
+              <p style={{ margin: '4px 0 0', fontSize: 11, color: '#f87171' }}>
+                有効にするとファイル変更やコマンド実行が自動適用されます。自己責任で使用してください。
+              </p>
             </>
           )}
 
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 16 }}>
-            <label style={{ ...labelStyle, marginTop: 0 }} htmlFor="chat-model">Chat Model</label>
-            <button
-              type="button"
-              style={{ ...btnSecondary, padding: '4px 10px', fontSize: 12 }}
-              disabled={loadingModels}
-              onClick={() => void fetchModels(provider, openaiKey, anthropicKey, ollamaBaseUrl)}
-            >
-              {loadingModels ? '取得中...' : 'モデル一覧を更新'}
+          <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            {onCancel && (
+              <button type="button" style={btnSecondary} onClick={onCancel}>閉じる</button>
+            )}
+            <button type="submit" style={btnPrimary} disabled={loading}>
+              {saved ? '保存しました' : '保存'}
             </button>
           </div>
-          <select
-            id="chat-model"
-            style={selectStyle}
-            value={model}
-            disabled={loadingModels}
-            onChange={(e) => setModel(e.target.value)}
-          >
-            {models.length === 0 ? (
-              <option value={model}>{model}</option>
-            ) : (
-              models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name !== m.id ? `${m.name} (${m.id})` : m.id}
-                </option>
-              ))
-            )}
-          </select>
-          <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6e6e6e' }}>
-            {models.length} 件のモデル · 環境変数 OPENAI_API_KEY / ANTHROPIC_API_KEY / OLLAMA_BASE_URL も利用可
-          </p>
-
-          <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8, marginTop: 16 }}>
-            <input
-              type="checkbox"
-              checked={yoloMode}
-              onChange={(e) => setYoloMode(e.target.checked)}
-            />
-            YOLO モード（Agent の書込・Shell を承認なしで実行）
-          </label>
-          <p style={{ margin: '4px 0 0', fontSize: 11, color: '#f87171' }}>
-            有効にするとファイル変更やコマンド実行が自動適用されます。自己責任で使用してください。
-          </p>
         </>
       )}
-
-      <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-        {onCancel && (
-          <button type="button" style={btnSecondary} onClick={onCancel}>閉じる</button>
-        )}
-        <button type="submit" style={btnPrimary} disabled={loading}>
-          {saved ? '保存しました' : '保存'}
-        </button>
-      </div>
     </form>
   )
 }

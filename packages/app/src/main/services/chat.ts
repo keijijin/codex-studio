@@ -20,6 +20,7 @@ import {
   missingApiKeyMessage,
 } from './llm-config'
 import { DEFAULT_OLLAMA_BASE_URL } from '@codex/shared'
+import { rulesService } from './rules-service'
 
 const SYSTEM_PROMPT = `You are Codex Studio, an AI coding assistant integrated into a developer IDE.
 Help the user with code understanding, debugging, refactoring, and general programming questions.
@@ -113,7 +114,12 @@ export class ChatService {
     this.updateSessionTitle(sessionId, content)
 
     const history = sessionService.getMessages(sessionId)
-    const llmMessages = this.buildMessages(history, attachments)
+    const contextPaths = [
+      ...(params.contextPaths ?? []),
+      ...attachments.map((a) => a.path),
+    ]
+    const rulesPrompt = await rulesService.buildPrompt(contextPaths)
+    const llmMessages = this.buildMessages(history, attachments, rulesPrompt)
     const llm = getProviderInstance(runtime.provider)
 
     let assistantContent = ''
@@ -149,8 +155,12 @@ export class ChatService {
     }
   }
 
-  private buildMessages(history: Message[], latestAttachments: Attachment[]): ChatMessage[] {
-    const messages: ChatMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }]
+  private buildMessages(
+    history: Message[],
+    latestAttachments: Attachment[],
+    rulesPrompt = '',
+  ): ChatMessage[] {
+    const messages: ChatMessage[] = [{ role: 'system', content: SYSTEM_PROMPT + rulesPrompt }]
 
     for (const msg of history) {
       if (msg.role === 'user' || msg.role === 'assistant') {

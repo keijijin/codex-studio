@@ -16,6 +16,7 @@ import {
 import { approvalService } from './approval'
 import { createE2eMockAgentProvider } from './e2e-mock-agent'
 import { getLlmRuntimeConfig, missingApiKeyMessage } from './llm-config'
+import { rulesService } from './rules-service'
 import { sessionService, settingsService } from './settings'
 import { workspaceService } from './workspace'
 
@@ -90,6 +91,12 @@ export class AgentService {
       }
     }
 
+    const contextPaths = [
+      ...(params.contextPaths ?? []),
+      ...attachments.map((a) => a.path),
+    ]
+    const rulesPrompt = await rulesService.buildPrompt(contextPaths)
+
     try {
       for await (const event of this.orchestrator.run(history, {
         workspaceRoot: root,
@@ -104,6 +111,7 @@ export class AgentService {
         resolvePath: (p) => workspaceService.resolveWithinWorkspace(p),
         getRelativePath: (p) => workspaceService.getRelativePath(p),
         onFileChanged: notifyFileChanged,
+        rulesPrompt,
         requestApproval: async (request: ApprovalRequest) => {
           this.emit(webContents, sessionId, {
             type: 'approval_required',
