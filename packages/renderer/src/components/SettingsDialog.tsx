@@ -205,7 +205,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
     ? { ...panelStyle, maxWidth: 560, margin: '0 auto', textAlign: 'left' }
     : panelStyle
 
-  const tabBtn = (id: 'models' | 'rules', label: string): CSSProperties => ({
+  const tabBtn = (id: 'models' | 'rules', _label: string): CSSProperties => ({
     flex: 1,
     padding: '8px 12px',
     fontSize: 13,

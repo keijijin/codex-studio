@@ -68,7 +68,8 @@ jobs:
 
   release:
     needs: build
-    if: always() && needs.build.result != 'cancelled'
+    # Only publish when every platform build succeeded (no empty releases).
+    if: needs.build.result == 'success'
     runs-on: ubuntu-latest
 
     steps:
@@ -76,11 +77,23 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+          pattern: codex-studio-*
+
+      - name: Verify artifacts
+        run: |
+          count=$(find artifacts -type f | wc -l)
+          echo "Found $count artifact file(s)"
+          find artifacts -type f
+          if [ "$count" -eq 0 ]; then
+            echo "No release artifacts downloaded — aborting"
+            exit 1
+          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**
           generate_release_notes: true
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

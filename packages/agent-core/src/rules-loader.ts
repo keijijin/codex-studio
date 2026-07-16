@@ -23,7 +23,7 @@ export function parseRuleFrontmatter(raw: string): { meta: RuleMeta; body: strin
   }
 
   const fm = trimmed.slice(4, end).trim()
-  let body = trimmed.slice(end + 4).replace(/^\r?\n/, '').trim()
+  const body = trimmed.slice(end + 4).replace(/^\r?\n/, '').trim()
 
   const meta: RuleMeta = { ...defaults }
   const lines = fm.split(/\r?\n/)

@@ -18,11 +18,12 @@ pnpm package:linux  # Linux AppImage + .deb
 2. バージョン tag を push
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.2
+git push origin v0.1.2
 ```
 
-3. `.github/workflows/release.yml` が macOS / Linux / Windows 向けビルドを実行し、GitHub Releases にアップロードします。
+3. `.github/workflows/release.yml` が macOS / Linux / Windows 向けビルドを実行し、**全プラットフォーム成功時のみ** GitHub Releases にアップロードします。
+   - ビルド失敗時は Release は作成されません（空のリリースを防ぐため）
 
 ## コード署名・公証（任意）
 
