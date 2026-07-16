@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, session, shell } from 'electron'
 import { join } from 'path'
 import { IPC_CHANNELS } from '@codex/shared'
 import { indexService } from '@codex/indexer'
@@ -7,17 +7,21 @@ import { settingsService } from './services/settings'
 import { workspaceService } from './services/workspace'
 import { terminalService } from './services/terminal-service'
 import { fileWatcherService } from './services/file-watcher'
-import { resolvePreloadPath } from './utils/paths'
+import { resolveAppIconPath, resolvePreloadPath } from './utils/paths'
 
 let mainWindow: BrowserWindow | null = null
 
 function createWindow(): void {
+  const iconPath = resolveAppIconPath()
+  const icon = iconPath ? nativeImage.createFromPath(iconPath) : undefined
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 900,
     minHeight: 600,
     show: false,
+    ...(icon && !icon.isEmpty() ? { icon } : {}),
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
       preload: resolvePreloadPath(__dirname),
@@ -26,6 +30,10 @@ function createWindow(): void {
       sandbox: false,
     },
   })
+
+  if (process.platform === 'darwin' && icon && !icon.isEmpty() && app.dock) {
+    app.dock.setIcon(icon)
+  }
 
   mainWindow.on('ready-to-show', () => {
     mainWindow?.show()

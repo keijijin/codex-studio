@@ -10,6 +10,12 @@
     "package.json",
     "!**/*.map"
   ],
+  "extraResources": [
+    {
+      "from": "build/icon.png",
+      "to": "icon.png"
+    }
+  ],
   "asar": true,
   "asarUnpack": [
     "**/node_modules/@vscode/ripgrep/**",
@@ -23,6 +29,7 @@
     }
   ],
   "mac": {
+    "icon": "icon.icns",
     "category": "public.app-category.developer-tools",
     "target": ["dmg", "zip"],
     "hardenedRuntime": true,
@@ -32,9 +39,11 @@
     "notarize": false
   },
   "win": {
+    "icon": "icon.ico",
     "target": ["nsis"]
   },
   "linux": {
+    "icon": "icon.png",
     "target": ["AppImage", "deb"],
     "category": "Development",
     "maintainer": "Codex Studio <codex-studio@users.noreply.github.com>"

@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a2332"/>
+      <stop offset="100%" stop-color="#0d1117"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3da9fc"/>
+      <stop offset="100%" stop-color="#0078d4"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#5eb8ff" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#0078d4" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded app tile -->
+  <rect x="64" y="64" width="896" height="896" rx="196" ry="196" fill="url(#bg)"/>
+  <rect x="64" y="64" width="896" height="896" rx="196" ry="196" fill="url(#glow)"/>
+
+  <!-- Subtle border -->
+  <rect x="72" y="72" width="880" height="880" rx="188" ry="188"
+        fill="none" stroke="#3da9fc" stroke-opacity="0.22" stroke-width="8"/>
+
+  <!-- Left chevron < -->
+  <path d="M340 320 L220 512 L340 704"
+        fill="none" stroke="url(#accent)" stroke-width="72"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Right chevron > -->
+  <path d="M684 320 L804 512 L684 704"
+        fill="none" stroke="url(#accent)" stroke-width="72"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Center cursor / agent mark -->
+  <circle cx="512" cy="512" r="56" fill="#ffffff"/>
+  <circle cx="512" cy="512" r="28" fill="#0078d4"/>
+
+  <!-- Top accent bar (editor title hint) -->
+  <rect x="380" y="220" width="264" height="36" rx="18" fill="#3da9fc" fill-opacity="0.45"/>
+</svg>
