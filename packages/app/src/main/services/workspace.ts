@@ -1,6 +1,6 @@
 import { createHash } from 'crypto'
 import { realpath, readdir, readFile, stat, writeFile } from 'fs/promises'
-import { join, relative, resolve } from 'path'
+import { dirname, join, relative, resolve } from 'path'
 import type { FileNode, Workspace } from '@codex/shared'
 
 export function workspaceIdFromPath(resolvedPath: string): string {
@@ -78,6 +78,47 @@ export class WorkspaceService {
       throw new Error('Path is outside workspace')
     }
     return relativeResolved
+  }
+
+  /** Resolve a markdown href to an absolute path inside the workspace. */
+  resolveMarkdownLink(href: string, baseFilePath?: string): string {
+    const root = this.getRoot()
+    if (!root) {
+      throw new Error('No workspace open')
+    }
+
+    const normalizedRoot = resolve(root)
+    let target = href.trim()
+
+    if (target.startsWith('file:')) {
+      try {
+        target = decodeURIComponent(new URL(target).pathname)
+      } catch {
+        target = target.replace(/^file:\/\//, '')
+      }
+    }
+
+    const hashIndex = target.indexOf('#')
+    if (hashIndex >= 0) {
+      target = target.slice(0, hashIndex)
+    }
+    if (target === '') {
+      throw new Error('Not a workspace file link')
+    }
+
+    let resolved: string
+    if (target.startsWith('/')) {
+      resolved = resolve(target)
+    } else if (baseFilePath) {
+      resolved = resolve(dirname(baseFilePath), target)
+    } else {
+      resolved = resolve(normalizedRoot, target)
+    }
+
+    if (!resolved.startsWith(normalizedRoot)) {
+      throw new Error('Path is outside workspace')
+    }
+    return resolved
   }
 
   async getFileTree(): Promise<FileNode[]> {

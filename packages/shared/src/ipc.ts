@@ -21,6 +21,7 @@ export const IPC_CHANNELS = {
   WORKSPACE_RECENT_LIST: 'workspace:recentList',
   FILE_READ: 'file:read',
   FILE_WRITE: 'file:write',
+  FILE_RESOLVE: 'file:resolve',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
   SESSION_LIST: 'session:list',
@@ -69,6 +70,7 @@ export interface IpcInvokeMap {
   [IPC_CHANNELS.WORKSPACE_RECENT_LIST]: { args: []; result: string[] }
   [IPC_CHANNELS.FILE_READ]: { args: [path: string]; result: string }
   [IPC_CHANNELS.FILE_WRITE]: { args: [path: string, content: string]; result: void }
+  [IPC_CHANNELS.FILE_RESOLVE]: { args: [href: string, baseFilePath?: string]; result: string }
   [IPC_CHANNELS.SETTINGS_GET]: { args: []; result: AppSettings }
   [IPC_CHANNELS.SETTINGS_SET]: { args: [partial: Partial<AppSettings>]; result: AppSettings }
   [IPC_CHANNELS.SESSION_LIST]: { args: []; result: Session[] }

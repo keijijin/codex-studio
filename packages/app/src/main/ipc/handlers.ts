@@ -52,6 +52,12 @@ export function registerIpcHandlers(): void {
     return workspaceService.readFile(assertFilePath(path))
   })
 
+  ipcMain.handle(IPC_CHANNELS.FILE_RESOLVE, (_event, href: string, baseFilePath?: string) => {
+    const target = assertNonEmptyString(href, 'href')
+    const base = baseFilePath === undefined ? undefined : assertFilePath(baseFilePath)
+    return workspaceService.resolveMarkdownLink(target, base)
+  })
+
   ipcMain.handle(IPC_CHANNELS.FILE_WRITE, async (_event, path: string, content: string) => {
     const target = assertFilePath(path)
     if (typeof content !== 'string') {

@@ -54,4 +54,19 @@ describe('WorkspaceService path sandbox', () => {
     expect(deepFile?.type).toBe('file')
     expect(deepFile?.path.endsWith(join('level12', 'deep.txt'))).toBe(true)
   })
+
+  it('resolves markdown links relative to the source file', async () => {
+    const root = process.cwd()
+    await service.open(root)
+    const base = join(root, 'docs', 'user', 'guide.md')
+    expect(service.resolveMarkdownLink('../release.md', base)).toBe(join(root, 'docs', 'release.md'))
+    expect(service.resolveMarkdownLink('guide.md', base)).toBe(join(root, 'docs', 'user', 'guide.md'))
+    expect(service.resolveMarkdownLink('README.md')).toBe(join(root, 'README.md'))
+  })
+
+  it('strips hash fragments from markdown file links', async () => {
+    const root = process.cwd()
+    await service.open(root)
+    expect(service.resolveMarkdownLink('./README.md#section')).toBe(join(root, 'README.md'))
+  })
 })

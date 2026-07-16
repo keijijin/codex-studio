@@ -2,6 +2,7 @@ import { isValidElement, useEffect, useId, useRef, type ReactElement, type React
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import mermaid from 'mermaid'
+import { MarkdownLink } from './MarkdownLink'
 
 let mermaidInitialized = false
 
@@ -59,13 +60,22 @@ function extractMermaidChart(children: ReactNode): string | null {
 
 interface MarkdownRendererProps {
   content: string
+  /** Absolute path of the markdown file being previewed (for relative links). */
+  baseFilePath?: string
 }
 
-export function MarkdownRenderer({ content }: MarkdownRendererProps) {
+export function MarkdownRenderer({ content, baseFilePath }: MarkdownRendererProps) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       components={{
+        a({ href, children }) {
+          return (
+            <MarkdownLink href={href} baseFilePath={baseFilePath}>
+              {children}
+            </MarkdownLink>
+          )
+        },
         pre({ children }) {
           const child = isValidElement(children) ? (children as ReactElement<{ className?: string; children?: ReactNode }>) : null
           const className = child?.props?.className ?? ''

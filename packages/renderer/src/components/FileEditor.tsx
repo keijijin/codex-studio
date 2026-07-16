@@ -24,7 +24,7 @@ export function FileEditor() {
   if (isMarkdownFile(activeTab.name) && (activeTab.mdViewMode ?? 'preview') === 'preview') {
     return (
       <div className="h-full min-h-0">
-        <MarkdownPreview content={activeTab.content} />
+        <MarkdownPreview content={activeTab.content} baseFilePath={activeTab.path} />
       </div>
     )
   }
