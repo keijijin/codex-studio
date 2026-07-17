@@ -15,6 +15,18 @@ export interface ToolContext {
   resolvePath: (path: string) => string
   getRelativePath: (absolutePath: string) => string
   onFileChanged?: (absolutePath: string) => void
+  /** Nested subagent depth (0 = parent). Task tool refuses depth >= 1. */
+  subagentDepth?: number
+  /** Spawn a read-only investigation subagent (wired by agent-core / app). */
+  runSubagent?: (params: {
+    prompt: string
+    description?: string
+  }) => Promise<ToolResult>
+  /** Run a named local Agent Team (Phase D). */
+  runTeam?: (params: {
+    teamId: string
+    prompt: string
+  }) => Promise<ToolResult>
 }
 
 export interface ToolResult {

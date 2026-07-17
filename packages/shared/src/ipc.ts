@@ -11,6 +11,7 @@ import type { ChatStreamEvent } from './chat'
 import type { LLMProviderId, ModelInfo } from './types'
 import type { SessionMode } from './agent'
 import type { RuleFile, RuleSaveParams } from './rules'
+import type { SkillFile } from './skills'
 
 /** IPC channel names (invoke) */
 export const IPC_CHANNELS = {
@@ -43,6 +44,8 @@ export const IPC_CHANNELS = {
   RULES_LIST: 'rules:list',
   RULES_SAVE: 'rules:save',
   RULES_DELETE: 'rules:delete',
+  SKILLS_LIST: 'skills:list',
+  CHAT_COMPACT: 'chat:compact',
 } as const
 
 /** IPC event names (push) */
@@ -92,6 +95,8 @@ export interface IpcInvokeMap {
   [IPC_CHANNELS.RULES_LIST]: { args: []; result: RuleFile[] }
   [IPC_CHANNELS.RULES_SAVE]: { args: [params: RuleSaveParams]; result: RuleFile }
   [IPC_CHANNELS.RULES_DELETE]: { args: [absolutePath: string]; result: void }
+  [IPC_CHANNELS.SKILLS_LIST]: { args: []; result: SkillFile[] }
+  [IPC_CHANNELS.CHAT_COMPACT]: { args: [sessionId: string]; result: Message[] }
 }
 
 export interface IpcEventMap {

@@ -16,11 +16,36 @@ import {
 import { approvalService } from './approval'
 import { createE2eMockAgentProvider } from './e2e-mock-agent'
 import { getLlmRuntimeConfig, missingApiKeyMessage } from './llm-config'
+import { formatSkillPrompt, formatSkillUserMessage } from '@codex/agent-core'
+import {
+  appendMemoryNote,
+  createConcurrencyLimiter,
+  findTeam,
+  collectTeams,
+  runSubagentTask,
+  runTeam,
+} from '@codex/agent-core'
+import { DEFAULT_AGENT_PERMISSIONS } from '@codex/shared'
+import { skillsService } from './skills-service'
+import { teamsService } from './teams-service'
 import { rulesService } from './rules-service'
+import { hooksService } from './hooks-service'
 import { sessionService, settingsService } from './settings'
 import { workspaceService } from './workspace'
 
-const ALL_AGENT_TOOLS = ['Read', 'Grep', 'Glob', 'Write', 'StrReplace', 'Delete', 'Shell']
+const ALL_AGENT_TOOLS = [
+  'Read',
+  'Grep',
+  'Glob',
+  'Write',
+  'StrReplace',
+  'Delete',
+  'Shell',
+  'Task',
+  'Team',
+  'WebSearch',
+  'MemoryAppend',
+]
 
 export class AgentService {
   private abortControllers = new Map<string, AbortController>()
@@ -37,7 +62,8 @@ export class AgentService {
   }
 
   async run(params: ChatSendParams, webContents: WebContents): Promise<void> {
-    const { sessionId, content, attachments = [] } = params
+    const { sessionId, attachments = [] } = params
+    let content = params.content
     const settings = settingsService.get()
     const root = workspaceService.getRoot()
 
@@ -47,6 +73,18 @@ export class AgentService {
         message: 'ワークスペースを開いてから Agent を使用してください。',
       })
       return
+    }
+
+    const skillMatch = await skillsService.matchInvocation(content)
+    let skillPrompt: string | undefined
+    const teamMatch = skillMatch ? null : await teamsService.matchInvocation(content)
+    if (skillMatch) {
+      skillPrompt = formatSkillPrompt(skillMatch.skill, skillMatch.args)
+      content = formatSkillUserMessage(skillMatch.skill, skillMatch.args)
+    } else if (teamMatch) {
+      content = teamMatch.args
+        ? `/team ${teamMatch.team.id} ${teamMatch.args}`
+        : `/team ${teamMatch.team.id}`
     }
 
     const runtime = getLlmRuntimeConfig(settings, 'agent')
@@ -78,6 +116,52 @@ export class AgentService {
 
     this.updateSessionTitle(sessionId, content)
 
+    if (teamMatch) {
+      try {
+        const toolCallId = `team-${teamMatch.team.id}`
+        this.emit(webContents, sessionId, {
+          type: 'tool_call_start',
+          toolCallId,
+          tool: 'Team',
+          args: { team: teamMatch.team.id, prompt: teamMatch.args || content },
+        })
+        const result = await teamsService.run(
+          teamMatch.team.id,
+          teamMatch.args || 'Review this workspace',
+          abortController.signal,
+        )
+        this.emit(webContents, sessionId, {
+          type: 'tool_call_result',
+          toolCallId,
+          tool: 'Team',
+          result: result.synthesis,
+          success: result.success,
+        })
+        const saved = sessionService.addMessage(sessionId, {
+          sessionId,
+          role: 'assistant',
+          content: result.synthesis,
+          toolCalls: [
+            {
+              id: toolCallId,
+              name: 'Team',
+              args: { team: teamMatch.team.id, prompt: teamMatch.args || content },
+              result: result.synthesis,
+              status: result.success ? 'done' : 'error',
+            },
+          ],
+        })
+        this.emit(webContents, sessionId, { type: 'done', messageId: saved.id })
+        void hooksService.onAgentComplete(sessionId)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Team failed'
+        this.emit(webContents, sessionId, { type: 'error', message })
+      } finally {
+        this.abortControllers.delete(sessionId)
+      }
+      return
+    }
+
     const history = this.buildAgentHistory(sessionService.getMessages(sessionId), attachments)
     let assistantContent = ''
     const toolCalls: ToolCallRecord[] = []
@@ -96,6 +180,12 @@ export class AgentService {
       ...attachments.map((a) => a.path),
     ]
     const rulesPrompt = await rulesService.buildPrompt(contextPaths)
+    const permissions = {
+      ...DEFAULT_AGENT_PERMISSIONS,
+      ...settings.agent.permissions,
+    }
+    const runLimited = createConcurrencyLimiter(settings.agent.maxSubagents ?? 3)
+    const userPromptForMemory = content
 
     try {
       for await (const event of this.orchestrator.run(history, {
@@ -107,11 +197,67 @@ export class AgentService {
         maxIterations: settings.agent.maxIterations,
         enabledTools: ALL_AGENT_TOOLS,
         yoloMode: isE2eMock ? false : settings.agent.yoloMode,
+        permissions,
+        compactTokenThreshold: settings.agent.compactTokenThreshold,
         signal: abortController.signal,
         resolvePath: (p) => workspaceService.resolveWithinWorkspace(p),
         getRelativePath: (p) => workspaceService.getRelativePath(p),
         onFileChanged: notifyFileChanged,
         rulesPrompt,
+        skillPrompt,
+        subagentDepth: 0,
+        runSubagent: async ({ prompt, description }) => {
+          const result = await runLimited(() =>
+            runSubagentTask({
+              prompt,
+              description,
+              workspaceRoot: root,
+              sessionId,
+              modelId: runtime.model,
+              apiKey: runtime.apiKey,
+              baseUrl: runtime.baseUrl,
+              signal: abortController.signal,
+              llm,
+              registry: defaultToolRegistry,
+              resolvePath: (p) => workspaceService.resolveWithinWorkspace(p),
+              getRelativePath: (p) => workspaceService.getRelativePath(p),
+              rulesPrompt,
+              parentDepth: 0,
+            }),
+          )
+          return {
+            success: result.success,
+            output: result.output,
+            metadata: { description: result.description },
+          }
+        },
+        runTeam: async ({ teamId, prompt }) => {
+          const teams = await collectTeams(root)
+          const team = findTeam(teams, teamId)
+          if (!team) {
+            return { success: false, output: `Error: unknown team "${teamId}"` }
+          }
+          const result = await runTeam({
+            workspaceRoot: root,
+            team,
+            task: prompt,
+            modelId: runtime.model,
+            apiKey: runtime.apiKey,
+            baseUrl: runtime.baseUrl,
+            signal: abortController.signal,
+            llm,
+            registry: defaultToolRegistry,
+            resolvePath: (p) => workspaceService.resolveWithinWorkspace(p),
+            getRelativePath: (p) => workspaceService.getRelativePath(p),
+            rulesPrompt,
+            maxConcurrency: settings.agent.maxSubagents ?? 3,
+          })
+          return {
+            success: result.success,
+            output: `${result.synthesis}\n\n(Board: ${result.boardPath})`,
+            metadata: { teamId: result.teamId, boardPath: result.boardPath },
+          }
+        },
         requestApproval: async (request: ApprovalRequest) => {
           this.emit(webContents, sessionId, {
             type: 'approval_required',
@@ -173,6 +319,12 @@ export class AgentService {
       })
 
       this.emit(webContents, sessionId, { type: 'done', messageId: saved.id })
+      void hooksService.onAgentComplete(sessionId)
+
+      if (settings.agent.autoMemory && assistantContent.trim()) {
+        const note = `${userPromptForMemory.slice(0, 100)} → ${assistantContent.slice(0, 180)}`
+        void appendMemoryNote(root, note).catch(() => undefined)
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Agent failed'
       this.emit(webContents, sessionId, { type: 'error', message })

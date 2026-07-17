@@ -21,6 +21,7 @@ export function AIPanel() {
   const selectSession = useAppStore((s) => s.selectSession)
   const sendMessage = useAppStore((s) => s.sendMessage)
   const cancelChat = useAppStore((s) => s.cancelChat)
+  const compactChat = useAppStore((s) => s.compactChat)
   const setSessionMode = useAppStore((s) => s.setSessionMode)
   const pendingApproval = useAppStore((s) => s.pendingApproval)
   const respondApproval = useAppStore((s) => s.respondApproval)
@@ -93,6 +94,15 @@ export function AIPanel() {
             }}
           >
             設定
+          </button>
+          <button
+            type="button"
+            title="履歴を Compact"
+            className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-white/10 disabled:opacity-40"
+            disabled={!activeSessionId || isStreaming || messages.length <= 4}
+            onClick={() => void compactChat()}
+          >
+            Compact
           </button>
           <button
             type="button"

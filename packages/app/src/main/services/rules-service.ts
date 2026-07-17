@@ -4,6 +4,8 @@ import { app } from 'electron'
 import {
   collectRules,
   loadRules,
+  loadProjectContext,
+  loadMemory,
   serializeRuleFile,
   type LoadRulesOptions,
 } from '@codex/agent-core'
@@ -37,7 +39,12 @@ export class RulesService {
 
   async buildPrompt(contextPaths: string[] = []): Promise<string> {
     const root = workspaceService.getRoot()
-    return loadRules(root, { globalRulesDir: globalRulesDir(), contextPaths })
+    const [rules, project, memory] = await Promise.all([
+      loadRules(root, { globalRulesDir: globalRulesDir(), contextPaths }),
+      root ? loadProjectContext(root) : Promise.resolve(''),
+      root ? loadMemory(root) : Promise.resolve(''),
+    ])
+    return `${rules}${project}${memory}`
   }
 
   async loadOptions(contextPaths?: string[]): Promise<LoadRulesOptions> {

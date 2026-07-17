@@ -165,4 +165,38 @@ describe('AgentOrchestrator edge cases', () => {
 
     expect(events).toEqual([{ type: 'error', message: 'stream failed' }])
   })
+
+  it('denies tools blocked by permission policy without calling approval', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'codex-orch-'))
+    try {
+      const registry = new ToolRegistry([writeTool])
+      const llm = createMockProvider([
+        [{ type: 'tool_calls', calls: [{ id: 'tc1', name: 'Write', arguments: { path: 'x.txt', content: 'nope' } }] }],
+        [{ type: 'text', delta: 'Blocked.' }],
+      ])
+      const orchestrator = new AgentOrchestrator(llm, registry)
+      let approvals = 0
+
+      const events = await collectOrchestratorEvents(
+        orchestrator.run([{ role: 'user', content: 'Write' }], createAgentRunContext(root, {
+          yoloMode: false,
+          permissions: { read: 'allow', edit: 'deny', shell: 'deny', network: 'deny' },
+          enabledTools: ['Write'],
+          resolvePath: (p) => join(root, p),
+          getRelativePath: (p) => p.replace(`${root}/`, ''),
+          requestApproval: async () => {
+            approvals++
+            return true
+          },
+        })),
+      )
+
+      expect(approvals).toBe(0)
+      const result = events.find((e) => e.type === 'tool_call_result')
+      expect(result?.success).toBe(false)
+      expect(String(result?.result)).toMatch(/denied by permission policy/)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })

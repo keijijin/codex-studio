@@ -9,6 +9,8 @@ import { auditLog } from '../services/audit-log'
 import { fileWatcherService } from '../services/file-watcher'
 import { terminalService } from '../services/terminal-service'
 import { rulesService } from '../services/rules-service'
+import { skillsService } from '../services/skills-service'
+import { hooksService } from '../services/hooks-service'
 import { assertFilePath, assertNonEmptyString, assertSessionId, assertTerminalId } from '../utils/validate-ipc'
 
 export function registerIpcHandlers(): void {
@@ -66,6 +68,7 @@ export function registerIpcHandlers(): void {
     await workspaceService.writeFile(target, content)
     fileWatcherService.markInternalWrite(target)
     void auditLog('file:write', { path: target, bytes: content.length })
+    void hooksService.onFileSave(target)
   })
 
   ipcMain.handle(IPC_CHANNELS.SETTINGS_GET, () => {
@@ -166,5 +169,13 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.RULES_DELETE, async (_event, absolutePath: string) => {
     await rulesService.remove(assertFilePath(absolutePath))
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SKILLS_LIST, async () => {
+    return skillsService.list()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.CHAT_COMPACT, async (_event, sessionId: string) => {
+    return chatService.compactSession(assertSessionId(sessionId))
   })
 }

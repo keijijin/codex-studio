@@ -20,12 +20,13 @@ import {
   missingApiKeyMessage,
 } from './llm-config'
 import { DEFAULT_OLLAMA_BASE_URL } from '@codex/shared'
+import { formatSkillPrompt, formatSkillUserMessage, compactMessageContents, detectReplyLanguage, formatLanguageInstruction } from '@codex/agent-core'
 import { rulesService } from './rules-service'
+import { skillsService } from './skills-service'
 
 const SYSTEM_PROMPT = `You are Codex Studio, an AI coding assistant integrated into a developer IDE.
 Help the user with code understanding, debugging, refactoring, and general programming questions.
 When file attachments are provided, use them as context for your answers.
-Respond in the same language the user writes in (Japanese or English).
 Use markdown for code blocks and formatting.`
 
 export class ChatService {
@@ -85,7 +86,15 @@ export class ChatService {
   }
 
   private async sendAsk(params: ChatSendParams, webContents: WebContents): Promise<void> {
-    const { sessionId, content, attachments = [] } = params
+    const { sessionId, attachments = [] } = params
+    let content = params.content
+
+    const skillMatch = await skillsService.matchInvocation(content)
+    let skillPrompt = ''
+    if (skillMatch) {
+      skillPrompt = `\n\n${formatSkillPrompt(skillMatch.skill, skillMatch.args)}`
+      content = formatSkillUserMessage(skillMatch.skill, skillMatch.args)
+    }
 
     const settings = settingsService.get()
     const runtime = getLlmRuntimeConfig(settings, 'chat')
@@ -118,7 +127,7 @@ export class ChatService {
       ...(params.contextPaths ?? []),
       ...attachments.map((a) => a.path),
     ]
-    const rulesPrompt = await rulesService.buildPrompt(contextPaths)
+    const rulesPrompt = (await rulesService.buildPrompt(contextPaths)) + skillPrompt
     const llmMessages = this.buildMessages(history, attachments, rulesPrompt)
     const llm = getProviderInstance(runtime.provider)
 
@@ -160,7 +169,11 @@ export class ChatService {
     latestAttachments: Attachment[],
     rulesPrompt = '',
   ): ChatMessage[] {
-    const messages: ChatMessage[] = [{ role: 'system', content: SYSTEM_PROMPT + rulesPrompt }]
+    const lastUser = [...history].reverse().find((m) => m.role === 'user')?.content ?? ''
+    const languageBlock = formatLanguageInstruction(detectReplyLanguage(lastUser))
+    const messages: ChatMessage[] = [
+      { role: 'system', content: SYSTEM_PROMPT + languageBlock + rulesPrompt },
+    ]
 
     for (const msg of history) {
       if (msg.role === 'user' || msg.role === 'assistant') {
@@ -195,6 +208,27 @@ export class ChatService {
   private updateSessionTitle(sessionId: string, content: string): void {
     const title = content.slice(0, 40) + (content.length > 40 ? '...' : '')
     sessionService.updateTitle(sessionId, title)
+  }
+
+  /** Compact persisted chat history for a session (manual Compact). */
+  compactSession(sessionId: string): Message[] {
+    const existing = sessionService.getMessages(sessionId)
+    if (existing.length <= 4) return existing
+
+    const compacted = compactMessageContents(
+      existing.map((m) => ({ role: m.role, content: m.content })),
+      6,
+    )
+    const now = new Date().toISOString()
+    const next: Message[] = compacted.map((m, i) => ({
+      id: existing[i]?.id ?? `compact-${sessionId}-${i}`,
+      sessionId,
+      role: m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user',
+      content: m.content,
+      createdAt: existing[Math.min(i, existing.length - 1)]?.createdAt ?? now,
+    }))
+    sessionService.replaceMessages(sessionId, next)
+    return next
   }
 
   private emit(webContents: WebContents, sessionId: string, event: ChatStreamEvent): void {

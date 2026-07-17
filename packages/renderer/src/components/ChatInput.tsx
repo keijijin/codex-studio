@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react'
-import type { Attachment, FileNode } from '@codex/shared'
+import { useEffect, useRef, useState } from 'react'
+import type { Attachment, FileNode, SkillFile } from '@codex/shared'
 import { IPC_CHANNELS } from '@codex/shared'
 import { useAppStore } from '@renderer/store/app-store'
 
@@ -23,14 +23,42 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [suggestions, setSuggestions] = useState<FileNode[]>([])
+  const [skills, setSkills] = useState<SkillFile[]>([])
+  const [skillSuggestions, setSkillSuggestions] = useState<SkillFile[]>([])
+  const workspace = useAppStore((s) => s.workspace)
   const fileTree = useAppStore((s) => s.fileTree)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const isComposingRef = useRef(false)
 
   const allFiles = flattenFiles(fileTree)
 
+  useEffect(() => {
+    if (!workspace) {
+      setSkills([])
+      return
+    }
+    void window.codex
+      .invoke(IPC_CHANNELS.SKILLS_LIST)
+      .then(setSkills)
+      .catch(() => setSkills([]))
+  }, [workspace])
+
   const handleChange = (value: string) => {
     setText(value)
+
+    const skillMatch = value.match(/^\/([a-zA-Z0-9_-]*)$/)
+    if (skillMatch) {
+      const query = skillMatch[1].toLowerCase()
+      setSkillSuggestions(
+        skills
+          .filter((s) => s.name.includes(query) || s.description.toLowerCase().includes(query))
+          .slice(0, 8),
+      )
+      setSuggestions([])
+      return
+    }
+    setSkillSuggestions([])
+
     const match = value.match(/@(\S*)$/)
     if (match) {
       const query = match[1].toLowerCase()
@@ -42,6 +70,12 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
     } else {
       setSuggestions([])
     }
+  }
+
+  const selectSkill = (skill: SkillFile) => {
+    setText(`/${skill.name} `)
+    setSkillSuggestions([])
+    textareaRef.current?.focus()
   }
 
   const selectFile = async (file: FileNode) => {
@@ -66,6 +100,8 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
     onSend(trimmed, attachments)
     setText('')
     setAttachments([])
+    setSkillSuggestions([])
+    setSuggestions([])
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -104,6 +140,24 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
         </div>
       )}
 
+      {skillSuggestions.length > 0 && (
+        <div className="mb-2 max-h-40 overflow-auto rounded border border-surface-border bg-surface">
+          {skillSuggestions.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className="block w-full truncate px-3 py-1.5 text-left text-xs hover:bg-white/10"
+              onClick={() => selectSkill(s)}
+            >
+              <span className="text-accent">/{s.name}</span>
+              {s.description ? (
+                <span className="ml-2 text-text-muted">{s.description}</span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+      )}
+
       {suggestions.length > 0 && (
         <div className="mb-2 max-h-32 overflow-auto rounded border border-surface-border bg-surface">
           {suggestions.map((f) => (
@@ -132,13 +186,17 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
           isComposingRef.current = false
         }}
         onKeyDown={handleKeyDown}
-        placeholder="メッセージを入力... (@file で添付、Enter で送信)"
+        placeholder="メッセージを入力... (/skill · @file · Enter で送信)"
         disabled={disabled}
       />
 
       <div className="mt-2 flex items-center justify-between">
         <span className="text-xs text-text-muted">
-          {isStreaming ? '生成中... (Esc で中断)' : 'Shift+Enter で改行'}
+          {isStreaming
+            ? '生成中... (Esc で中断)'
+            : skills.length > 0
+              ? `Shift+Enter で改行 · / で Skills（${skills.length}）`
+              : 'Shift+Enter で改行'}
         </span>
         {isStreaming ? (
           <button

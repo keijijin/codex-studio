@@ -40,6 +40,20 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
 
   const filePathArg = getFilePathFromArgs(toolCall.args)
   const writePreview = toolCall.name === 'Write' ? getWritePreview(toolCall.args) : null
+  const taskLabel =
+    toolCall.name === 'Task' && toolCall.args && typeof toolCall.args === 'object'
+      ? String((toolCall.args as { description?: string; prompt?: string }).description
+        || (toolCall.args as { prompt?: string }).prompt
+        || '').slice(0, 80)
+      : null
+  const searchQuery =
+    toolCall.name === 'WebSearch' && toolCall.args && typeof toolCall.args === 'object'
+      ? String((toolCall.args as { query?: string }).query ?? '')
+      : null
+  const teamLabel =
+    toolCall.name === 'Team' && toolCall.args && typeof toolCall.args === 'object'
+      ? String((toolCall.args as { team?: string }).team ?? '')
+      : null
   const canOpen =
     toolCall.status === 'done' &&
     filePathArg &&
@@ -64,6 +78,15 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
         <span className="font-medium text-text-secondary">{toolCall.name}</span>
         {filePathArg && (
           <span className="truncate text-text-muted">{filePathArg}</span>
+        )}
+        {taskLabel && (
+          <span className="truncate text-accent/90">sub · {taskLabel}</span>
+        )}
+        {searchQuery && (
+          <span className="truncate text-text-muted">🔍 {searchQuery}</span>
+        )}
+        {teamLabel && (
+          <span className="truncate text-accent/90">team · {teamLabel}</span>
         )}
         <span className="ml-auto text-text-muted">{expanded ? '▼' : '▶'}</span>
       </button>

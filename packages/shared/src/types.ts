@@ -53,6 +53,9 @@ export interface ModelInfo {
   provider: LLMProviderId
 }
 
+import type { AgentPermissions } from './permissions'
+import { DEFAULT_AGENT_PERMISSIONS } from './permissions'
+
 export interface AppSettings {
   general: {
     theme: 'dark' | 'light' | 'system'
@@ -69,6 +72,13 @@ export interface AppSettings {
   agent: {
     maxIterations: number
     yoloMode: boolean
+    permissions: AgentPermissions
+    /** Auto-compact when estimated history tokens exceed this (0 = off) */
+    compactTokenThreshold: number
+    /** Append session notes to .codex/memory/MEMORY.md after Agent completes */
+    autoMemory: boolean
+    /** Max concurrent Task subagents (1–8) */
+    maxSubagents: number
   }
 }
 
@@ -86,6 +96,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   agent: {
     maxIterations: 100,
     yoloMode: false,
+    permissions: { ...DEFAULT_AGENT_PERMISSIONS },
+    compactTokenThreshold: 80_000,
+    autoMemory: false,
+    maxSubagents: 3,
   },
 }
 

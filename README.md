@@ -21,12 +21,16 @@ pnpm dev
 - [x] **組み込みターミナル**（node-pty + xterm）
 - [x] **XML / Java シンタックスハイライト**
 - [x] 最近開いたワークスペース
+- [x] **Skills / Permission / Compact**（Phase A）
+- [x] **Hooks / Headless CLI**（Phase B）
+- [x] **Subagents / Memory / WebSearch**（Phase C）
+- [x] **Local Agent Teams / 共有 Skills**（Phase D・Cloud は見送り）
 - [x] Playwright E2E（5 件）
 - [x] **Agent ベンチマーク 20 件**（mock LLM）
 - [x] electron-builder（macOS / Windows / Linux）
 - [x] GitHub Releases 自動化（`v*` tag）
 - [x] [α テスト計画](./docs/alpha-test-plan.md) / [フィードバック](./docs/alpha-feedback-template.md)
-- [x] [ユーザーガイド](./docs/user/guide.md) / [セキュリティチェックリスト](./docs/security-checklist.md) / [リリース手順](./docs/release.md)
+- [x] [ユーザーガイド](./docs/user/guide.md) / [操作マニュアル](./docs/user/操作マニュアル.md) / [セキュリティチェックリスト](./docs/security-checklist.md) / [リリース手順](./docs/release.md)
 
 **リポジトリ**: https://github.com/keijijin/codex-studio
 
@@ -35,9 +39,11 @@ pnpm dev
 ```bash
 pnpm dev          # 開発サーバー
 pnpm build        # ビルド
-pnpm test         # ユニット + ベンチマーク（27 件）
+pnpm test         # ユニット + ベンチマーク
 pnpm test:benchmark  # Agent ベンチマーク 20 件
 pnpm test:e2e     # E2E（5 件）
+pnpm cli -- agent "..." -w .   # Headless Agent（CLI）
+pnpm cli -- team list -w .     # Local Agent Teams
 pnpm package:mac    # macOS .dmg
 pnpm package:win    # Windows インストーラー
 pnpm package:linux  # Linux AppImage + .deb
@@ -66,7 +72,8 @@ packages/
 ├── indexer/       # 索引・ripgrep
 ├── llm-adapters/  # OpenAI / Anthropic / Ollama
 ├── tools/         # Agent ツール
-└── agent-core/    # Orchestrator
+├── agent-core/    # Orchestrator + Hooks + Headless
+└── cli/           # Headless CLI (codex-studio agent)
 ```
 
 ## ドキュメント
@@ -74,10 +81,14 @@ packages/
 | 文書 | パス |
 |------|------|
 | ユーザーガイド | [docs/user/guide.md](./docs/user/guide.md) |
+| **操作マニュアル（拡張込み）** | [docs/user/操作マニュアル.md](./docs/user/操作マニュアル.md) |
 | α テスト計画 | [docs/alpha-test-plan.md](./docs/alpha-test-plan.md) |
 | リリース | [docs/release.md](./docs/release.md) / [Releases](https://github.com/keijijin/codex-studio/releases) |
 | セキュリティ | [docs/security-checklist.md](./docs/security-checklist.md) |
 | アーキテクチャ | [docs/03-アーキテクチャ定義書.md](./docs/03-アーキテクチャ定義書.md) |
+| エージェント拡張プラン | [docs/08-エージェント拡張プラン.md](./docs/08-エージェント拡張プラン.md) |
+| Phase D 設計ゲート | [docs/09-PhaseD-設計ゲート.md](./docs/09-PhaseD-設計ゲート.md) |
+| ToDo | [docs/07-TODOリスト.md](./docs/07-TODOリスト.md) |
 
 ## 技術スタック
 

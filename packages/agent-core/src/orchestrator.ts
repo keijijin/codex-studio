@@ -1,9 +1,13 @@
 import type { LLMProvider, AgentMessage, ToolCall } from '@codex/llm-adapters'
-import type { ApprovalRequest } from '@codex/shared'
-import type { ToolRegistry } from '@codex/tools'
+import type { AgentPermissions, ApprovalRequest } from '@codex/shared'
+import { DEFAULT_AGENT_PERMISSIONS, permissionForTool } from '@codex/shared'
+import type { ToolRegistry, ToolResult } from '@codex/tools'
 import type { ToolContext } from '@codex/tools'
-import { trimAgentHistory } from './context-builder'
+import { estimateMessagesTokens, trimAgentHistory } from './context-builder'
+import { loadProjectContext } from './project-context'
 import { loadRules } from './rules-loader'
+import { loadMemory } from './memory'
+import { detectReplyLanguage, formatLanguageInstruction } from './language'
 
 export interface AgentRunContext {
   workspaceRoot: string
@@ -14,13 +18,30 @@ export interface AgentRunContext {
   maxIterations: number
   enabledTools: string[]
   yoloMode: boolean
+  permissions?: AgentPermissions
+  /** Auto-compact when estimated history tokens exceed this (0 = use default budget only) */
+  compactTokenThreshold?: number
   signal: AbortSignal
   resolvePath: (path: string) => string
   getRelativePath: (absolutePath: string) => string
   onFileChanged?: (absolutePath: string) => void
   requestApproval?: (request: ApprovalRequest) => Promise<boolean>
-  /** Prebuilt rules prompt (global + workspace). Falls back to workspace .codex/rules only. */
+  /** Prebuilt rules + project context + memory prompt. */
   rulesPrompt?: string
+  /** Extra system instructions from an invoked Skill */
+  skillPrompt?: string
+  /** Nested subagent depth (0 = top-level parent) */
+  subagentDepth?: number
+  /** Wired for Task tool */
+  runSubagent?: (params: {
+    prompt: string
+    description?: string
+  }) => Promise<ToolResult>
+  /** Wired for Team tool (Phase D local teams) */
+  runTeam?: (params: {
+    teamId: string
+    prompt: string
+  }) => Promise<ToolResult>
 }
 
 export type AgentOrchestratorEvent =
@@ -31,18 +52,56 @@ export type AgentOrchestratorEvent =
   | { type: 'done' }
   | { type: 'error'; message: string }
 
-const buildSystemPrompt = (workspaceRoot: string, rules: string) => `You are Codex Studio, an AI coding assistant with access to tools for reading, searching, and modifying the codebase.
+const buildSystemPrompt = (
+  workspaceRoot: string,
+  rules: string,
+  skillPrompt?: string,
+  languageBlock = '',
+  isSubagent = false,
+) => {
+  const skillBlock = skillPrompt ? `\n\n${skillPrompt}` : ''
+  if (isSubagent) {
+    return `You are a read-only Codex Studio subagent.
+
+Workspace root: ${workspaceRoot}
+
+You may only use Read, Grep, and Glob. Do not attempt to modify files or run shell commands.
+Return a concise factual report for the parent agent.
+Use markdown for formatting.${languageBlock}${rules}${skillBlock}`
+  }
+
+  return `You are Codex Studio, an AI coding assistant with access to tools for reading, searching, and modifying the codebase.
 
 Workspace root: ${workspaceRoot}
 
 Tools available:
 - Read, Grep, Glob — inspect and search the codebase
-- Write, StrReplace, Delete — modify files (requires user approval)
-- Shell — run commands (requires user approval)
+- Write, StrReplace, Delete — modify files (subject to permission policy)
+- Shell — run commands (subject to permission policy)
+- Task — spawn a read-only subagent for a focused investigation (parallel Tasks allowed)
+- Team — run a local multi-role team from .codex/teams/ (shared BOARD.md)
+- WebSearch — search the public web for external docs / errors
+- MemoryAppend — append durable project notes to .codex/memory/MEMORY.md
 
-For code questions, use Read/Grep/Glob first. To make changes, use Write or StrReplace.
+For code questions, use Read/Grep/Glob first. For independent research threads, spawn Task subagents then synthesize.
+For multi-perspective reviews, prefer Team when a matching team exists.
+To make changes, use Write or StrReplace.
 Use workspace-relative paths (e.g. README.md, packages/app/src/main/index.ts).
-Respond in the user's language (Japanese or English). Use markdown for formatting.${rules}`
+Use markdown for formatting.${languageBlock}${rules}${skillBlock}`
+}
+
+function resolvePermission(
+  toolName: string,
+  yoloMode: boolean,
+  permissions: AgentPermissions,
+): 'allow' | 'ask' | 'deny' {
+  if (yoloMode) return 'allow'
+  return permissionForTool(toolName, permissions)
+}
+
+function isTaskTool(name: string): boolean {
+  return name === 'Task' || name.toLowerCase() === 'task'
+}
 
 export class AgentOrchestrator {
   constructor(
@@ -54,9 +113,32 @@ export class AgentOrchestrator {
     history: AgentMessage[],
     ctx: AgentRunContext,
   ): AsyncGenerator<AgentOrchestratorEvent> {
-    const rules = ctx.rulesPrompt ?? (await loadRules(ctx.workspaceRoot))
+    const permissions = ctx.permissions ?? DEFAULT_AGENT_PERMISSIONS
+    const depth = ctx.subagentDepth ?? 0
+    let rules = ctx.rulesPrompt
+    if (rules === undefined) {
+      const [rulesText, projectCtx, memory] = await Promise.all([
+        loadRules(ctx.workspaceRoot),
+        loadProjectContext(ctx.workspaceRoot),
+        loadMemory(ctx.workspaceRoot),
+      ])
+      rules = `${rulesText}${projectCtx}${memory}`
+    }
+
+    const lastUserText = [...history].reverse().find((m) => m.role === 'user')?.content ?? ''
+    const languageBlock = formatLanguageInstruction(detectReplyLanguage(lastUserText))
+
     let messages: AgentMessage[] = [
-      { role: 'system', content: buildSystemPrompt(ctx.workspaceRoot, rules) },
+      {
+        role: 'system',
+        content: buildSystemPrompt(
+          ctx.workspaceRoot,
+          rules,
+          ctx.skillPrompt,
+          languageBlock,
+          depth > 0,
+        ),
+      },
       ...history,
     ]
 
@@ -68,7 +150,15 @@ export class AgentOrchestrator {
       resolvePath: ctx.resolvePath,
       getRelativePath: ctx.getRelativePath,
       onFileChanged: ctx.onFileChanged,
+      subagentDepth: depth,
+      runSubagent: ctx.runSubagent,
+      runTeam: ctx.runTeam,
     }
+
+    const budget =
+      ctx.compactTokenThreshold && ctx.compactTokenThreshold > 0
+        ? ctx.compactTokenThreshold
+        : undefined
 
     for (let i = 0; i < ctx.maxIterations; i++) {
       if (ctx.signal.aborted) {
@@ -76,7 +166,11 @@ export class AgentOrchestrator {
         return
       }
 
-      messages = trimAgentHistory(messages)
+      if (budget && estimateMessagesTokens(messages) > budget) {
+        messages = trimAgentHistory(messages, budget)
+      } else {
+        messages = trimAgentHistory(messages)
+      }
 
       let assistantText = ''
       let pendingToolCalls: ToolCall[] = []
@@ -110,7 +204,42 @@ export class AgentOrchestrator {
         tool_calls: pendingToolCalls,
       })
 
-      for (const call of pendingToolCalls) {
+      const resultsById = new Map<string, { result: ToolResult; tool: string }>()
+
+      const taskCalls = pendingToolCalls.filter((c) => isTaskTool(c.name))
+      const otherCalls = pendingToolCalls.filter((c) => !isTaskTool(c.name))
+
+      // Parallel Task subagents (start events first, then await all)
+      for (const call of taskCalls) {
+        yield {
+          type: 'tool_call_start',
+          toolCallId: call.id,
+          tool: call.name,
+          args: call.arguments,
+        }
+      }
+
+      if (taskCalls.length > 0) {
+        const taskResults = await Promise.all(
+          taskCalls.map(async (call) => {
+            const result = await this.executeToolCall(call, ctx, permissions, baseToolCtx)
+            return { call, result }
+          }),
+        )
+        for (const { call, result } of taskResults) {
+          resultsById.set(call.id, { result, tool: call.name })
+          yield {
+            type: 'tool_call_result',
+            toolCallId: call.id,
+            tool: call.name,
+            result: result.output,
+            success: result.success,
+            filePath: typeof result.metadata?.path === 'string' ? result.metadata.path : undefined,
+          }
+        }
+      }
+
+      for (const call of otherCalls) {
         yield {
           type: 'tool_call_start',
           toolCallId: call.id,
@@ -118,66 +247,51 @@ export class AgentOrchestrator {
           args: call.arguments,
         }
 
-        const tool = this.registry.get(call.name)
-        const needsApproval = tool?.requiresApproval && !ctx.yoloMode
+        const result = await this.executeToolCall(call, ctx, permissions, baseToolCtx)
 
-        let result
-        if (needsApproval) {
-          const preview = await this.registry.execute(call.name, call.arguments, {
-            ...baseToolCtx,
-            executeMode: 'preview',
-          })
+        resultsById.set(call.id, { result, tool: call.name })
 
-          if (!preview.success) {
-            result = preview
-          } else {
-            const meta = preview.metadata ?? {}
-            const approvalReq: ApprovalRequest = {
-              toolCallId: call.id,
-              tool: call.name,
-              path: String(meta.path ?? ''),
-              relativePath: String(meta.relativePath ?? meta.path ?? call.name),
-              oldContent: String(meta.oldContent ?? ''),
-              newContent: String(meta.newContent ?? ''),
-              summary: preview.output,
-              action: meta.action as ApprovalRequest['action'],
-            }
-
-            yield { type: 'approval_required', request: approvalReq }
-
-            const approved = ctx.requestApproval
-              ? await ctx.requestApproval(approvalReq)
-              : false
-
-            if (!approved) {
-              result = { success: false, output: 'Error: user rejected the change' }
-            } else {
-              result = await this.registry.execute(call.name, call.arguments, {
+        if (result.metadata?.__approvalRequest) {
+          const approvalReq = result.metadata.__approvalRequest as ApprovalRequest
+          yield { type: 'approval_required', request: approvalReq }
+          const approved = ctx.requestApproval
+            ? await ctx.requestApproval(approvalReq)
+            : false
+          const applied = approved
+            ? await this.registry.execute(call.name, call.arguments, {
                 ...baseToolCtx,
                 executeMode: 'apply',
               })
-            }
+            : { success: false, output: 'Error: user rejected the change' }
+          resultsById.set(call.id, { result: applied, tool: call.name })
+          yield {
+            type: 'tool_call_result',
+            toolCallId: call.id,
+            tool: call.name,
+            result: applied.output,
+            success: applied.success,
+            filePath: typeof applied.metadata?.path === 'string' ? applied.metadata.path : undefined,
           }
         } else {
-          result = await this.registry.execute(call.name, call.arguments, {
-            ...baseToolCtx,
-            executeMode: 'apply',
-          })
+          yield {
+            type: 'tool_call_result',
+            toolCallId: call.id,
+            tool: call.name,
+            result: result.output,
+            success: result.success,
+            filePath: typeof result.metadata?.path === 'string' ? result.metadata.path : undefined,
+          }
         }
+      }
 
-        yield {
-          type: 'tool_call_result',
-          toolCallId: call.id,
-          tool: call.name,
-          result: result.output,
-          success: result.success,
-          filePath: typeof result.metadata?.path === 'string' ? result.metadata.path : undefined,
-        }
-
+      // Preserve tool message order matching the model's tool_calls list
+      for (const call of pendingToolCalls) {
+        const entry = resultsById.get(call.id)
+        const content = entry?.result.output ?? 'Error: missing tool result'
         messages.push({
           role: 'tool',
           tool_call_id: call.id,
-          content: result.output,
+          content,
         })
       }
     }
@@ -186,5 +300,56 @@ export class AgentOrchestrator {
       type: 'error',
       message: `ツール呼び出しの上限（${ctx.maxIterations}回）に達しました。設定の「最大イテレーション」を引き上げて再実行してください。`,
     }
+  }
+
+  private async executeToolCall(
+    call: ToolCall,
+    ctx: AgentRunContext,
+    permissions: AgentPermissions,
+    baseToolCtx: Omit<ToolContext, 'executeMode'>,
+  ): Promise<ToolResult> {
+    const tool = this.registry.get(call.name)
+    const perm = resolvePermission(call.name, ctx.yoloMode, permissions)
+
+    if (perm === 'deny') {
+      return {
+        success: false,
+        output: `Error: tool "${call.name}" is denied by permission policy`,
+      }
+    }
+
+    if (perm === 'ask' && tool?.requiresApproval) {
+      const preview = await this.registry.execute(call.name, call.arguments, {
+        ...baseToolCtx,
+        executeMode: 'preview',
+      })
+
+      if (!preview.success) {
+        return preview
+      }
+
+      const meta = preview.metadata ?? {}
+      const approvalReq: ApprovalRequest = {
+        toolCallId: call.id,
+        tool: call.name,
+        path: String(meta.path ?? ''),
+        relativePath: String(meta.relativePath ?? meta.path ?? call.name),
+        oldContent: String(meta.oldContent ?? ''),
+        newContent: String(meta.newContent ?? ''),
+        summary: preview.output,
+        action: meta.action as ApprovalRequest['action'],
+      }
+
+      return {
+        success: true,
+        output: preview.output,
+        metadata: { ...meta, __approvalRequest: approvalReq },
+      }
+    }
+
+    return this.registry.execute(call.name, call.arguments, {
+      ...baseToolCtx,
+      executeMode: 'apply',
+    })
   }
 }

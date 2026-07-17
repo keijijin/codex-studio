@@ -4,7 +4,7 @@
 |------|------|
 | 版 | 1.0 |
 | 作成日 | 2026-07-15 |
-| 更新日 | 2026-07-15（Sprint 6 同期） |
+| 更新日 | 2026-07-17（エージェント拡張 Phase A〜D 追加） |
 
 > ステータス: `[ ]` 未着手 / `[~]` 進行中 / `[x]` 完了 / `[-]` キャンセル
 
@@ -266,7 +266,66 @@
 
 ---
 
-## 進捗サマリー（2026-07-15 時点）
+## Phase A〜D: Claude Code 相当（エージェント拡張）
+
+> 詳細プラン: [08-エージェント拡張プラン.md](./08-エージェント拡張プラン.md)  
+> 方針: Skills / Hooks / Headless / Subagents を優先。Cloud / Teams は後回し。
+
+### Phase A — Skills / 常駐コンテキスト / Permission / Compact
+
+- [x] Skills スキーマ定義（`SKILL.md` / frontmatter）
+- [x] Skills ローダー（`.codex/skills/`）
+- [x] チャット入力の `/skill` 起動・候補表示
+- [x] Skills 実行時の system / user 注入
+- [x] サンプル Skills（review / security / explain 等）3 本以上
+- [x] プロジェクト常駐 MD 読込（`CODEX.md` / `CLAUDE.md` / `AGENTS.md`）
+- [x] Rules と常駐 MD の優先順位・結合ルール文書化
+- [x] Permission モード型（allow / ask / deny × ツールカテゴリ）
+- [x] Permission 設定 UI（設定画面）
+- [x] Agent 実行時の Permission 適用（YOLO との関係整理）
+- [x] Compact：閾値超過時の自動要約
+- [x] Compact：手動実行（チャットまたはコマンド）
+- [x] Phase A のユニットテスト
+- [x] ユーザーガイド更新（Skills / Permission / Compact）
+
+### Phase B — Hooks / Headless CLI
+
+- [x] Hooks 設定スキーマ（`hooks.json`）
+- [x] Hook ランタイム（onFileSave / onAgentComplete 等）
+- [x] Hook 再入防止・パス除外
+- [x] Hook から Shell / Skill 起動
+- [x] agent-core を Electron 非依存で起動可能に整理
+- [x] Headless CLI エントリ（`codex-studio agent` 仮称）
+- [x] CLI：ワークスペース指定・モデル・Permission プロファイル
+- [x] CLI：非対話（deny 以外は失敗 or 明示 allow プロファイル）
+- [x] Hooks / CLI の E2E または統合テスト
+- [x] ユーザーガイド更新（Hooks / CLI）
+
+### Phase C — Subagents / Memory / WebSearch
+
+- [x] Subagent タスク定義（目的・許可ツール・コンテキスト）
+- [x] 親 Agent からの spawn API
+- [x] 並列実行（上限・キャンセル）
+- [x] 子結果の統合（要約マージ）
+- [x] Subagent 用 UI（進捗・結果カード）
+- [x] 承認の集約（親セッションに集約 or 一括）
+- [x] Auto Memory オプトイン設定
+- [x] `MEMORY.md` / `.codex/memory/` への追記・読込
+- [x] WebSearch ツール（組み込み or MCP 経由）
+- [x] Phase C テスト・ガイド更新
+
+### Phase D — Teams / Cloud / Remote（必要時）
+
+- [x] Agent Teams（役割・共有ボード）設計
+- [x] Agent Teams（ローカル実装: team.json / BOARD / CLI / `/team`）
+- [x] チーム共有 Skills（`~/.codex-studio/skills`）
+- [x] Cloud Execution（管理 VM）設計 → **見送り**（ゲート文書）
+- [x] Remote Control（ブラウザ遠隔）設計 → **見送り**（ゲート文書）
+- [x] 実装判断ゲート（需要・コスト・セキュリティ）→ [09-PhaseD-設計ゲート.md](./09-PhaseD-設計ゲート.md)
+
+---
+
+## 進捗サマリー（2026-07-17 時点）
 
 | Phase | 状態 | 備考 |
 |-------|------|------|
@@ -274,18 +333,19 @@
 | Phase 1 エディタ | ほぼ完了 | ウォッチャー完了 |
 | Phase 2 索引+チャット | ほぼ完了 | SQLite は Post-MVP |
 | Phase 3 Agent+ツール | 完了 | Worker Thread 分離は未 |
-| Phase 4 リリース | ほぼ完了 | v0.1.0 全 OS 公開、α 配布開始可能 |
-
-> 詳細は [README.md](../README.md) の Sprint 6 セクションを参照
+| Phase 4 リリース | 進行中 | v0.1.x、インストーラ・CI 改善継続 |
+| **エージェント拡張 A** | **完了** | Skills / 常駐 MD / Permission / Compact |
+| **エージェント拡張 B** | **完了** | Hooks / Headless CLI |
+| **エージェント拡張 C** | **完了** | Subagents / Memory / WebSearch |
+| **エージェント拡張 D** | **完了（ローカル）** | Teams + 共有 Skills。Cloud/Remote はゲートで見送り |
 
 ---
 
-## 今週のフォーカス（Week 1）
+## 今週のフォーカス
 
-1. Monorepo + Electron 起動
-2. CI パイプライン
-3. IPC 基盤の型定義
-4. README / CONTRIBUTING
+1. Phase A〜D dogfooding
+2. α リリース周辺の安定化
+3. Cloud/Remote は [09](./09-PhaseD-設計ゲート.md) の条件が揃うまで着手しない
 
 ---
 
@@ -296,3 +356,11 @@
 | 2026-07-15 | プロジェクト名「Codex Studio（仮称）」で文書一式作成 |
 | | Electron + React + Monaco で MVP 構築方針決定 |
 | | MCP / Tab 補完は Post-MVP に延期 |
+| **2026-07-17** | **Claude Code 相当機能を段階導入する方針を決定（プラン 08）** |
+| | **優先: Skills → 常駐 MD → Permission → Compact → Hooks → Headless → Subagents** |
+| 2026-07-17 | Phase A 実装完了（Skills / 常駐 MD / Permission / Compact） |
+| 2026-07-17 | Phase B 実装完了（Hooks / Headless CLI） |
+| 2026-07-17 | Phase C 実装完了（Subagents / Memory / WebSearch） |
+| 2026-07-17 | Phase D: Local Teams + 共有 Skills 実装。Cloud/Remote は設計ゲートで見送り |
+| | **非優先: Cloud VM / Remote Control（ゲート未達）** |
+| | **Cursor 完全追随（Tab 補完等）はエージェント拡張と並行しすぎない** |

@@ -53,11 +53,9 @@
     "target": ["AppImage", "deb"],
     "category": "Development",
     "maintainer": "Codex Studio <codex-studio@users.noreply.github.com>",
-    "desktop": {
-      "Name": "Codex Studio",
-      "Comment": "AI-native development environment",
-      "StartupWMClass": "Codex Studio"
-    }
+    "executableName": "CodexStudio",
+    "synopsis": "AI-native development environment",
+    "description": "AI-native development environment"
   },
   "nsis": {
     "oneClick": false,

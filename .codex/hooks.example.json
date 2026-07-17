@@ -1,0 +1,14 @@
+{
+  "hooks": [
+    {
+      "event": "onFileSave",
+      "paths": ["**/*.{ts,tsx,js,mjs}"],
+      "exclude": ["**/node_modules/**", "**/out/**", "**/dist/**", "**/release/**"],
+      "action": {
+        "type": "shell",
+        "command": "echo \"[hook] saved ${relativePath}\""
+      },
+      "cooldownMs": 2000
+    }
+  ]
+}

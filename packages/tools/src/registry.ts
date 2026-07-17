@@ -6,10 +6,15 @@ import { writeTool } from './tools/write'
 import { strReplaceTool } from './tools/str-replace'
 import { deleteTool } from './tools/delete'
 import { shellTool } from './tools/shell'
+import { taskTool } from './tools/task'
+import { webSearchTool } from './tools/web-search'
+import { memoryAppendTool } from './tools/memory-append'
+import { teamTool } from './tools/team'
 
 const DEFAULT_TOOLS: Tool[] = [
   readTool, grepTool, globTool,
   writeTool, strReplaceTool, deleteTool, shellTool,
+  taskTool, webSearchTool, memoryAppendTool, teamTool,
 ]
 
 export class ToolRegistry {

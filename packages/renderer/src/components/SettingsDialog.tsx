@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { IPC_CHANNELS, DEFAULT_OLLAMA_BASE_URL, type LLMProviderId, type ModelInfo } from '@codex/shared'
+import {
+  IPC_CHANNELS,
+  DEFAULT_OLLAMA_BASE_URL,
+  DEFAULT_AGENT_PERMISSIONS,
+  type AgentPermissions,
+  type LLMProviderId,
+  type ModelInfo,
+  type PermissionAction,
+} from '@codex/shared'
 import { useAppStore } from '@renderer/store/app-store'
 import { hasCodexApi } from './ErrorBoundary'
 import { RulesSettings } from './RulesSettings'
@@ -91,6 +99,10 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
   const [ollamaBaseUrl, setOllamaBaseUrl] = useState(DEFAULT_OLLAMA_BASE_URL)
   const [yoloMode, setYoloMode] = useState(false)
   const [maxIterations, setMaxIterations] = useState(100)
+  const [permissions, setPermissions] = useState<AgentPermissions>({ ...DEFAULT_AGENT_PERMISSIONS })
+  const [compactTokenThreshold, setCompactTokenThreshold] = useState(80_000)
+  const [autoMemory, setAutoMemory] = useState(false)
+  const [maxSubagents, setMaxSubagents] = useState(3)
   const [provider, setProvider] = useState<LLMProviderId>('openai')
   const [model, setModel] = useState('gpt-4o')
   const [models, setModels] = useState<ModelInfo[]>([])
@@ -159,6 +171,13 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
         setOllamaBaseUrl(ollamaUrl)
         setYoloMode(settings.agent.yoloMode)
         setMaxIterations(settings.agent.maxIterations)
+        setPermissions({
+          ...DEFAULT_AGENT_PERMISSIONS,
+          ...settings.agent.permissions,
+        })
+        setCompactTokenThreshold(settings.agent.compactTokenThreshold ?? 80_000)
+        setAutoMemory(Boolean(settings.agent.autoMemory))
+        setMaxSubagents(settings.agent.maxSubagents ?? 3)
         await fetchModels(p, oKey, aKey, ollamaUrl, { preferredModel: savedModel })
       })
       .catch((err: unknown) => {
@@ -191,6 +210,10 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
           ...current.agent,
           yoloMode,
           maxIterations: Math.min(500, Math.max(5, Math.floor(maxIterations) || 100)),
+          permissions,
+          compactTokenThreshold: Math.max(0, Math.floor(compactTokenThreshold) || 0),
+          autoMemory,
+          maxSubagents: Math.min(8, Math.max(1, Math.floor(maxSubagents) || 3)),
         },
       })
       setSaved(true)
@@ -359,6 +382,79 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
               </label>
               <p style={{ margin: '4px 0 0', fontSize: 11, color: '#f87171' }}>
                 有効にするとファイル変更やコマンド実行が自動適用されます。自己責任で使用してください。
+              </p>
+
+              <p style={{ ...labelStyle, marginTop: 20, marginBottom: 0 }}>ツール権限（YOLO が OFF のとき）</p>
+              {([
+                ['read', '読取（Read / Grep / Glob / Task）'],
+                ['edit', '編集（Write / StrReplace / Delete / MemoryAppend）'],
+                ['shell', 'Shell'],
+                ['network', 'ネットワーク（WebSearch）'],
+              ] as const).map(([key, label]) => (
+                <label key={key} style={labelStyle} htmlFor={`perm-${key}`}>
+                  {label}
+                  <select
+                    id={`perm-${key}`}
+                    style={selectStyle}
+                    value={permissions[key]}
+                    disabled={yoloMode}
+                    onChange={(e) =>
+                      setPermissions((prev) => ({
+                        ...prev,
+                        [key]: e.target.value as PermissionAction,
+                      }))
+                    }
+                  >
+                    <option value="allow">allow（自動実行）</option>
+                    <option value="ask">ask（承認を求める）</option>
+                    <option value="deny">deny（拒否）</option>
+                  </select>
+                </label>
+              ))}
+
+              <label style={labelStyle} htmlFor="compact-threshold">
+                Compact 閾値（推定トークン）
+              </label>
+              <input
+                id="compact-threshold"
+                type="number"
+                min={0}
+                step={1000}
+                style={inputStyle}
+                value={compactTokenThreshold}
+                onChange={(e) => setCompactTokenThreshold(Number(e.target.value) || 0)}
+              />
+              <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6e6e6e' }}>
+                Agent 履歴がこの推定トークンを超えると自動 Compact（0 で既定の履歴予算のみ）
+              </p>
+
+              <label style={labelStyle} htmlFor="max-subagents">
+                並列 Subagent 上限（Task）
+              </label>
+              <input
+                id="max-subagents"
+                type="number"
+                min={1}
+                max={8}
+                step={1}
+                style={inputStyle}
+                value={maxSubagents}
+                onChange={(e) => setMaxSubagents(Number(e.target.value) || 3)}
+              />
+              <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6e6e6e' }}>
+                同時に動かす読取専用サブエージェント数（1〜8）
+              </p>
+
+              <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8, marginTop: 16 }}>
+                <input
+                  type="checkbox"
+                  checked={autoMemory}
+                  onChange={(e) => setAutoMemory(e.target.checked)}
+                />
+                Auto Memory（Agent 完了後に `.codex/memory/MEMORY.md` へ要約を追記）
+              </label>
+              <p style={{ margin: '4px 0 0', fontSize: 11, color: '#6e6e6e' }}>
+                オプトイン。次回以降のセッションで memory が system に注入されます。
               </p>
             </>
           )}

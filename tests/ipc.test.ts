@@ -5,6 +5,8 @@ describe('shared IPC', () => {
   it('exports chat and search channels', () => {
     expect(IPC_CHANNELS.CHAT_SEND).toBe('chat:send')
     expect(IPC_CHANNELS.INDEX_SEARCH).toBe('index:search')
+    expect(IPC_CHANNELS.SKILLS_LIST).toBe('skills:list')
+    expect(IPC_CHANNELS.CHAT_COMPACT).toBe('chat:compact')
     expect(IPC_EVENTS.CHAT_STREAM).toBe('chat:stream')
   })
 })

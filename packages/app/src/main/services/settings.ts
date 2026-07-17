@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import {
   APP_USER_DATA_DIR,
+  DEFAULT_AGENT_PERMISSIONS,
   DEFAULT_SETTINGS,
   type AppSettings,
   type Message,
@@ -140,6 +141,21 @@ export class SettingsService {
     }
 
     agent.maxIterations = clampMaxIterations(agent.maxIterations)
+    agent.permissions = {
+      ...DEFAULT_AGENT_PERMISSIONS,
+      ...agent.permissions,
+    }
+    if (typeof agent.compactTokenThreshold !== 'number') {
+      agent.compactTokenThreshold = DEFAULT_SETTINGS.agent.compactTokenThreshold
+    }
+    if (typeof agent.autoMemory !== 'boolean') {
+      agent.autoMemory = DEFAULT_SETTINGS.agent.autoMemory
+    }
+    if (typeof agent.maxSubagents !== 'number') {
+      agent.maxSubagents = DEFAULT_SETTINGS.agent.maxSubagents
+    } else {
+      agent.maxSubagents = Math.min(8, Math.max(1, Math.floor(agent.maxSubagents)))
+    }
     return {
       ...DEFAULT_SETTINGS,
       ...stored,
@@ -151,8 +167,18 @@ export class SettingsService {
 
   set(partial: Partial<AppSettings>): AppSettings {
     const current = this.get()
-    const agent = { ...current.agent, ...partial.agent }
+    const agent = {
+      ...current.agent,
+      ...partial.agent,
+      permissions: {
+        ...current.agent.permissions,
+        ...partial.agent?.permissions,
+      },
+    }
     agent.maxIterations = clampMaxIterations(agent.maxIterations)
+    if (typeof agent.maxSubagents === 'number') {
+      agent.maxSubagents = Math.min(8, Math.max(1, Math.floor(agent.maxSubagents)))
+    }
     // User explicitly saved — do not re-run legacy bump.
     store.set('migratedMaxIterationsV2', true)
     const updated: AppSettings = {
@@ -302,6 +328,17 @@ export class SessionService {
     store.set('sessions', sessions)
 
     return full
+  }
+
+  /** Replace all messages for a session (used by Compact). */
+  replaceMessages(sessionId: string, next: Message[]): void {
+    const messages = store.get('messages')
+    messages[sessionId] = next
+    store.set('messages', messages)
+    const sessions = store.get('sessions').map((s) =>
+      s.id === sessionId ? { ...s, updatedAt: new Date().toISOString() } : s,
+    )
+    store.set('sessions', sessions)
   }
 }
 

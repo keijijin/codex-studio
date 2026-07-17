@@ -10,6 +10,7 @@
     "email": "codex-studio@users.noreply.github.com"
   },
   "dependencies": {
+    "@codex/cli": "workspace:*",
     "node-pty": "^1.1.0"
   },
   "scripts": {
@@ -23,12 +24,16 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "pnpm build && playwright test",
     "test:benchmark": "vitest run tests/agent-benchmark.test.ts",
+    "cli": "tsx packages/cli/src/cli.ts",
     "postinstall": "electron-rebuild -f -w node-pty && node scripts/patch-electron-name.mjs",
     "patch:electron-name": "node scripts/patch-electron-name.mjs",
     "package": "pnpm build && electron-builder",
     "package:mac": "pnpm build && electron-builder --mac",
     "package:win": "pnpm build && electron-builder --win",
     "package:linux": "pnpm build && electron-builder --linux"
+  },
+  "bin": {
+    "codex-studio": "./packages/cli/bin/codex-studio.mjs"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
@@ -46,6 +51,7 @@
     "globals": "^16.2.0",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.33.1",
+    "tsx": "^4.19.4",
     "vite": "^6.0.0",
     "vitest": "^3.2.1"
   },

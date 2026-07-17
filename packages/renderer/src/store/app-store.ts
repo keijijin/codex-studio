@@ -71,6 +71,7 @@ interface AppState {
   loadSessions: () => Promise<void>
   sendMessage: (content: string, attachments: Attachment[]) => Promise<void>
   cancelChat: () => Promise<void>
+  compactChat: () => Promise<void>
   setSessionMode: (mode: SessionMode) => Promise<void>
   respondApproval: (approved: boolean) => Promise<void>
   refreshIndexStatus: () => Promise<void>
@@ -538,5 +539,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!activeSessionId) return
     await window.codex.invoke(IPC_CHANNELS.CHAT_CANCEL, activeSessionId)
     set({ isStreaming: false, streamingContent: '', streamingToolCalls: [] })
+  },
+
+  compactChat: async () => {
+    const { activeSessionId, isStreaming } = get()
+    if (!activeSessionId || isStreaming) return
+    const messages = await window.codex.invoke(IPC_CHANNELS.CHAT_COMPACT, activeSessionId)
+    set({ messages, chatError: null })
   },
 }))
