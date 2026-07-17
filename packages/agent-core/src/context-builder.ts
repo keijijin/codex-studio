@@ -12,6 +12,50 @@ export function estimateMessagesTokens(messages: AgentMessage[]): number {
 }
 
 /**
+ * Drop orphan tool messages / incomplete tool_call groups so OpenAI/Anthropic
+ * accept the transcript (`tool` must follow an assistant with `tool_calls`).
+ */
+export function sanitizeToolMessagePairs(messages: AgentMessage[]): AgentMessage[] {
+  const out: AgentMessage[] = []
+  let i = 0
+  while (i < messages.length) {
+    const msg = messages[i]
+    if (msg.role === 'tool') {
+      // Orphan tool result — skip
+      i++
+      continue
+    }
+    if (msg.role === 'assistant' && msg.tool_calls?.length) {
+      const ids = new Set(msg.tool_calls.map((tc) => tc.id))
+      const results: AgentMessage[] = []
+      let j = i + 1
+      while (j < messages.length && messages[j].role === 'tool') {
+        const toolMsg = messages[j]
+        if (toolMsg.tool_call_id && ids.has(toolMsg.tool_call_id)) {
+          results.push(toolMsg)
+          ids.delete(toolMsg.tool_call_id)
+        }
+        j++
+      }
+      // Only keep the assistant+tools block if every tool_call has a result
+      if (ids.size === 0 && results.length === msg.tool_calls.length) {
+        out.push(msg)
+        out.push(...results)
+        i = j
+        continue
+      }
+      // Incomplete pair: keep assistant text only (drop tool_calls)
+      out.push({ role: 'assistant', content: msg.content || '(tool results omitted)' })
+      i = j
+      continue
+    }
+    out.push(msg)
+    i++
+  }
+  return out
+}
+
+/**
  * Drop middle history under a token budget, pinning system + latest user turn.
  * When messages are dropped, insert a compact summary placeholder.
  */
@@ -64,16 +108,19 @@ export function trimAgentHistory(
     budget -= used
   }
 
+  let trimmed: AgentMessage[]
   if (dropped > 0) {
     const summary: AgentMessage = {
       role: 'user',
       content:
         `[Compacted history] ${dropped} earlier message(s) were summarized away to stay within the context budget. Continue from the remaining conversation.`,
     }
-    return [...system, summary, ...kept, ...pinned]
+    trimmed = [...system, summary, ...kept, ...pinned]
+  } else {
+    trimmed = [...system, ...kept, ...pinned]
   }
 
-  return [...system, ...kept, ...pinned]
+  return sanitizeToolMessagePairs(trimmed)
 }
 
 /**

@@ -215,8 +215,12 @@ export class ChatService {
     const existing = sessionService.getMessages(sessionId)
     if (existing.length <= 4) return existing
 
+    // Drop toolCalls metadata so rebuilt history never sends orphan tool roles to the API
     const compacted = compactMessageContents(
-      existing.map((m) => ({ role: m.role, content: m.content })),
+      existing.map((m) => ({
+        role: m.role === 'tool' ? 'assistant' : m.role,
+        content: m.content,
+      })),
       6,
     )
     const now = new Date().toISOString()

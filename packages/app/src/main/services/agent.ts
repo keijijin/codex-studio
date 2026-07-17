@@ -24,6 +24,7 @@ import {
   collectTeams,
   runSubagentTask,
   runTeam,
+  sanitizeToolMessagePairs,
 } from '@codex/agent-core'
 import { DEFAULT_AGENT_PERMISSIONS } from '@codex/shared'
 import { skillsService } from './skills-service'
@@ -386,7 +387,7 @@ export class AgentService {
       }
     }
 
-    return agentMessages
+    return sanitizeToolMessagePairs(agentMessages)
   }
 
   private updateSessionTitle(sessionId: string, content: string): void {

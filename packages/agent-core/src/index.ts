@@ -14,6 +14,7 @@ export {
   estimateTokens,
   estimateMessagesTokens,
   compactMessageContents,
+  sanitizeToolMessagePairs,
 } from './context-builder'
 export {
   collectSkills,
