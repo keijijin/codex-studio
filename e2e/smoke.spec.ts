@@ -22,75 +22,76 @@ async function launchApp(extraEnv: Record<string, string> = {}) {
   return { app, userDataDir }
 }
 
+async function closeApp(
+  app: Awaited<ReturnType<typeof electron.launch>>,
+  userDataDir?: string,
+): Promise<void> {
+  await app.close()
+  if (userDataDir) {
+    await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+  }
+}
+
 test('welcome screen is shown on launch', async () => {
-  const app = await electron.launch({
-    args: ['.'],
-    env: baseEnv,
-  })
+  const { app, userDataDir } = await launchApp()
 
   const page = await app.firstWindow()
   await expect(page.getByText('Codex Studio')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Open Folder' })).toBeVisible()
-  await app.close()
+  await closeApp(app, userDataDir)
 })
 
 test('opens fixture workspace and shows layout', async () => {
   const fixturePath = join(process.cwd(), 'e2e/fixtures/sample-workspace')
-
-  const app = await electron.launch({
-    args: ['.'],
-    env: {
-      ...baseEnv,
-      CODEX_E2E_WORKSPACE: fixturePath,
-    },
+  const { app, userDataDir } = await launchApp({
+    CODEX_E2E_WORKSPACE: fixturePath,
   })
 
   const page = await app.firstWindow()
   await expect(page.getByRole('contentinfo').getByText('sample-workspace')).toBeVisible({ timeout: 15_000 })
   await expect(page.getByText('AI Chat')).toBeVisible()
-  await app.close()
+  await closeApp(app, userDataDir)
 })
 
 test('sends chat message with E2E mock provider', async () => {
   const fixturePath = join(process.cwd(), 'e2e/fixtures/sample-workspace')
-
-  const app = await electron.launch({
-    args: ['.'],
-    env: {
-      ...baseEnv,
-      CODEX_E2E_WORKSPACE: fixturePath,
-      CODEX_E2E_MOCK_CHAT: '1',
-    },
+  const { app, userDataDir } = await launchApp({
+    CODEX_E2E_WORKSPACE: fixturePath,
+    CODEX_E2E_MOCK_CHAT: '1',
   })
 
-  const page = await app.firstWindow()
-  await expect(page.getByText('AI Chat')).toBeVisible({ timeout: 15_000 })
+  try {
+    const page = await app.firstWindow()
+    await expect(page.getByText('AI Chat')).toBeVisible({ timeout: 15_000 })
 
-  const textarea = page.getByPlaceholder('メッセージを入力... (@file で添付、Enter で送信)')
-  await textarea.fill('hello from e2e')
-  await page.getByRole('button', { name: '送信' }).click()
+    await page.getByRole('button', { name: 'Ask', exact: true }).click()
+    await expect(page.getByText(/^Ask · /)).toBeVisible()
 
-  await expect(page.getByText('E2E mock response').first()).toBeVisible({ timeout: 10_000 })
-  await app.close()
+    const textarea = page.getByPlaceholder(/メッセージを入力/)
+    await textarea.fill('hello from e2e')
+    await page.getByRole('button', { name: '送信' }).click()
+
+    await expect(page.getByText('E2E mock response').first()).toBeVisible({ timeout: 10_000 })
+  } finally {
+    await closeApp(app, userDataDir)
+  }
 })
 
 test('toggles terminal panel', async () => {
   const fixturePath = join(process.cwd(), 'e2e/fixtures/sample-workspace')
-
-  const app = await electron.launch({
-    args: ['.'],
-    env: {
-      ...baseEnv,
-      CODEX_E2E_WORKSPACE: fixturePath,
-    },
+  const { app, userDataDir } = await launchApp({
+    CODEX_E2E_WORKSPACE: fixturePath,
   })
 
-  const page = await app.firstWindow()
-  await expect(page.getByText('AI Chat')).toBeVisible({ timeout: 15_000 })
+  try {
+    const page = await app.firstWindow()
+    await expect(page.getByText('AI Chat')).toBeVisible({ timeout: 15_000 })
 
-  await page.getByRole('button', { name: 'Terminal' }).click()
-  await expect(page.getByText('Terminal', { exact: true })).toBeVisible()
-  await app.close()
+    await page.getByRole('button', { name: 'Terminal' }).click()
+    await expect(page.getByText('Terminal', { exact: true })).toBeVisible()
+  } finally {
+    await closeApp(app, userDataDir)
+  }
 })
 
 test('completes agent write task with approval', async () => {
@@ -99,7 +100,7 @@ test('completes agent write task with approval', async () => {
 
   await rm(outputFile, { force: true })
 
-  const { app } = await launchApp({
+  const { app, userDataDir } = await launchApp({
     CODEX_E2E_WORKSPACE: fixturePath,
     CODEX_E2E_MOCK_AGENT: '1',
   })
@@ -111,7 +112,7 @@ test('completes agent write task with approval', async () => {
     await page.getByRole('button', { name: 'Agent', exact: true }).click()
     await expect(page.getByText(/^Agent · /)).toBeVisible()
 
-    const textarea = page.getByPlaceholder('メッセージを入力... (@file で添付、Enter で送信)')
+    const textarea = page.getByPlaceholder(/メッセージを入力/)
     await textarea.fill('write e2e test file')
     await page.getByRole('button', { name: '送信' }).click()
 
@@ -123,7 +124,7 @@ test('completes agent write task with approval', async () => {
     const { readFile } = await import('fs/promises')
     expect(await readFile(outputFile, 'utf-8')).toBe('hello from agent e2e')
   } finally {
-    await app.close()
+    await closeApp(app, userDataDir)
     await rm(outputFile, { force: true })
   }
 })
@@ -134,12 +135,8 @@ test('reflects external file changes via watcher', async () => {
 
   await writeFile(watchedFile, 'initial', 'utf-8')
 
-  const app = await electron.launch({
-    args: ['.'],
-    env: {
-      ...baseEnv,
-      CODEX_E2E_WORKSPACE: fixturePath,
-    },
+  const { app, userDataDir } = await launchApp({
+    CODEX_E2E_WORKSPACE: fixturePath,
   })
 
   try {
@@ -149,7 +146,7 @@ test('reflects external file changes via watcher', async () => {
     await writeFile(watchedFile, 'updated by watcher', 'utf-8')
     await expect(page.getByText('watcher-e2e.txt')).toBeVisible({ timeout: 10_000 })
   } finally {
-    await app.close()
+    await closeApp(app, userDataDir)
     await rm(watchedFile, { force: true })
   }
 })

@@ -27,9 +27,9 @@ interface StoreSchema {
   migratedFromDisplayNameDir?: boolean
 }
 
-/** Absolute path — never rely on app.getName() / userData (breaks on rename). */
+/** Absolute path — never rely on app.getName() (breaks on rename). Honor ELECTRON_USER_DATA via bootstrap. */
 function storeCwd(): string {
-  return join(app.getPath('appData'), APP_USER_DATA_DIR)
+  return app.getPath('userData')
 }
 
 const store = new Store<StoreSchema>({
