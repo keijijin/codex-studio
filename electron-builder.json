@@ -22,6 +22,8 @@
     "**/node_modules/@vscode/ripgrep/**",
     "**/node_modules/node-pty/**"
   ],
+  "npmRebuild": false,
+  "nodeGypRebuild": false,
   "publish": [
     {
       "provider": "github",

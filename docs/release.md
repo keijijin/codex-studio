@@ -12,6 +12,14 @@ pnpm package:linux  # Linux AppImage + .deb
 
 成果物は `release/` に出力されます。
 
+### Windows ローカルビルドの注意
+
+`node-pty` は N-API の prebuild（`node_modules/node-pty/prebuilds/win32-x64/` など）を同梱しています。  
+Visual Studio / Build Tools が無い環境でも、`electron-builder` は **ソース再ビルドを行わず**（`npmRebuild: false`）パッケージできます。
+
+ネイティブモジュールをソースから再ビルドしたい場合のみ、[VS Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) に **「デスクトップ開発 with C++」** を入れてください。  
+`postinstall` の `electron-rebuild` は失敗しても prebuild があれば続行します。
+
 ## GitHub Releases（自動）
 
 1. 変更を `main` に push
