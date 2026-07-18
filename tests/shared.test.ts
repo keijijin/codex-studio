@@ -5,6 +5,7 @@ describe('shared', () => {
   it('exports default settings', () => {
     expect(DEFAULT_SETTINGS.general.theme).toBe('dark')
     expect(DEFAULT_SETTINGS.agent.maxIterations).toBe(100)
+    expect(DEFAULT_SETTINGS.routing.mode).toBe('fixed')
   })
 
   it('defines IPC channels', () => {

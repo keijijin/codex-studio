@@ -1,9 +1,18 @@
 import {
   DEFAULT_OLLAMA_BASE_URL,
+  migrateModelId,
+  normalizeRoutingSettings,
   type AppSettings,
   type LLMProviderId,
+  type ModelCandidate,
+  type RoutingSettings,
 } from '@codex/shared'
-import { getProviderForModel, providerDisplayName } from '@codex/llm-adapters'
+import {
+  decideRouting,
+  getProviderForModel,
+  providerDisplayName,
+  type RoutingDecision,
+} from '@codex/llm-adapters'
 
 export interface LlmRuntimeConfig {
   provider: LLMProviderId
@@ -30,23 +39,76 @@ export function getApiKeyForProvider(
   return models.openaiApiKey || process.env.OPENAI_API_KEY
 }
 
-export function getLlmRuntimeConfig(settings: AppSettings, mode: 'chat' | 'agent' = 'chat'): LlmRuntimeConfig {
+export function getRoutingSettings(settings: AppSettings): RoutingSettings {
+  return normalizeRoutingSettings(settings.routing)
+}
+
+export function getPrimaryCandidate(
+  settings: AppSettings,
+  mode: 'chat' | 'agent' = 'chat',
+): ModelCandidate {
   const provider = resolveProvider(settings)
-  const apiKey = getApiKeyForProvider(provider, settings.models)
-  const baseUrl = provider === 'ollama'
-    ? modelsOllamaBaseUrl(settings.models)
-    : undefined
   const model = mode === 'agent'
     ? settings.models.defaultAgentModel || settings.models.defaultChatModel
     : settings.models.defaultChatModel
+  return { provider, model: migrateModelId(model) }
+}
 
+export function runtimeFromCandidate(
+  candidate: ModelCandidate,
+  settings: AppSettings,
+): LlmRuntimeConfig {
+  const apiKey = getApiKeyForProvider(candidate.provider, settings.models)
+  const baseUrl = candidate.provider === 'ollama'
+    ? modelsOllamaBaseUrl(settings.models)
+    : undefined
   return {
-    provider,
+    provider: candidate.provider,
     apiKey: apiKey ?? '',
     baseUrl,
-    model,
-    displayName: providerDisplayName(provider),
+    model: migrateModelId(candidate.model),
+    displayName: providerDisplayName(candidate.provider),
   }
+}
+
+export function isCandidateAvailable(
+  candidate: ModelCandidate,
+  settings: AppSettings,
+): boolean {
+  if (candidate.provider === 'ollama') return true
+  return Boolean(getApiKeyForProvider(candidate.provider, settings.models))
+}
+
+export interface ResolveRoutingOptions {
+  runMode: 'chat' | 'agent'
+  prompt?: string
+  isTeam?: boolean
+  /** Override settings.routing.mode (e.g. CLI --routing). */
+  modeOverride?: RoutingSettings['mode']
+}
+
+export function resolveRoutingDecision(
+  settings: AppSettings,
+  options: ResolveRoutingOptions,
+): RoutingDecision {
+  const routing = getRoutingSettings(settings)
+  const primary = getPrimaryCandidate(settings, options.runMode)
+  return decideRouting({
+    mode: options.modeOverride ?? routing.mode,
+    primary,
+    fallbackChain: routing.fallbackChain,
+    profiles: routing.profiles,
+    maxAttempts: routing.maxAttempts,
+    isAvailable: (c) => isCandidateAvailable(c, settings),
+    prompt: options.prompt,
+    runMode: options.runMode,
+    isTeam: options.isTeam,
+  })
+}
+
+export function getLlmRuntimeConfig(settings: AppSettings, mode: 'chat' | 'agent' = 'chat'): LlmRuntimeConfig {
+  const decision = resolveRoutingDecision(settings, { runMode: mode })
+  return runtimeFromCandidate(decision.selected, settings)
 }
 
 function modelsOllamaBaseUrl(models: AppSettings['models']): string {

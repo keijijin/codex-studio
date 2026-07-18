@@ -4,10 +4,13 @@ import {
   IPC_CHANNELS,
   DEFAULT_OLLAMA_BASE_URL,
   DEFAULT_AGENT_PERMISSIONS,
+  DEFAULT_FALLBACK_CHAIN,
   type AgentPermissions,
   type LLMProviderId,
+  type ModelCandidate,
   type ModelInfo,
   type PermissionAction,
+  type RoutingMode,
 } from '@codex/shared'
 import { useAppStore } from '@renderer/store/app-store'
 import { hasCodexApi } from './ErrorBoundary'
@@ -105,6 +108,9 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
   const [maxSubagents, setMaxSubagents] = useState(3)
   const [provider, setProvider] = useState<LLMProviderId>('openai')
   const [model, setModel] = useState('gpt-4o')
+  const [routingMode, setRoutingMode] = useState<RoutingMode>('fixed')
+  const [fallbackChain, setFallbackChain] = useState<ModelCandidate[]>([...DEFAULT_FALLBACK_CHAIN])
+  const [maxAttempts, setMaxAttempts] = useState(3)
   const [models, setModels] = useState<ModelInfo[]>([])
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -166,6 +172,13 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
         const ollamaUrl = settings.models.ollamaBaseUrl ?? DEFAULT_OLLAMA_BASE_URL
         setProvider(p)
         setModel(savedModel)
+        setRoutingMode(settings.routing?.mode ?? 'fixed')
+        setFallbackChain(
+          settings.routing?.fallbackChain?.length
+            ? settings.routing.fallbackChain.map((c) => ({ ...c }))
+            : [...DEFAULT_FALLBACK_CHAIN],
+        )
+        setMaxAttempts(settings.routing?.maxAttempts ?? 3)
         setOpenaiKey(oKey)
         setAnthropicKey(aKey)
         setOllamaBaseUrl(ollamaUrl)
@@ -205,6 +218,12 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
           ollamaBaseUrl,
           defaultChatModel: model,
           defaultAgentModel: model,
+        },
+        routing: {
+          ...current.routing,
+          mode: routingMode,
+          fallbackChain: fallbackChain.filter((c) => c.model.trim().length > 0),
+          maxAttempts: Math.min(5, Math.max(1, Math.floor(maxAttempts) || 3)),
         },
         agent: {
           ...current.agent,
@@ -356,6 +375,186 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
               <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6e6e6e' }}>
                 {models.length} 件のモデル · 環境変数 OPENAI_API_KEY / ANTHROPIC_API_KEY / OLLAMA_BASE_URL も利用可
               </p>
+
+              <label style={labelStyle} htmlFor="routing-mode">モデルルーティング</label>
+              <select
+                id="routing-mode"
+                style={selectStyle}
+                value={routingMode}
+                onChange={(e) => setRoutingMode(e.target.value as RoutingMode)}
+              >
+                <option value="fixed">固定（既定モデルのみ）</option>
+                <option value="fallback-only">フォールバック（失敗時に切替）</option>
+                <option value="auto">Auto（タスクに応じて選択）</option>
+              </select>
+              <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6e6e6e' }}>
+                Auto / フォールバック時は API キーがあるプロバイダへ自動切替します（ツール開始後は切替しません）
+              </p>
+
+              {routingMode !== 'fixed' && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: 12,
+                    border: '1px solid #3c3c3c',
+                    borderRadius: 6,
+                    backgroundColor: '#1e1e1e',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <span style={{ fontSize: 12, color: '#858585' }}>フォールバックチェーン</span>
+                    <button
+                      type="button"
+                      style={{ ...btnSecondary, padding: '2px 8px', fontSize: 11 }}
+                      onClick={() => setFallbackChain([...DEFAULT_FALLBACK_CHAIN])}
+                    >
+                      既定に戻す
+                    </button>
+                  </div>
+                  <p style={{ margin: '6px 0 10px', fontSize: 11, color: '#6e6e6e' }}>
+                    上から順に試行します。キー未設定のプロバイダはスキップされます。
+                  </p>
+
+                  {fallbackChain.map((row, index) => (
+                    <div
+                      key={`fb-${index}`}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '110px 1fr auto',
+                        gap: 6,
+                        marginBottom: 8,
+                        alignItems: 'center',
+                      }}
+                    >
+                      <select
+                        aria-label={`フォールバック ${index + 1} プロバイダ`}
+                        style={{ ...selectStyle, marginTop: 0, fontSize: 12, padding: '6px 8px' }}
+                        value={row.provider}
+                        onChange={(e) => {
+                          const provider = e.target.value as LLMProviderId
+                          setFallbackChain((prev) =>
+                            prev.map((c, i) => (i === index ? { ...c, provider } : c)),
+                          )
+                        }}
+                      >
+                        <option value="openai">OpenAI</option>
+                        <option value="anthropic">Anthropic</option>
+                        <option value="ollama">Ollama</option>
+                      </select>
+                      <input
+                        aria-label={`フォールバック ${index + 1} モデル`}
+                        type="text"
+                        style={{ ...inputStyle, marginTop: 0, fontSize: 12, padding: '6px 8px' }}
+                        placeholder="model id"
+                        value={row.model}
+                        onChange={(e) => {
+                          const modelId = e.target.value
+                          setFallbackChain((prev) =>
+                            prev.map((c, i) => (i === index ? { ...c, model: modelId } : c)),
+                          )
+                        }}
+                      />
+                      <div style={{ display: 'flex', gap: 2 }}>
+                        <button
+                          type="button"
+                          title="上へ"
+                          disabled={index === 0}
+                          style={{
+                            ...btnSecondary,
+                            padding: '4px 6px',
+                            fontSize: 11,
+                            opacity: index === 0 ? 0.4 : 1,
+                          }}
+                          onClick={() => {
+                            if (index === 0) return
+                            setFallbackChain((prev) => {
+                              const next = [...prev]
+                              ;[next[index - 1], next[index]] = [next[index]!, next[index - 1]!]
+                              return next
+                            })
+                          }}
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          title="下へ"
+                          disabled={index >= fallbackChain.length - 1}
+                          style={{
+                            ...btnSecondary,
+                            padding: '4px 6px',
+                            fontSize: 11,
+                            opacity: index >= fallbackChain.length - 1 ? 0.4 : 1,
+                          }}
+                          onClick={() => {
+                            if (index >= fallbackChain.length - 1) return
+                            setFallbackChain((prev) => {
+                              const next = [...prev]
+                              ;[next[index], next[index + 1]] = [next[index + 1]!, next[index]!]
+                              return next
+                            })
+                          }}
+                        >
+                          ↓
+                        </button>
+                        <button
+                          type="button"
+                          title="削除"
+                          disabled={fallbackChain.length <= 1}
+                          style={{
+                            ...btnSecondary,
+                            padding: '4px 6px',
+                            fontSize: 11,
+                            color: '#f87171',
+                            opacity: fallbackChain.length <= 1 ? 0.4 : 1,
+                          }}
+                          onClick={() => {
+                            if (fallbackChain.length <= 1) return
+                            setFallbackChain((prev) => prev.filter((_, i) => i !== index))
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                    <button
+                      type="button"
+                      style={{ ...btnSecondary, padding: '4px 10px', fontSize: 12 }}
+                      disabled={fallbackChain.length >= 5}
+                      onClick={() =>
+                        setFallbackChain((prev) => [
+                          ...prev,
+                          { provider: 'ollama', model: 'qwen2.5-coder:14b' },
+                        ])
+                      }
+                    >
+                      + 候補を追加
+                    </button>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#858585' }}>
+                      最大試行
+                      <input
+                        type="number"
+                        min={1}
+                        max={5}
+                        style={{
+                          width: 52,
+                          padding: '4px 6px',
+                          fontSize: 12,
+                          color: '#cccccc',
+                          backgroundColor: '#252526',
+                          border: '1px solid #3c3c3c',
+                          borderRadius: 4,
+                        }}
+                        value={maxAttempts}
+                        onChange={(e) => setMaxAttempts(Number(e.target.value) || 3)}
+                      />
+                    </label>
+                  </div>
+                </div>
+              )}
 
               <label style={labelStyle} htmlFor="max-iterations">最大イテレーション（Agent）</label>
               <input

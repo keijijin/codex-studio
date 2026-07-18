@@ -1,7 +1,9 @@
 import {
   getProviderInstance,
+  isRetryableError,
   listModels,
   type ChatMessage,
+  type RoutingDecision,
 } from '@codex/llm-adapters'
 import type { WebContents } from 'electron'
 import {
@@ -16,8 +18,9 @@ import { sessionService, settingsService } from './settings'
 import { agentService } from './agent'
 import {
   getApiKeyForProvider,
-  getLlmRuntimeConfig,
   missingApiKeyMessage,
+  resolveRoutingDecision,
+  runtimeFromCandidate,
 } from './llm-config'
 import { DEFAULT_OLLAMA_BASE_URL } from '@codex/shared'
 import { formatSkillPrompt, formatSkillUserMessage, compactMessageContents, detectReplyLanguage, formatLanguageInstruction } from '@codex/agent-core'
@@ -97,12 +100,16 @@ export class ChatService {
     }
 
     const settings = settingsService.get()
-    const runtime = getLlmRuntimeConfig(settings, 'chat')
+    const decision = resolveRoutingDecision(settings, {
+      runMode: 'chat',
+      prompt: content,
+    })
 
-    if (!runtime.apiKey) {
+    if (decision.queue.length === 0 || !runtimeFromCandidate(decision.selected, settings).apiKey) {
+      const provider = decision.selected.provider
       this.emit(webContents, sessionId, {
         type: 'error',
-        message: missingApiKeyMessage(runtime.provider),
+        message: missingApiKeyMessage(provider),
       })
       return
     }
@@ -129,39 +136,107 @@ export class ChatService {
     ]
     const rulesPrompt = (await rulesService.buildPrompt(contextPaths)) + skillPrompt
     const llmMessages = this.buildMessages(history, attachments, rulesPrompt)
-    const llm = getProviderInstance(runtime.provider)
 
-    let assistantContent = ''
+    this.emitRouting(webContents, sessionId, decision)
 
+    let lastError = ''
     try {
-      for await (const chunk of llm.chat(llmMessages, {
-        model: runtime.model,
-        apiKey: runtime.apiKey,
-        baseUrl: runtime.baseUrl,
-        signal: abortController.signal,
-      })) {
-        if (chunk.type === 'text') {
-          assistantContent += chunk.delta
-          this.emit(webContents, sessionId, { type: 'text_delta', content: chunk.delta })
-        } else if (chunk.type === 'error') {
-          this.emit(webContents, sessionId, { type: 'error', message: chunk.error })
+      for (let attempt = 0; attempt < decision.queue.length; attempt++) {
+        if (abortController.signal.aborted) {
+          this.emit(webContents, sessionId, { type: 'error', message: 'Cancelled' })
+          return
+        }
+
+        const candidate = decision.queue[attempt]!
+        const runtime = runtimeFromCandidate(candidate, settings)
+        if (!runtime.apiKey) {
+          lastError = missingApiKeyMessage(candidate.provider)
+          continue
+        }
+
+        if (attempt > 0) {
+          this.emit(webContents, sessionId, {
+            type: 'retrying',
+            provider: candidate.provider,
+            model: candidate.model,
+            attempt: attempt + 1,
+            previousError: lastError,
+          })
+          this.emit(webContents, sessionId, {
+            type: 'routing',
+            provider: candidate.provider,
+            model: candidate.model,
+            reason: `フォールバック (${attempt + 1}/${decision.queue.length})`,
+            mode: decision.mode,
+          })
+        }
+
+        const llm = getProviderInstance(runtime.provider)
+        let assistantContent = ''
+        let streamError: string | null = null
+
+        try {
+          for await (const chunk of llm.chat(llmMessages, {
+            model: runtime.model,
+            apiKey: runtime.apiKey,
+            baseUrl: runtime.baseUrl,
+            signal: abortController.signal,
+          })) {
+            if (chunk.type === 'text') {
+              assistantContent += chunk.delta
+              this.emit(webContents, sessionId, { type: 'text_delta', content: chunk.delta })
+            } else if (chunk.type === 'error') {
+              streamError = chunk.error
+              break
+            }
+          }
+        } catch (err) {
+          streamError = err instanceof Error ? err.message : 'Chat failed'
+        }
+
+        if (!streamError) {
+          const saved = sessionService.addMessage(sessionId, {
+            sessionId,
+            role: 'assistant',
+            content: assistantContent,
+          })
+          this.emit(webContents, sessionId, { type: 'done', messageId: saved.id })
+          return
+        }
+
+        lastError = streamError
+        const canRetry =
+          attempt < decision.queue.length - 1 &&
+          isRetryableError(streamError) &&
+          !abortController.signal.aborted
+
+        if (!canRetry) {
+          this.emit(webContents, sessionId, { type: 'error', message: streamError })
           return
         }
       }
 
-      const saved = sessionService.addMessage(sessionId, {
-        sessionId,
-        role: 'assistant',
-        content: assistantContent,
+      this.emit(webContents, sessionId, {
+        type: 'error',
+        message: lastError || 'Chat failed',
       })
-
-      this.emit(webContents, sessionId, { type: 'done', messageId: saved.id })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Chat failed'
-      this.emit(webContents, sessionId, { type: 'error', message })
     } finally {
       this.abortControllers.delete(sessionId)
     }
+  }
+
+  private emitRouting(
+    webContents: WebContents,
+    sessionId: string,
+    decision: RoutingDecision,
+  ): void {
+    this.emit(webContents, sessionId, {
+      type: 'routing',
+      provider: decision.selected.provider,
+      model: decision.selected.model,
+      reason: decision.reason,
+      mode: decision.mode,
+    })
   }
 
   private buildMessages(

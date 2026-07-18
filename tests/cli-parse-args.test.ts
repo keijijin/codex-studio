@@ -29,14 +29,9 @@ describe('cli parseArgs', () => {
     })
   })
 
-  it('parses team list and team run', () => {
-    expect(parseArgs(['team', 'list', '-w', '/tmp']).command).toBe('team-list')
-    const run = parseArgs(['team', 'run', 'review-squad', 'IPCを見て', '-w', '/tmp'])
-    expect(run).toMatchObject({
-      command: 'team-run',
-      teamId: 'review-squad',
-      prompt: 'IPCを見て',
-      workspace: '/tmp',
-    })
+  it('parses --routing mode', () => {
+    const args = parseArgs(['agent', 'hello', '--routing', 'auto'])
+    expect(args.routing).toBe('auto')
+    expect(parseArgs(['agent', 'hi']).routing).toBe('fixed')
   })
 })

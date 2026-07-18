@@ -1,4 +1,5 @@
 export * from './types'
+export * from './routing'
 export * from './ipc'
 export * from './chat'
 export * from './agent'

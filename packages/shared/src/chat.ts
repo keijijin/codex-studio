@@ -22,5 +22,19 @@ export type ChatStreamEvent =
   | { type: 'tool_call_start'; toolCallId: string; tool: string; args: unknown }
   | { type: 'tool_call_result'; toolCallId: string; tool: string; result: string; success: boolean; filePath?: string }
   | { type: 'approval_required'; toolCallId: string; tool: string; path: string; relativePath: string; oldContent: string; newContent: string; summary: string; action?: string }
+  | {
+      type: 'routing'
+      provider: string
+      model: string
+      reason: string
+      mode: 'fixed' | 'auto' | 'fallback-only'
+    }
+  | {
+      type: 'retrying'
+      provider: string
+      model: string
+      attempt: number
+      previousError: string
+    }
   | { type: 'done'; messageId: string }
   | { type: 'error'; message: string }

@@ -6,6 +6,7 @@ import type {
   FileNode,
   IndexStatus,
   Message,
+  RoutingMode,
   Session,
   SessionMode,
   ToolCallRecord,
@@ -45,6 +46,12 @@ interface AppState {
   streamingContent: string
   streamingToolCalls: ToolCallRecord[]
   chatError: string | null
+  routingInfo: {
+    provider: string
+    model: string
+    reason: string
+    mode: RoutingMode
+  } | null
   sessionMode: SessionMode
   pendingApproval: (ApprovalRequest & { sessionId: string }) | null
   listenersSetup: boolean
@@ -73,6 +80,7 @@ interface AppState {
   cancelChat: () => Promise<void>
   compactChat: () => Promise<void>
   setSessionMode: (mode: SessionMode) => Promise<void>
+  setRoutingMode: (mode: RoutingMode) => Promise<void>
   respondApproval: (approved: boolean) => Promise<void>
   refreshIndexStatus: () => Promise<void>
 }
@@ -95,6 +103,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   streamingContent: '',
   streamingToolCalls: [],
   chatError: null,
+  routingInfo: null,
   sessionMode: 'ask',
   pendingApproval: null,
   listenersSetup: false,
@@ -169,6 +178,28 @@ export const useAppStore = create<AppState>((set, get) => ({
             newContent: event.newContent,
             summary: event.summary,
             action: event.action as ApprovalRequest['action'],
+          },
+        })
+      } else if (event.type === 'routing') {
+        set({
+          routingInfo: {
+            provider: event.provider,
+            model: event.model,
+            reason: event.reason,
+            mode: event.mode,
+          },
+          chatError: null,
+        })
+      } else if (event.type === 'retrying') {
+        set({
+          streamingContent: '',
+          streamingToolCalls: [],
+          chatError: null,
+          routingInfo: {
+            provider: event.provider,
+            model: event.model,
+            reason: `再試行 ${event.attempt}: ${event.previousError.slice(0, 80)}`,
+            mode: get().routingInfo?.mode ?? 'fallback-only',
           },
         })
       } else if (event.type === 'done') {
@@ -490,6 +521,31 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  setRoutingMode: async (mode: RoutingMode) => {
+    const current = get().settings
+    if (current) {
+      set({
+        settings: {
+          ...current,
+          routing: { ...current.routing, mode },
+        },
+      })
+    }
+    try {
+      const latest = await window.codex.invoke(IPC_CHANNELS.SETTINGS_GET)
+      const updated = await window.codex.invoke(IPC_CHANNELS.SETTINGS_SET, {
+        routing: {
+          ...latest.routing,
+          mode,
+        },
+      })
+      set({ settings: updated })
+    } catch (err) {
+      console.warn('[app] routing mode persist failed:', err)
+      await get().loadSettings()
+    }
+  },
+
   respondApproval: async (approved: boolean) => {
     const { pendingApproval, activeSessionId } = get()
     if (!pendingApproval || !activeSessionId) return
@@ -521,6 +577,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       streamingContent: '',
       streamingToolCalls: [],
       chatError: null,
+      routingInfo: null,
     })
 
     const contextPaths = get().tabs.map((t) => t.path)

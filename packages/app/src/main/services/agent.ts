@@ -1,7 +1,7 @@
 import { BrowserWindow } from 'electron'
 import { AgentOrchestrator } from '@codex/agent-core'
 import type { AgentMessage } from '@codex/llm-adapters'
-import { getProviderInstance } from '@codex/llm-adapters'
+import { getProviderInstance, isRetryableError } from '@codex/llm-adapters'
 import { defaultToolRegistry } from '@codex/tools'
 import type { WebContents } from 'electron'
 import {
@@ -15,7 +15,12 @@ import {
 } from '@codex/shared'
 import { approvalService } from './approval'
 import { createE2eMockAgentProvider } from './e2e-mock-agent'
-import { getLlmRuntimeConfig, missingApiKeyMessage } from './llm-config'
+import {
+  missingApiKeyMessage,
+  resolveRoutingDecision,
+  runtimeFromCandidate,
+  type LlmRuntimeConfig,
+} from './llm-config'
 import { formatSkillPrompt, formatSkillUserMessage } from '@codex/agent-core'
 import {
   appendMemoryNote,
@@ -88,19 +93,21 @@ export class AgentService {
         : `/team ${teamMatch.team.id}`
     }
 
-    const runtime = getLlmRuntimeConfig(settings, 'agent')
+    const decision = resolveRoutingDecision(settings, {
+      runMode: 'agent',
+      prompt: content,
+      isTeam: Boolean(teamMatch),
+    })
     const isE2eMock = process.env.CODEX_E2E_MOCK_AGENT === '1'
+    const firstRuntime = runtimeFromCandidate(decision.selected, settings)
 
-    if (!runtime.apiKey && !isE2eMock) {
+    if (!firstRuntime.apiKey && !isE2eMock) {
       this.emit(webContents, sessionId, {
         type: 'error',
-        message: missingApiKeyMessage(runtime.provider),
+        message: missingApiKeyMessage(firstRuntime.provider),
       })
       return
     }
-
-    const llm = isE2eMock ? createE2eMockAgentProvider() : getProviderInstance(runtime.provider)
-    this.orchestrator = new AgentOrchestrator(llm, defaultToolRegistry)
 
     const existingAbort = this.abortControllers.get(sessionId)
     if (existingAbort) existingAbort.abort()
@@ -163,9 +170,15 @@ export class AgentService {
       return
     }
 
+    this.emit(webContents, sessionId, {
+      type: 'routing',
+      provider: decision.selected.provider,
+      model: decision.selected.model,
+      reason: decision.reason,
+      mode: decision.mode,
+    })
+
     const history = this.buildAgentHistory(sessionService.getMessages(sessionId), attachments)
-    let assistantContent = ''
-    const toolCalls: ToolCallRecord[] = []
 
     const notifyFileChanged = (absolutePath: string) => {
       for (const win of BrowserWindow.getAllWindows()) {
@@ -187,6 +200,140 @@ export class AgentService {
     }
     const runLimited = createConcurrencyLimiter(settings.agent.maxSubagents ?? 3)
     const userPromptForMemory = content
+
+    let lastError = ''
+    try {
+      for (let attempt = 0; attempt < decision.queue.length; attempt++) {
+        if (abortController.signal.aborted) {
+          this.emit(webContents, sessionId, { type: 'error', message: 'Cancelled' })
+          return
+        }
+
+        const candidate = decision.queue[attempt]!
+        const runtime = isE2eMock
+          ? firstRuntime
+          : runtimeFromCandidate(candidate, settings)
+        if (!runtime.apiKey && !isE2eMock) {
+          lastError = missingApiKeyMessage(candidate.provider)
+          continue
+        }
+
+        if (attempt > 0) {
+          this.emit(webContents, sessionId, {
+            type: 'retrying',
+            provider: candidate.provider,
+            model: candidate.model,
+            attempt: attempt + 1,
+            previousError: lastError,
+          })
+          this.emit(webContents, sessionId, {
+            type: 'routing',
+            provider: candidate.provider,
+            model: candidate.model,
+            reason: `フォールバック (${attempt + 1}/${decision.queue.length})`,
+            mode: decision.mode,
+          })
+        }
+
+        const outcome = await this.runOrchestratorAttempt({
+          webContents,
+          sessionId,
+          root,
+          history,
+          runtime,
+          isE2eMock,
+          settings,
+          abortController,
+          rulesPrompt,
+          skillPrompt,
+          permissions,
+          runLimited,
+          notifyFileChanged,
+        })
+
+        if (outcome.status === 'ok') {
+          const saved = sessionService.addMessage(sessionId, {
+            sessionId,
+            role: 'assistant',
+            content: outcome.assistantContent,
+            toolCalls: outcome.toolCalls.length > 0 ? outcome.toolCalls : undefined,
+          })
+          this.emit(webContents, sessionId, { type: 'done', messageId: saved.id })
+          void hooksService.onAgentComplete(sessionId)
+
+          if (settings.agent.autoMemory && outcome.assistantContent.trim()) {
+            const note = `${userPromptForMemory.slice(0, 100)} → ${outcome.assistantContent.slice(0, 180)}`
+            void appendMemoryNote(root, note).catch(() => undefined)
+          }
+          return
+        }
+
+        lastError = outcome.error
+        const canRetry =
+          !outcome.toolsStarted &&
+          attempt < decision.queue.length - 1 &&
+          isRetryableError(outcome.error) &&
+          !abortController.signal.aborted &&
+          !isE2eMock
+
+        if (!canRetry) {
+          this.emit(webContents, sessionId, { type: 'error', message: outcome.error })
+          return
+        }
+      }
+
+      this.emit(webContents, sessionId, {
+        type: 'error',
+        message: lastError || 'Agent failed',
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Agent failed'
+      this.emit(webContents, sessionId, { type: 'error', message })
+    } finally {
+      this.abortControllers.delete(sessionId)
+    }
+  }
+
+  private async runOrchestratorAttempt(opts: {
+    webContents: WebContents
+    sessionId: string
+    root: string
+    history: AgentMessage[]
+    runtime: LlmRuntimeConfig
+    isE2eMock: boolean
+    settings: ReturnType<typeof settingsService.get>
+    abortController: AbortController
+    rulesPrompt: string
+    skillPrompt: string | undefined
+    permissions: typeof DEFAULT_AGENT_PERMISSIONS
+    runLimited: ReturnType<typeof createConcurrencyLimiter>
+    notifyFileChanged: (absolutePath: string) => void
+  }): Promise<
+    | { status: 'ok'; assistantContent: string; toolCalls: ToolCallRecord[] }
+    | { status: 'error'; error: string; toolsStarted: boolean }
+  > {
+    const {
+      webContents,
+      sessionId,
+      root,
+      history,
+      runtime,
+      isE2eMock,
+      settings,
+      abortController,
+      rulesPrompt,
+      skillPrompt,
+      permissions,
+      runLimited,
+      notifyFileChanged,
+    } = opts
+
+    const llm = isE2eMock ? createE2eMockAgentProvider() : getProviderInstance(runtime.provider)
+    this.orchestrator = new AgentOrchestrator(llm, defaultToolRegistry)
+
+    let assistantContent = ''
+    const toolCalls: ToolCallRecord[] = []
+    let toolsStarted = false
 
     try {
       for await (const event of this.orchestrator.run(history, {
@@ -278,6 +425,7 @@ export class AgentService {
           assistantContent += event.content
           this.emit(webContents, sessionId, { type: 'text_delta', content: event.content })
         } else if (event.type === 'tool_call_start') {
+          toolsStarted = true
           toolCalls.push({
             id: event.toolCallId,
             name: event.tool,
@@ -291,6 +439,7 @@ export class AgentService {
             args: event.args,
           })
         } else if (event.type === 'tool_call_result') {
+          toolsStarted = true
           const tc = toolCalls.find((t) => t.id === event.toolCallId)
           if (tc) {
             tc.result = event.result
@@ -305,32 +454,16 @@ export class AgentService {
             filePath: typeof event.filePath === 'string' ? event.filePath : undefined,
           })
         } else if (event.type === 'error') {
-          this.emit(webContents, sessionId, { type: 'error', message: event.message })
-          return
+          return { status: 'error', error: event.message, toolsStarted }
         } else if (event.type === 'done') {
           break
         }
       }
 
-      const saved = sessionService.addMessage(sessionId, {
-        sessionId,
-        role: 'assistant',
-        content: assistantContent,
-        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-      })
-
-      this.emit(webContents, sessionId, { type: 'done', messageId: saved.id })
-      void hooksService.onAgentComplete(sessionId)
-
-      if (settings.agent.autoMemory && assistantContent.trim()) {
-        const note = `${userPromptForMemory.slice(0, 100)} → ${assistantContent.slice(0, 180)}`
-        void appendMemoryNote(root, note).catch(() => undefined)
-      }
+      return { status: 'ok', assistantContent, toolCalls }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Agent failed'
-      this.emit(webContents, sessionId, { type: 'error', message })
-    } finally {
-      this.abortControllers.delete(sessionId)
+      return { status: 'error', error: message, toolsStarted }
     }
   }
 

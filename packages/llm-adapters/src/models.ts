@@ -2,11 +2,11 @@ import OpenAI from 'openai'
 import type { LLMProviderId, ModelInfo } from './types'
 
 const ANTHROPIC_MODELS: ModelInfo[] = [
-  { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', provider: 'anthropic' },
-  { id: 'claude-3-7-sonnet-20250219', name: 'Claude 3.7 Sonnet', provider: 'anthropic' },
-  { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', provider: 'anthropic' },
-  { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', provider: 'anthropic' },
-  { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', provider: 'anthropic' },
+  { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', provider: 'anthropic' },
+  { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', provider: 'anthropic' },
+  { id: 'claude-opus-4-8', name: 'Claude Opus 4.8', provider: 'anthropic' },
+  { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', provider: 'anthropic' },
+  { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5 (dated)', provider: 'anthropic' },
 ]
 
 const OPENAI_FALLBACK: ModelInfo[] = [

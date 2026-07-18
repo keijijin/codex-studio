@@ -4,7 +4,13 @@ import { ChatInput } from './ChatInput'
 import { MessageList } from './MessageList'
 import { useSettingsDialog } from './SettingsDialog'
 import { ApprovalDialog } from './ApprovalDialog'
-import type { SessionMode } from '@codex/shared'
+import type { RoutingMode, SessionMode } from '@codex/shared'
+
+const ROUTING_QUICK: { id: RoutingMode; label: string; title: string }[] = [
+  { id: 'fixed', label: 'Fixed', title: '既定モデルのみ（固定）' },
+  { id: 'fallback-only', label: 'Fallback', title: '失敗時に次のモデルへ切替' },
+  { id: 'auto', label: 'Auto', title: 'タスクに応じてモデルを自動選択' },
+]
 
 export function AIPanel() {
   const workspace = useAppStore((s) => s.workspace)
@@ -15,6 +21,7 @@ export function AIPanel() {
   const streamingToolCalls = useAppStore((s) => s.streamingToolCalls)
   const isStreaming = useAppStore((s) => s.isStreaming)
   const chatError = useAppStore((s) => s.chatError)
+  const routingInfo = useAppStore((s) => s.routingInfo)
   const settings = useAppStore((s) => s.settings)
   const sessionMode = useAppStore((s) => s.sessionMode)
   const createSession = useAppStore((s) => s.createSession)
@@ -23,6 +30,7 @@ export function AIPanel() {
   const cancelChat = useAppStore((s) => s.cancelChat)
   const compactChat = useAppStore((s) => s.compactChat)
   const setSessionMode = useAppStore((s) => s.setSessionMode)
+  const setRoutingMode = useAppStore((s) => s.setRoutingMode)
   const pendingApproval = useAppStore((s) => s.pendingApproval)
   const respondApproval = useAppStore((s) => s.respondApproval)
   const toggleAiPanel = useAppStore((s) => s.toggleAiPanel)
@@ -37,15 +45,30 @@ export function AIPanel() {
         : Boolean(settings?.models.openaiApiKey)
 
   const providerLabel =
-    settings?.models.defaultProvider === 'anthropic'
+    routingInfo?.provider === 'anthropic'
       ? 'Anthropic'
-      : settings?.models.defaultProvider === 'ollama'
+      : routingInfo?.provider === 'ollama'
         ? 'Ollama'
-        : 'OpenAI'
+        : routingInfo?.provider === 'openai'
+          ? 'OpenAI'
+          : settings?.models.defaultProvider === 'anthropic'
+            ? 'Anthropic'
+            : settings?.models.defaultProvider === 'ollama'
+              ? 'Ollama'
+              : 'OpenAI'
   const modelLabel =
-    sessionMode === 'agent'
+    routingInfo?.model ??
+    (sessionMode === 'agent'
       ? settings?.models.defaultAgentModel ?? settings?.models.defaultChatModel
-      : settings?.models.defaultChatModel
+      : settings?.models.defaultChatModel)
+  const routingMode = settings?.routing?.mode ?? 'fixed'
+  const routingHint =
+    routingInfo?.reason ??
+    (routingMode === 'fixed'
+      ? null
+      : routingMode === 'auto'
+        ? 'Auto ルーティング'
+        : 'フォールバック有効')
 
   const sortedSessions = [...sessions].sort(
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
@@ -152,6 +175,25 @@ export function AIPanel() {
           ))}
         </div>
 
+        <div className="mt-2 flex gap-1" role="group" aria-label="モデルルーティング">
+          {ROUTING_QUICK.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              title={opt.title}
+              disabled={isStreaming}
+              onClick={() => void setRoutingMode(opt.id)}
+              className={`flex-1 rounded px-1 py-1 text-[11px] ${
+                routingMode === opt.id
+                  ? 'bg-accent/90 text-white'
+                  : 'bg-surface text-text-secondary hover:bg-white/10'
+              } disabled:opacity-50`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
         <p className="mt-2 text-xs text-text-muted">
           {sessionMode === 'agent' ? 'Agent' : 'Ask'} · {providerLabel}: {modelLabel ?? 'gpt-4o'}
           {!hasApiKey && (
@@ -167,6 +209,15 @@ export function AIPanel() {
             </>
           )}
         </p>
+        {((isStreaming && routingInfo?.reason) ||
+          (!isStreaming && routingMode !== 'fixed' && routingHint)) && (
+          <p
+            className="mt-1 truncate text-[11px] text-text-secondary"
+            title={isStreaming ? routingInfo?.reason ?? undefined : routingHint ?? undefined}
+          >
+            {isStreaming ? routingInfo?.reason : routingHint}
+          </p>
+        )}
       </div>
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto p-3">

@@ -1,5 +1,5 @@
 import { resolve } from 'node:path'
-import type { LLMProviderId, PermissionProfile } from '@codex/shared'
+import type { LLMProviderId, PermissionProfile, RoutingMode } from '@codex/shared'
 
 export type CliCommand = 'agent' | 'team-list' | 'team-run' | 'help'
 
@@ -14,10 +14,12 @@ export interface CliArgs {
   yolo: boolean
   maxIterations: number
   json: boolean
+  /** fixed = single model; fallback-only / auto enable multi-model tries */
+  routing: RoutingMode
 }
 
 function defaultModel(provider: LLMProviderId): string {
-  if (provider === 'anthropic') return 'claude-sonnet-4-20250514'
+  if (provider === 'anthropic') return 'claude-sonnet-4-6'
   if (provider === 'ollama') return 'llama3.2'
   return 'gpt-4o'
 }
@@ -34,6 +36,7 @@ function helpArgs(): CliArgs {
     yolo: false,
     maxIterations: 50,
     json: false,
+    routing: 'fixed',
   }
 }
 
@@ -48,6 +51,7 @@ function parseSharedOptions(args: string[]): Omit<CliArgs, 'command' | 'prompt' 
   let yolo = false
   let maxIterations = 50
   let json = false
+  let routing: RoutingMode = 'fixed'
   const promptParts: string[] = []
 
   while (args.length > 0) {
@@ -68,6 +72,12 @@ function parseSharedOptions(args: string[]): Omit<CliArgs, 'command' | 'prompt' 
         throw new Error(`Unknown profile: ${name}`)
       }
       profile = name
+    } else if (token === '--routing') {
+      const mode = (args.shift() ?? 'fixed') as RoutingMode
+      if (mode !== 'fixed' && mode !== 'auto' && mode !== 'fallback-only') {
+        throw new Error(`Unknown routing mode: ${mode}. Use fixed | auto | fallback-only`)
+      }
+      routing = mode
     } else if (token === '--yolo') {
       yolo = true
     } else if (token === '--max-iterations') {
@@ -91,7 +101,29 @@ function parseSharedOptions(args: string[]): Omit<CliArgs, 'command' | 'prompt' 
     yolo,
     maxIterations,
     json,
+    routing,
     promptParts,
+  }
+}
+
+function toCliArgs(
+  command: CliCommand,
+  shared: ReturnType<typeof parseSharedOptions>,
+  prompt: string,
+  teamId = '',
+): CliArgs {
+  return {
+    command,
+    prompt,
+    teamId,
+    workspace: shared.workspace,
+    provider: shared.provider,
+    model: shared.model,
+    profile: shared.profile,
+    yolo: shared.yolo,
+    maxIterations: shared.maxIterations,
+    json: shared.json,
+    routing: shared.routing,
   }
 }
 
@@ -112,18 +144,7 @@ export function parseArgs(argv: string[]): CliArgs {
       if (!prompt) {
         throw new Error('Missing prompt. Usage: codex-studio agent "<prompt>"')
       }
-      return {
-        command: 'agent',
-        prompt,
-        teamId: '',
-        workspace: shared.workspace,
-        provider: shared.provider,
-        model: shared.model,
-        profile: shared.profile,
-        yolo: shared.yolo,
-        maxIterations: shared.maxIterations,
-        json: shared.json,
-      }
+      return toCliArgs('agent', shared, prompt)
     } catch (err) {
       if (err instanceof Error && err.message === '__help__') return helpArgs()
       throw err
@@ -136,18 +157,7 @@ export function parseArgs(argv: string[]): CliArgs {
       if (sub === '-h' || sub === '--help') return helpArgs()
       try {
         const shared = parseSharedOptions(args)
-        return {
-          command: 'team-list',
-          prompt: '',
-          teamId: '',
-          workspace: shared.workspace,
-          provider: shared.provider,
-          model: shared.model,
-          profile: shared.profile,
-          yolo: shared.yolo,
-          maxIterations: shared.maxIterations,
-          json: shared.json,
-        }
+        return toCliArgs('team-list', shared, '')
       } catch (err) {
         if (err instanceof Error && err.message === '__help__') return helpArgs()
         throw err
@@ -164,18 +174,7 @@ export function parseArgs(argv: string[]): CliArgs {
         if (!prompt) {
           throw new Error('Missing task. Usage: codex-studio team run <id> "<task>"')
         }
-        return {
-          command: 'team-run',
-          prompt,
-          teamId,
-          workspace: shared.workspace,
-          provider: shared.provider,
-          model: shared.model,
-          profile: shared.profile,
-          yolo: shared.yolo,
-          maxIterations: shared.maxIterations,
-          json: shared.json,
-        }
+        return toCliArgs('team-run', shared, prompt, teamId)
       } catch (err) {
         if (err instanceof Error && err.message === '__help__') return helpArgs()
         throw err

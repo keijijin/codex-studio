@@ -6,6 +6,8 @@ import {
   APP_USER_DATA_DIR,
   DEFAULT_AGENT_PERMISSIONS,
   DEFAULT_SETTINGS,
+  migrateModelId,
+  normalizeRoutingSettings,
   type AppSettings,
   type Message,
   type Session,
@@ -136,6 +138,7 @@ export class SettingsService {
         ...stored,
         general: { ...DEFAULT_SETTINGS.general, ...stored.general },
         models: { ...DEFAULT_SETTINGS.models, ...stored.models },
+        routing: normalizeRoutingSettings(stored.routing ?? DEFAULT_SETTINGS.routing),
         agent,
       })
     }
@@ -160,7 +163,17 @@ export class SettingsService {
       ...DEFAULT_SETTINGS,
       ...stored,
       general: { ...DEFAULT_SETTINGS.general, ...stored.general },
-      models: { ...DEFAULT_SETTINGS.models, ...stored.models },
+      models: {
+        ...DEFAULT_SETTINGS.models,
+        ...stored.models,
+        defaultChatModel: migrateModelId(
+          stored.models?.defaultChatModel ?? DEFAULT_SETTINGS.models.defaultChatModel,
+        ),
+        defaultAgentModel: migrateModelId(
+          stored.models?.defaultAgentModel ?? DEFAULT_SETTINGS.models.defaultAgentModel,
+        ),
+      },
+      routing: normalizeRoutingSettings(stored.routing ?? DEFAULT_SETTINGS.routing),
       agent,
     }
   }
@@ -186,6 +199,12 @@ export class SettingsService {
       ...partial,
       general: { ...current.general, ...partial.general },
       models: { ...current.models, ...partial.models },
+      routing: normalizeRoutingSettings({
+        ...current.routing,
+        ...partial.routing,
+        fallbackChain: partial.routing?.fallbackChain ?? current.routing.fallbackChain,
+        profiles: partial.routing?.profiles ?? current.routing.profiles,
+      }),
       agent,
     }
     store.set('settings', updated)

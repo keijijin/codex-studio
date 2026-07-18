@@ -10,9 +10,10 @@ import {
   runTeam,
   type HeadlessAgentResult,
 } from '@codex/agent-core'
-import { getProviderInstance } from '@codex/llm-adapters'
+import { getProviderInstance, decideRouting, isRetryableError, type ModelCandidate } from '@codex/llm-adapters'
 import { defaultToolRegistry, resolveWithinWorkspace } from '@codex/tools'
 import {
+  DEFAULT_FALLBACK_CHAIN,
   DEFAULT_OLLAMA_BASE_URL,
   type LLMProviderId,
 } from '@codex/shared'
@@ -32,6 +33,7 @@ Options:
   -p, --provider <id>      openai | anthropic | ollama (default: openai)
   -m, --model <id>         Model id
   --profile <name>         readonly | ask | allow (default: readonly)
+  --routing <mode>         fixed | auto | fallback-only (default: fixed)
   --yolo                   Allow all tools (same as --profile allow)
   --max-iterations <n>     Tool loop limit (default: 50)
   --json                   Print final result as JSON
@@ -42,6 +44,7 @@ Environment:
 
 Examples:
   pnpm cli -- agent "README を要約して" -w .
+  pnpm cli -- agent "実装して" -w . --routing fallback-only
   pnpm cli -- team list -w .
   pnpm cli -- team run review-squad "IPC と権限をレビュー" -w .
 
@@ -52,7 +55,7 @@ Notes:
 `)
 }
 
-function resolveApiKey(provider: LLMProviderId): { apiKey: string; baseUrl?: string } {
+function resolveApiKey(provider: LLMProviderId): { apiKey: string; baseUrl?: string } | null {
   if (provider === 'ollama') {
     return {
       apiKey: 'ollama',
@@ -61,23 +64,38 @@ function resolveApiKey(provider: LLMProviderId): { apiKey: string; baseUrl?: str
   }
   if (provider === 'anthropic') {
     const apiKey = process.env.ANTHROPIC_API_KEY
-    if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not set')
+    if (!apiKey) return null
     return { apiKey }
   }
   const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) throw new Error('OPENAI_API_KEY is not set')
+  if (!apiKey) return null
   return { apiKey }
 }
 
-async function runAgent(args: CliArgs): Promise<HeadlessAgentResult> {
-  const { apiKey, baseUrl } = resolveApiKey(args.provider)
+function isCliCandidateAvailable(candidate: ModelCandidate): boolean {
+  return resolveApiKey(candidate.provider) !== null
+}
+
+async function runAgentOnce(
+  args: CliArgs,
+  candidate: ModelCandidate,
+): Promise<HeadlessAgentResult> {
+  const creds = resolveApiKey(candidate.provider)
+  if (!creds) {
+    return {
+      success: false,
+      text: '',
+      error: `Missing API key for ${candidate.provider}`,
+      events: [],
+    }
+  }
   return runHeadlessAgent({
     workspaceRoot: args.workspace,
     prompt: args.prompt,
-    provider: args.provider,
-    model: args.model,
-    apiKey,
-    baseUrl,
+    provider: candidate.provider,
+    model: candidate.model,
+    apiKey: creds.apiKey,
+    baseUrl: creds.baseUrl,
     maxIterations: args.maxIterations,
     permissionProfile: args.profile,
     yoloMode: args.yolo || args.profile === 'allow',
@@ -95,6 +113,72 @@ async function runAgent(args: CliArgs): Promise<HeadlessAgentResult> {
       }
     },
   })
+}
+
+async function runAgent(args: CliArgs): Promise<HeadlessAgentResult & {
+  routing?: { mode: string; reason: string; selected: ModelCandidate; tried: ModelCandidate[] }
+}> {
+  const primary: ModelCandidate = { provider: args.provider, model: args.model }
+  const decision = decideRouting({
+    mode: args.routing,
+    primary,
+    fallbackChain: DEFAULT_FALLBACK_CHAIN,
+    maxAttempts: 3,
+    isAvailable: isCliCandidateAvailable,
+    prompt: args.prompt,
+    runMode: 'agent',
+  })
+
+  if (!args.json) {
+    console.error(`[routing] ${decision.reason}`)
+  }
+
+  const tried: ModelCandidate[] = []
+  let last: HeadlessAgentResult = {
+    success: false,
+    text: '',
+    error: 'No available models',
+    events: [],
+  }
+
+  for (let i = 0; i < decision.queue.length; i++) {
+    const candidate = decision.queue[i]!
+    tried.push(candidate)
+    if (i > 0 && !args.json) {
+      console.error(`\n[routing] fallback → ${candidate.provider}:${candidate.model}`)
+    }
+    last = await runAgentOnce(args, candidate)
+    if (last.success) {
+      return {
+        ...last,
+        routing: {
+          mode: decision.mode,
+          reason: decision.reason,
+          selected: candidate,
+          tried,
+        },
+      }
+    }
+    const err = last.error ?? 'Agent failed'
+    const toolsStarted = last.events.some(
+      (e) => e.type === 'tool_call_start' || e.type === 'tool_call_result',
+    )
+    const canRetry =
+      !toolsStarted &&
+      i < decision.queue.length - 1 &&
+      isRetryableError(err)
+    if (!canRetry) break
+  }
+
+  return {
+    ...last,
+    routing: {
+      mode: decision.mode,
+      reason: decision.reason,
+      selected: tried[tried.length - 1] ?? decision.selected,
+      tried,
+    },
+  }
 }
 
 async function listTeams(args: CliArgs): Promise<void> {
@@ -118,7 +202,15 @@ async function listTeams(args: CliArgs): Promise<void> {
 }
 
 async function runTeamCli(args: CliArgs): Promise<void> {
-  const { apiKey, baseUrl } = resolveApiKey(args.provider)
+  const creds = resolveApiKey(args.provider)
+  if (!creds) {
+    throw new Error(
+      args.provider === 'ollama'
+        ? 'Ollama is not configured'
+        : `${args.provider.toUpperCase()} API key is not set`,
+    )
+  }
+  const { apiKey, baseUrl } = creds
   const workspaceRoot = resolve(args.workspace)
   const teams = await collectTeams(workspaceRoot)
   const team = findTeam(teams, args.teamId)
@@ -204,6 +296,7 @@ async function main(): Promise<void> {
             success: result.success,
             text: result.text,
             error: result.error,
+            routing: result.routing,
           },
           null,
           2,

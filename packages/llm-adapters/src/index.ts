@@ -4,6 +4,7 @@ export * from './anthropic-provider'
 export * from './ollama-provider'
 export * from './models'
 export * from './provider-utils'
+export * from './router'
 
 export { openaiProvider } from './openai-provider'
 export { anthropicProvider } from './anthropic-provider'

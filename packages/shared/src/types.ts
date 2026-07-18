@@ -55,6 +55,7 @@ export interface ModelInfo {
 
 import type { AgentPermissions } from './permissions'
 import { DEFAULT_AGENT_PERMISSIONS } from './permissions'
+import { DEFAULT_ROUTING, type RoutingSettings } from './routing'
 
 export interface AppSettings {
   general: {
@@ -69,6 +70,8 @@ export interface AppSettings {
     anthropicApiKey?: string
     ollamaBaseUrl?: string
   }
+  /** Multi-model routing (fixed | auto | fallback-only). Default: fixed. */
+  routing: RoutingSettings
   agent: {
     maxIterations: number
     yoloMode: boolean
@@ -93,6 +96,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     defaultAgentModel: 'gpt-4o',
     ollamaBaseUrl: DEFAULT_OLLAMA_BASE_URL,
   },
+  routing: { ...DEFAULT_ROUTING, fallbackChain: [...DEFAULT_ROUTING.fallbackChain] },
   agent: {
     maxIterations: 100,
     yoloMode: false,
