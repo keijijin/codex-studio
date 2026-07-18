@@ -1,5 +1,6 @@
 import { spawn } from 'child_process'
 import type { Tool, ToolContext, ToolResult } from '../types'
+import { wrapShellCommand } from '../utils/shell-profile'
 
 const MAX_OUTPUT = 100 * 1024
 const DEFAULT_TIMEOUT = 30_000
@@ -17,7 +18,9 @@ const DENY_PATTERNS = [
 
 export const shellTool: Tool = {
   name: 'Shell',
-  description: 'Run a shell command in the workspace. Use for build, test, or git commands.',
+  description:
+    'Run a shell command in the workspace. Use for build, test, or git commands. ' +
+    'Login/profile files (e.g. ~/.bash_profile, ~/.zshrc) are sourced automatically — do not prepend source yourself.',
   requiresApproval: true,
   parameters: {
     type: 'object',
@@ -42,17 +45,26 @@ export const shellTool: Tool = {
       ? ctx.resolvePath(String(args.cwd))
       : ctx.workspaceRoot
     const timeout = Number(args.timeout) || DEFAULT_TIMEOUT
+    const wrapped = wrapShellCommand(command)
 
     if (ctx.executeMode === 'preview') {
+      const profileNote = wrapped.bootstrap
+        ? `\n(profile: ${wrapped.bootstrap})`
+        : ''
       return {
         success: true,
-        output: `Preview: run command in ${ctx.getRelativePath(cwd) || '.'}\n$ ${command}`,
-        metadata: { command, cwd, action: 'shell' },
+        output: `Preview: run command in ${ctx.getRelativePath(cwd) || '.'}\n$ ${command}${profileNote}`,
+        metadata: { command, cwd, action: 'shell', bootstrap: wrapped.bootstrap },
       }
     }
 
     return new Promise((resolve) => {
-      const proc = spawn(command, { shell: true, cwd, env: process.env })
+      const proc = spawn(wrapped.file, wrapped.args, {
+        cwd,
+        env: process.env,
+        // Avoid nested shell:true — profile + command already wrapped for this shell.
+        windowsHide: true,
+      })
       let stdout = ''
       let stderr = ''
       let killed = false
@@ -79,7 +91,7 @@ export const shellTool: Tool = {
           output: killed
             ? `Error: command timed out after ${timeout}ms\n${output}`
             : `Exit code: ${code ?? 'unknown'}\n${output}`,
-          metadata: { exitCode: code, killed },
+          metadata: { exitCode: code, killed, shell: wrapped.file, bootstrap: wrapped.bootstrap },
         })
       })
 

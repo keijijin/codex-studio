@@ -1,6 +1,7 @@
 export * from './types'
 export * from './resolve-path'
 export * from './registry'
+export * from './utils/shell-profile'
 export { readTool } from './tools/read'
 export { grepTool } from './tools/grep'
 export { globTool } from './tools/glob'

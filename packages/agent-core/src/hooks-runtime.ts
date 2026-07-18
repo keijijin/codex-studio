@@ -5,6 +5,7 @@ import {
   type HookDefinition,
   type HooksConfig,
 } from '@codex/shared'
+import { wrapShellCommand } from '@codex/tools'
 import { matchGlob } from './rules-loader'
 import { loadHooksConfig } from './hooks-loader'
 
@@ -77,10 +78,11 @@ function runShellCommand(
   timeoutMs: number,
 ): Promise<{ success: boolean; output: string }> {
   return new Promise((resolve) => {
-    const proc = spawn(command, {
-      shell: true,
+    const wrapped = wrapShellCommand(command)
+    const proc = spawn(wrapped.file, wrapped.args, {
       cwd,
       env: process.env,
+      windowsHide: true,
     })
     let stdout = ''
     let stderr = ''

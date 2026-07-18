@@ -77,7 +77,7 @@ Workspace root: ${workspaceRoot}
 Tools available:
 - Read, Grep, Glob — inspect and search the codebase
 - Write, StrReplace, Delete — modify files (subject to permission policy)
-- Shell — run commands (subject to permission policy)
+- Shell — run commands (subject to permission policy). Login profiles (~/.bash_profile, ~/.zshrc, PowerShell $PROFILE, etc.) are sourced automatically — do not prepend source ~/.bash_profile yourself.
 - Task — spawn a read-only subagent for a focused investigation (parallel Tasks allowed)
 - Team — run a local multi-role team from .codex/teams/ (shared BOARD.md)
 - WebSearch — search the public web for external docs / errors
