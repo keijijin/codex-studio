@@ -168,9 +168,12 @@ export function quietBootstrapCommand(shell: string, command: string): string {
     return `& { ${command} } *> $null\r`
   }
   if (isCmd(shell)) {
-    return `${command} >nul 2>&1\r`
+    return `(${command}) >nul 2>&1\r`
   }
-  return `${command} >/dev/null 2>&1\n`
+  if (shellBaseName(shell) === 'fish') {
+    return `begin; ${command}; end >/dev/null 2>&1\n`
+  }
+  return `{ ${command}; } >/dev/null 2>&1\n`
 }
 
 export interface WrappedShellSpawn {
@@ -208,8 +211,9 @@ export function wrapShellCommand(
   }
 
   if (isCmd(shell)) {
+    // cmd: wrap multi-statement bootstrap so >nul applies to all parts
     const body = bootstrap
-      ? `${bootstrap} >nul 2>&1 & ${command}`
+      ? `(${bootstrap}) >nul 2>&1 & ${command}`
       : command
     return {
       file: shell,
@@ -219,8 +223,13 @@ export function wrapShellCommand(
     }
   }
 
+  // Brace/begin group so every sourced file's stdout is silenced, while
+  // remaining in the same shell so PATH / env from profiles still apply.
+  const name = shellBaseName(shell)
   const body = bootstrap
-    ? `${bootstrap} >/dev/null 2>&1; ${command}`
+    ? name === 'fish'
+      ? `begin; ${bootstrap}; end >/dev/null 2>&1; ${command}`
+      : `{ ${bootstrap}; } >/dev/null 2>&1; ${command}`
     : command
   return {
     file: shell,

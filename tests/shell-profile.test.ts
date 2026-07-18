@@ -29,7 +29,23 @@ describe('wrapShellCommand', () => {
     })
     expect(wrapped.args[1]).toContain('source "/Users/demo/.zprofile"')
     expect(wrapped.args[1]).toContain('source "/Users/demo/.bash_profile"')
-    expect(wrapped.args[1]).toContain('pnpm -v')
+    expect(wrapped.args[1]).toContain('{ ')
+    expect(wrapped.args[1]).toContain('} >/dev/null 2>&1; pnpm -v')
+  })
+
+  it('silences all profile sources with a brace group (not only the last)', () => {
+    const wrapped = wrapShellCommand('printf ok', {
+      platform: 'darwin',
+      shell: '/bin/bash',
+      home: '/Users/demo',
+      exists: (p) =>
+        p === '/Users/demo/.bash_profile' || p === '/Users/demo/.bashrc',
+    })
+    const body = String(wrapped.args[1])
+    expect(body.startsWith('{ ')).toBe(true)
+    expect(body).toContain('} >/dev/null 2>&1; printf ok')
+    // Must not leave an ungrouped first source that can leak stdout (e.g. conda)
+    expect(body.startsWith('source ')).toBe(false)
   })
 
   it('uses PowerShell -Command with profile on Windows', () => {
