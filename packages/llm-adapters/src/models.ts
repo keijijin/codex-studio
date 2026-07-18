@@ -1,5 +1,6 @@
-import OpenAI from 'openai'
 import type { LLMProviderId, ModelInfo } from './types'
+import { createOpenAIClient } from './create-clients'
+import { getSystemCaFetch } from './system-ca-fetch'
 
 const ANTHROPIC_MODELS: ModelInfo[] = [
   { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', provider: 'anthropic' },
@@ -38,7 +39,8 @@ export async function listModels(
 
   if (provider === 'anthropic') {
     try {
-      const res = await fetch('https://api.anthropic.com/v1/models', {
+      const fetchImpl = getSystemCaFetch() ?? fetch
+      const res = await fetchImpl('https://api.anthropic.com/v1/models', {
         headers: {
           'x-api-key': apiKey,
           'anthropic-version': '2023-06-01',
@@ -62,7 +64,7 @@ export async function listModels(
   }
 
   try {
-    const client = new OpenAI({ apiKey })
+    const client = createOpenAIClient({ apiKey })
     const page = await client.models.list()
     const models: ModelInfo[] = []
     for await (const model of page) {

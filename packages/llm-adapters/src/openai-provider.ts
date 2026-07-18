@@ -1,4 +1,3 @@
-import OpenAI from 'openai'
 import type {
   AgentChatOptions,
   AgentMessage,
@@ -11,12 +10,13 @@ import type {
 } from './types'
 import { parseToolArguments } from './types'
 import { toOpenAIMessages } from './openai-messages'
+import { createOpenAIClient } from './create-clients'
 
 export class OpenAIProvider implements LLMProvider {
   id = 'openai' as const
 
   async *chat(messages: ChatMessage[], options: ChatOptions): AsyncGenerator<StreamChunk> {
-    const client = new OpenAI({ apiKey: options.apiKey })
+    const client = createOpenAIClient({ apiKey: options.apiKey })
 
     try {
       const stream = await client.chat.completions.create({
@@ -40,7 +40,7 @@ export class OpenAIProvider implements LLMProvider {
     messages: AgentMessage[],
     options: AgentChatOptions,
   ): AsyncGenerator<AgentStreamChunk> {
-    const client = new OpenAI({ apiKey: options.apiKey })
+    const client = createOpenAIClient({ apiKey: options.apiKey })
 
     try {
       const stream = await client.chat.completions.create({

@@ -34,12 +34,35 @@ const RETRYABLE = [
   /ENOTFOUND/i,
   /ECONNRESET/i,
   /fetch failed/i,
+  /connection error/i,
+  /certificate/i,
+  /UNABLE_TO_VERIFY/i,
   /network/i,
   /socket/i,
   /ollama/i,
   /connection refused/i,
+  /接続できません/i,
+  /への接続に失敗/i,
   /temporarily unavailable/i,
 ]
+
+/** True when the provider is unreachable (worth switching models). */
+export function isConnectionError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  if (!message.trim()) return false
+  return (
+    /connection error/i.test(message) ||
+    /fetch failed/i.test(message) ||
+    /ECONNREFUSED/i.test(message) ||
+    /ENOTFOUND/i.test(message) ||
+    /ECONNRESET/i.test(message) ||
+    /certificate/i.test(message) ||
+    /UNABLE_TO_VERIFY/i.test(message) ||
+    /接続できません/i.test(message) ||
+    /への接続に失敗/i.test(message) ||
+    /connection refused/i.test(message)
+  )
+}
 
 export function isRetryableError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? '')

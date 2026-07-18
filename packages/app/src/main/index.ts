@@ -5,6 +5,8 @@ import { APP_NAME, IPC_CHANNELS } from '@codex/shared'
 import { indexService } from '@codex/indexer'
 import { registerIpcHandlers } from './ipc/handlers'
 import { settingsService } from './services/settings'
+import { modelsOllamaBaseUrl } from './services/llm-config'
+import { probeOllamaAvailable } from './services/ollama-availability'
 import { workspaceService } from './services/workspace'
 import { terminalService } from './services/terminal-service'
 import { fileWatcherService } from './services/file-watcher'
@@ -83,6 +85,9 @@ app.whenReady().then(async () => {
 
   registerIpcHandlers()
   setupApplicationMenu()
+
+  // Warm Ollama reachability cache so auto-routing can skip a dead local server.
+  void probeOllamaAvailable(modelsOllamaBaseUrl(settingsService.get().models)).catch(() => undefined)
 
   const e2eWorkspace = process.env.CODEX_E2E_WORKSPACE
   if (e2eWorkspace) {

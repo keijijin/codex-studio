@@ -62,7 +62,7 @@ describe('terminal shell bootstrap', () => {
       home: join('C:', 'Users', 'demo'),
       exists: () => false,
     })
-    expect(cmd).toBe('if (Test-Path $PROFILE) { . $PROFILE }')
+    expect(cmd).toBe('if (Test-Path -LiteralPath $PROFILE) { . $PROFILE }')
   })
 
   it('calls profile.cmd for cmd.exe when present', () => {
@@ -80,7 +80,16 @@ describe('terminal shell bootstrap', () => {
     expect(quietBootstrapCommand('/bin/bash', 'source ~/.bash_profile')).toContain(
       '>/dev/null',
     )
-    expect(quietBootstrapCommand('powershell.exe', '. $PROFILE')).toContain('Out-Null')
+    expect(quietBootstrapCommand('powershell.exe', '. $PROFILE')).toBe(
+      '& { . $PROFILE } *> $null\r',
+    )
     expect(quietBootstrapCommand('cmd.exe', 'call profile.cmd')).toContain('>nul')
+  })
+
+  it('quiets PowerShell if-statements without piping them', () => {
+    const bootstrap = 'if (Test-Path -LiteralPath $PROFILE) { . $PROFILE }'
+    const quiet = quietBootstrapCommand('powershell.exe', bootstrap)
+    expect(quiet).toBe(`& { ${bootstrap} } *> $null\r`)
+    expect(quiet).not.toMatch(/\|\s*Out-Null/)
   })
 })

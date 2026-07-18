@@ -1,5 +1,6 @@
 import {
   getProviderInstance,
+  isConnectionError,
   isRetryableError,
   listModels,
   type ChatMessage,
@@ -17,9 +18,11 @@ import {
 import { sessionService, settingsService } from './settings'
 import { agentService } from './agent'
 import {
+  formatLlmConnectionError,
   getApiKeyForProvider,
   missingApiKeyMessage,
-  resolveRoutingDecision,
+  noteProviderConnectionFailure,
+  resolveRoutingDecisionAsync,
   runtimeFromCandidate,
 } from './llm-config'
 import { DEFAULT_OLLAMA_BASE_URL } from '@codex/shared'
@@ -100,7 +103,7 @@ export class ChatService {
     }
 
     const settings = settingsService.get()
-    const decision = resolveRoutingDecision(settings, {
+    const decision = await resolveRoutingDecisionAsync(settings, {
       runMode: 'chat',
       prompt: content,
     })
@@ -173,7 +176,7 @@ export class ChatService {
 
         const llm = getProviderInstance(runtime.provider)
         let assistantContent = ''
-        let streamError: string | null = null
+        let rawStreamError: string | null = null
 
         try {
           for await (const chunk of llm.chat(llmMessages, {
@@ -186,15 +189,15 @@ export class ChatService {
               assistantContent += chunk.delta
               this.emit(webContents, sessionId, { type: 'text_delta', content: chunk.delta })
             } else if (chunk.type === 'error') {
-              streamError = chunk.error
+              rawStreamError = chunk.error
               break
             }
           }
         } catch (err) {
-          streamError = err instanceof Error ? err.message : 'Chat failed'
+          rawStreamError = err instanceof Error ? err.message : 'Chat failed'
         }
 
-        if (!streamError) {
+        if (!rawStreamError) {
           const saved = sessionService.addMessage(sessionId, {
             sessionId,
             role: 'assistant',
@@ -204,10 +207,17 @@ export class ChatService {
           return
         }
 
+        if (isConnectionError(rawStreamError)) {
+          noteProviderConnectionFailure(runtime.provider, settings)
+        }
+
+        const streamError = formatLlmConnectionError(runtime.provider, rawStreamError)
         lastError = streamError
         const canRetry =
           attempt < decision.queue.length - 1 &&
-          isRetryableError(streamError) &&
+          (isConnectionError(rawStreamError) ||
+            isRetryableError(rawStreamError) ||
+            isRetryableError(streamError)) &&
           !abortController.signal.aborted
 
         if (!canRetry) {

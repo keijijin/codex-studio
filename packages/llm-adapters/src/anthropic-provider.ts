@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk'
+import type Anthropic from '@anthropic-ai/sdk'
 import type {
   AgentChatOptions,
   AgentMessage,
@@ -9,6 +9,7 @@ import type {
   StreamChunk,
   ToolCall,
 } from './types'
+import { createAnthropicClient } from './create-clients'
 
 function toAnthropicMessages(messages: AgentMessage[]): {
   system: string
@@ -76,7 +77,7 @@ export class AnthropicProvider implements LLMProvider {
   id = 'anthropic' as const
 
   async *chat(messages: ChatMessage[], options: ChatOptions): AsyncGenerator<StreamChunk> {
-    const client = new Anthropic({ apiKey: options.apiKey })
+    const client = createAnthropicClient({ apiKey: options.apiKey })
 
     const system = messages.find((m) => m.role === 'system')?.content ?? ''
     const chatMessages = messages
@@ -111,7 +112,7 @@ export class AnthropicProvider implements LLMProvider {
     messages: AgentMessage[],
     options: AgentChatOptions,
   ): AsyncGenerator<AgentStreamChunk> {
-    const client = new Anthropic({ apiKey: options.apiKey })
+    const client = createAnthropicClient({ apiKey: options.apiKey })
     const { system, messages: chatMessages } = toAnthropicMessages(messages)
 
     try {

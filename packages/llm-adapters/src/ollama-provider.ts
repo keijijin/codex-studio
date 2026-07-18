@@ -1,4 +1,3 @@
-import OpenAI from 'openai'
 import type {
   AgentChatOptions,
   AgentMessage,
@@ -11,12 +10,13 @@ import type {
 } from './types'
 import { parseToolArguments } from './types'
 import { toOpenAIMessages } from './openai-messages'
+import { createOpenAIClient } from './create-clients'
 
 export const DEFAULT_OLLAMA_BASE_URL = 'http://localhost:11434'
 
-function createClient(options: { apiKey: string; baseUrl?: string }): OpenAI {
+function createClient(options: { apiKey: string; baseUrl?: string }) {
   const base = (options.baseUrl ?? DEFAULT_OLLAMA_BASE_URL).replace(/\/$/, '')
-  return new OpenAI({
+  return createOpenAIClient({
     apiKey: options.apiKey || 'ollama',
     baseURL: `${base}/v1`,
   })

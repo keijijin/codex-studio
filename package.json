@@ -14,9 +14,9 @@
     "node-pty": "^1.1.0"
   },
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "node scripts/with-system-ca.mjs electron-vite dev",
     "build": "electron-vite build",
-    "preview": "electron-vite preview",
+    "preview": "node scripts/with-system-ca.mjs electron-vite preview",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
     "test": "vitest run",

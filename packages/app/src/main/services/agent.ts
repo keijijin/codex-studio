@@ -1,7 +1,7 @@
 import { BrowserWindow } from 'electron'
 import { AgentOrchestrator } from '@codex/agent-core'
 import type { AgentMessage } from '@codex/llm-adapters'
-import { getProviderInstance, isRetryableError } from '@codex/llm-adapters'
+import { getProviderInstance, isConnectionError, isRetryableError } from '@codex/llm-adapters'
 import { defaultToolRegistry } from '@codex/tools'
 import type { WebContents } from 'electron'
 import {
@@ -16,8 +16,10 @@ import {
 import { approvalService } from './approval'
 import { createE2eMockAgentProvider } from './e2e-mock-agent'
 import {
+  formatLlmConnectionError,
   missingApiKeyMessage,
-  resolveRoutingDecision,
+  noteProviderConnectionFailure,
+  resolveRoutingDecisionAsync,
   runtimeFromCandidate,
   type LlmRuntimeConfig,
 } from './llm-config'
@@ -93,7 +95,7 @@ export class AgentService {
         : `/team ${teamMatch.team.id}`
     }
 
-    const decision = resolveRoutingDecision(settings, {
+    const decision = await resolveRoutingDecisionAsync(settings, {
       runMode: 'agent',
       prompt: content,
       isTeam: Boolean(teamMatch),
@@ -268,16 +270,21 @@ export class AgentService {
           return
         }
 
-        lastError = outcome.error
+        if (isConnectionError(outcome.error)) {
+          noteProviderConnectionFailure(runtime.provider, settings)
+        }
+        lastError = formatLlmConnectionError(runtime.provider, outcome.error)
         const canRetry =
           !outcome.toolsStarted &&
           attempt < decision.queue.length - 1 &&
-          isRetryableError(outcome.error) &&
+          (isConnectionError(outcome.error) ||
+            isRetryableError(outcome.error) ||
+            isRetryableError(lastError)) &&
           !abortController.signal.aborted &&
           !isE2eMock
 
         if (!canRetry) {
-          this.emit(webContents, sessionId, { type: 'error', message: outcome.error })
+          this.emit(webContents, sessionId, { type: 'error', message: lastError })
           return
         }
       }
@@ -287,7 +294,8 @@ export class AgentService {
         message: lastError || 'Agent failed',
       })
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Agent failed'
+      const provider = decision.selected.provider
+      const message = formatLlmConnectionError(provider, err)
       this.emit(webContents, sessionId, { type: 'error', message })
     } finally {
       this.abortControllers.delete(sessionId)

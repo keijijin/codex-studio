@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
 import { homedir } from 'os'
-import { basename, isAbsolute, join, relative, resolve } from 'path'
+import { basename, isAbsolute, join, posix, relative, resolve } from 'path'
 import type { WebContents } from 'electron'
 import * as pty from 'node-pty'
 import { IPC_EVENTS } from '@codex/shared'
@@ -120,7 +120,7 @@ export function profileBootstrapCommand(
         .filter((c): c is string => Boolean(c))
       // Also try $PROFILE when no known file was found (works at runtime in PS).
       if (parts.length === 0) {
-        return 'if (Test-Path $PROFILE) { . $PROFILE }'
+        return 'if (Test-Path -LiteralPath $PROFILE) { . $PROFILE }'
       }
       return [...new Set(parts)].join('; ')
     }
@@ -138,12 +138,15 @@ export function profileBootstrapCommand(
     }
   }
 
-  // Unix / Git Bash on Windows
-  const bashProfile = join(home, '.bash_profile')
-  const bashrc = join(home, '.bashrc')
-  const zprofile = join(home, '.zprofile')
-  const zshrc = join(home, '.zshrc')
-  const profile = join(home, '.profile')
+  // Unix paths: use posix separators when targeting macOS/Linux so behavior does
+  // not depend on the host OS (e.g. running darwin-path tests on Windows).
+  // Git Bash on Windows keeps win32 join via platform === 'win32'.
+  const unixJoin = platform === 'win32' ? join : posix.join
+  const bashProfile = unixJoin(home, '.bash_profile')
+  const bashrc = unixJoin(home, '.bashrc')
+  const zprofile = unixJoin(home, '.zprofile')
+  const zshrc = unixJoin(home, '.zshrc')
+  const profile = unixJoin(home, '.profile')
 
   if (name === 'bash' || name === 'sh') {
     return (
@@ -165,7 +168,7 @@ export function profileBootstrapCommand(
   }
 
   if (name === 'fish') {
-    const fishConfig = join(home, '.config', 'fish', 'config.fish')
+    const fishConfig = unixJoin(home, '.config', 'fish', 'config.fish')
     return sourceIfExists(fishConfig, exists, 'unix')
   }
 
@@ -178,7 +181,9 @@ export function profileBootstrapCommand(
 /** Wrap a bootstrap command so it doesn't spam the terminal. */
 export function quietBootstrapCommand(shell: string, command: string): string {
   if (isPowerShell(shell)) {
-    return `${command} | Out-Null\r`
+    // PowerShell statements (e.g. `if (...) { ... }`) cannot be piped.
+    // Wrap in a scriptblock and discard all streams — valid on Windows PS 5.1+.
+    return `& { ${command} } *> $null\r`
   }
   if (isCmd(shell)) {
     return `${command} >nul 2>&1\r`

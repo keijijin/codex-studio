@@ -80,13 +80,20 @@ export function decideRouting(input: DecideRoutingInput): RoutingDecision {
   const maxAttempts = Math.min(5, Math.max(1, input.maxAttempts || 1))
 
   if (input.mode === 'fixed') {
-    const queue = filterAvailable([input.primary], input.isAvailable)
-    const selected = queue[0] ?? input.primary
+    // Prefer the primary model, but keep available fallbacks for connection errors.
+    const raw = buildFallbackQueue(input.primary, input.fallbackChain)
+    const queue = filterAvailable(raw, input.isAvailable).slice(0, maxAttempts)
+    const primaryAvailable = input.isAvailable(input.primary)
+    const selected = primaryAvailable
+      ? input.primary
+      : (queue[0] ?? input.primary)
     return {
       mode: 'fixed',
       selected,
-      reason: `固定モデル ${selected.provider}:${selected.model}`,
-      queue: queue.length > 0 ? queue.slice(0, 1) : [input.primary],
+      reason: primaryAvailable
+        ? `固定モデル ${selected.provider}:${selected.model}`
+        : `固定モデル不可 → ${selected.provider}:${selected.model}`,
+      queue: queue.length > 0 ? queue : [input.primary],
     }
   }
 
@@ -113,8 +120,9 @@ export function decideRouting(input: DecideRoutingInput): RoutingDecision {
     BUILTIN_AUTO_PROFILES[taskKind] ??
     BUILTIN_AUTO_PROFILES.unknown
 
-  // Prefer profile, then primary, then configured fallback chain
-  const raw = dedupe([...profile, input.primary, ...input.fallbackChain])
+  // Prefer the user's configured primary, then task profile, then fallback chain.
+  // (Avoid starting on a local Ollama that may be offline while cloud keys exist.)
+  const raw = dedupe([input.primary, ...profile, ...input.fallbackChain])
   const queue = filterAvailable(raw, input.isAvailable).slice(0, maxAttempts)
   const selected = queue[0] ?? input.primary
 

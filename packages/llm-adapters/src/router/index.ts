@@ -1,4 +1,4 @@
-export { isRetryableError } from './errors'
+export { isRetryableError, isConnectionError } from './errors'
 export { classifyTaskKind } from './classify'
 export { decideRouting, BUILTIN_AUTO_PROFILES } from './decide'
 export type {
