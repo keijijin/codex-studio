@@ -42,6 +42,8 @@ export interface AgentRunContext {
     teamId: string
     prompt: string
   }) => Promise<ToolResult>
+  /** Env for Shell / hooks (workspace agent.env + terminal sync). */
+  getShellEnv?: () => NodeJS.ProcessEnv
 }
 
 export type AgentOrchestratorEvent =
@@ -153,6 +155,7 @@ export class AgentOrchestrator {
       subagentDepth: depth,
       runSubagent: ctx.runSubagent,
       runTeam: ctx.runTeam,
+      getShellEnv: ctx.getShellEnv,
     }
 
     const budget =

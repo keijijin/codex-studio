@@ -41,6 +41,9 @@ export const IPC_CHANNELS = {
   TERMINAL_WRITE: 'terminal:write',
   TERMINAL_RESIZE: 'terminal:resize',
   TERMINAL_DESTROY: 'terminal:destroy',
+  TERMINAL_CAPTURE_ENV: 'terminal:captureEnv',
+  AGENT_ENV_STATUS: 'agentEnv:status',
+  AGENT_ENV_CLEAR: 'agentEnv:clear',
   RULES_LIST: 'rules:list',
   RULES_SAVE: 'rules:save',
   RULES_DELETE: 'rules:delete',
@@ -92,6 +95,20 @@ export interface IpcInvokeMap {
   [IPC_CHANNELS.TERMINAL_WRITE]: { args: [id: string, data: string]; result: void }
   [IPC_CHANNELS.TERMINAL_RESIZE]: { args: [id: string, cols: number, rows: number]; result: void }
   [IPC_CHANNELS.TERMINAL_DESTROY]: { args: [id: string]; result: void }
+  [IPC_CHANNELS.TERMINAL_CAPTURE_ENV]: {
+    args: [id: string]
+    result: { keyCount: number; capturedAt: string }
+  }
+  [IPC_CHANNELS.AGENT_ENV_STATUS]: {
+    args: []
+    result: {
+      capturedKeyCount: number
+      capturedAt: string | null
+      agentEnvFileKeyCount: number
+      hasAgentEnvFile: boolean
+    }
+  }
+  [IPC_CHANNELS.AGENT_ENV_CLEAR]: { args: []; result: void }
   [IPC_CHANNELS.RULES_LIST]: { args: []; result: RuleFile[] }
   [IPC_CHANNELS.RULES_SAVE]: { args: [params: RuleSaveParams]; result: RuleFile }
   [IPC_CHANNELS.RULES_DELETE]: { args: [absolutePath: string]; result: void }

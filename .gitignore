@@ -6,6 +6,8 @@ release
 .env
 .env.*
 !.env.example
+**/.codex/.agent-env.captured
+**/.codex/.agent-env-dump-*
 .DS_Store
 *.log
 coverage

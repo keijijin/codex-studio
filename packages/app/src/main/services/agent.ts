@@ -14,6 +14,7 @@ import {
   type ToolCallRecord,
 } from '@codex/shared'
 import { approvalService } from './approval'
+import { agentEnvService } from './agent-env-service'
 import { createE2eMockAgentProvider } from './e2e-mock-agent'
 import {
   formatLlmConnectionError,
@@ -414,6 +415,7 @@ export class AgentService {
             metadata: { teamId: result.teamId, boardPath: result.boardPath },
           }
         },
+        getShellEnv: () => agentEnvService.resolve(root),
         requestApproval: async (request: ApprovalRequest) => {
           this.emit(webContents, sessionId, {
             type: 'approval_required',

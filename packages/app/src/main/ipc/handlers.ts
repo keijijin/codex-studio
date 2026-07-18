@@ -8,6 +8,7 @@ import { agentService } from '../services/agent'
 import { auditLog } from '../services/audit-log'
 import { fileWatcherService } from '../services/file-watcher'
 import { terminalService } from '../services/terminal-service'
+import { agentEnvService } from '../services/agent-env-service'
 import { rulesService } from '../services/rules-service'
 import { skillsService } from '../services/skills-service'
 import { hooksService } from '../services/hooks-service'
@@ -26,6 +27,7 @@ export function registerIpcHandlers(): void {
     const root = workspace.rootPaths[0]
     settingsService.addRecentWorkspace(root)
     sessionService.rememberWorkspaceId(root, workspace.id)
+    agentEnvService.hydrateFromWorkspace(root)
     fileWatcherService.start(root)
     void indexService.scan(root)
     return workspace
@@ -34,6 +36,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_CLOSE, () => {
     fileWatcherService.stop()
     terminalService.destroyAll()
+    agentEnvService.clearMemory()
     workspaceService.close()
     indexService.reset()
   })
@@ -157,6 +160,20 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.TERMINAL_DESTROY, (_event, id: string) => {
     terminalService.destroy(assertTerminalId(id))
+  })
+
+  ipcMain.handle(IPC_CHANNELS.TERMINAL_CAPTURE_ENV, async (_event, id: string) => {
+    const result = await terminalService.captureEnvForAgent(assertTerminalId(id))
+    void auditLog('terminal:captureEnv', { keyCount: result.keyCount })
+    return result
+  })
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_ENV_STATUS, () => {
+    return agentEnvService.status(workspaceService.getRoot())
+  })
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_ENV_CLEAR, () => {
+    agentEnvService.clear(workspaceService.getRoot() ?? undefined)
   })
 
   ipcMain.handle(IPC_CHANNELS.RULES_LIST, async () => {

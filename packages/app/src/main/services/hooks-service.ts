@@ -9,6 +9,7 @@ import { getLlmRuntimeConfig } from './llm-config'
 import { settingsService } from './settings'
 import { workspaceService } from './workspace'
 import { auditLog } from './audit-log'
+import { agentEnvService } from './agent-env-service'
 
 /**
  * Electron-side hooks service.
@@ -19,6 +20,7 @@ class HooksService {
 
   constructor() {
     this.runtime = new HooksRuntime({
+      getShellEnv: (root) => agentEnvService.resolve(root),
       runSkill: async (skill, args, ctx) => {
         const settings = settingsService.get()
         const runtime = getLlmRuntimeConfig(settings, 'agent')

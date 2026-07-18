@@ -19,6 +19,9 @@ pnpm dev
 - [x] 承認ダイアログ + Diff + YOLO モード設定
 - [x] `.md` プレビュー / 編集切替
 - [x] **組み込みターミナル**（node-pty + xterm）
+- [x] **Agent Shell のログインプロファイル自動読込**（bash / zsh / fish / PowerShell）
+- [x] **ターミナル環境 → Agent 同期** + `.codex/agent.env`
+- [x] **マルチモデルルーティング**（Fixed / Fallback / Auto）
 - [x] **XML / Java シンタックスハイライト**
 - [x] 最近開いたワークスペース
 - [x] **Skills / Permission / Compact**（Phase A）
@@ -82,12 +85,14 @@ packages/
 |------|------|
 | ユーザーガイド | [docs/user/guide.md](./docs/user/guide.md) |
 | **操作マニュアル（拡張込み）** | [docs/user/操作マニュアル.md](./docs/user/操作マニュアル.md) |
+| **シェル環境・細かい機能メモ** | [docs/11-シェル環境と細かい機能メモ.md](./docs/11-シェル環境と細かい機能メモ.md) |
 | α テスト計画 | [docs/alpha-test-plan.md](./docs/alpha-test-plan.md) |
 | リリース | [docs/release.md](./docs/release.md) / [Releases](https://github.com/keijijin/codex-studio/releases) |
 | セキュリティ | [docs/security-checklist.md](./docs/security-checklist.md) |
 | アーキテクチャ | [docs/03-アーキテクチャ定義書.md](./docs/03-アーキテクチャ定義書.md) |
 | エージェント拡張プラン | [docs/08-エージェント拡張プラン.md](./docs/08-エージェント拡張プラン.md) |
 | Phase D 設計ゲート | [docs/09-PhaseD-設計ゲート.md](./docs/09-PhaseD-設計ゲート.md) |
+| マルチモデルルーティング | [docs/10-マルチモデルルーティングプラン.md](./docs/10-マルチモデルルーティングプラン.md) |
 | ToDo | [docs/07-TODOリスト.md](./docs/07-TODOリスト.md) |
 
 ## 技術スタック

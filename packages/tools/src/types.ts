@@ -27,6 +27,11 @@ export interface ToolContext {
     teamId: string
     prompt: string
   }) => Promise<ToolResult>
+  /**
+   * Environment for Shell (and similar) spawns.
+   * Prefer merging process.env + `.codex/agent.env` + terminal-captured overlay.
+   */
+  getShellEnv?: () => NodeJS.ProcessEnv
 }
 
 export interface ToolResult {

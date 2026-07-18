@@ -19,6 +19,23 @@ export function TerminalPanel() {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalIdRef = useRef<string | null>(null)
   const [containerReady, setContainerReady] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<string | null>(null)
+  const [syncing, setSyncing] = useState(false)
+
+  const syncEnvToAgent = async () => {
+    const id = terminalIdRef.current
+    if (!id || !hasCodexApi()) return
+    setSyncing(true)
+    setSyncStatus(null)
+    try {
+      const result = await window.codex.invoke(IPC_CHANNELS.TERMINAL_CAPTURE_ENV, id)
+      setSyncStatus(`Agent に同期済み (${result.keyCount} 変数)`)
+    } catch (err) {
+      setSyncStatus(`同期失敗: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   useEffect(() => {
     if (!hasCodexApi() || !workspace || !containerReady || !containerRef.current) {
@@ -114,9 +131,25 @@ export function TerminalPanel() {
   return (
     <section className="flex h-64 min-h-48 shrink-0 flex-col border-t border-surface-border bg-[#1e1e1e]">
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-surface-border bg-surface-raised px-3">
-        <span className="text-xs font-medium text-text-primary">Terminal</span>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="text-xs font-medium text-text-primary">Terminal</span>
+          {syncStatus && (
+            <span className="truncate text-[11px] text-text-secondary" title={syncStatus}>
+              {syncStatus}
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-text-secondary">{workspace?.name ?? ''}</span>
+          <button
+            type="button"
+            className="rounded px-2 py-0.5 text-xs text-text-secondary hover:bg-white/10 hover:text-text-primary disabled:opacity-40"
+            onClick={() => void syncEnvToAgent()}
+            disabled={syncing || !workspace}
+            title="このターミナルの環境変数を Agent の Shell に同期（oc login や export した変数など）"
+          >
+            {syncing ? '同期中…' : '環境を Agent に同期'}
+          </button>
           <button
             type="button"
             className="rounded px-2 py-0.5 text-xs text-text-secondary hover:bg-white/10 hover:text-text-primary"

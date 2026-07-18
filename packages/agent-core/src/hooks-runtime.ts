@@ -5,7 +5,7 @@ import {
   type HookDefinition,
   type HooksConfig,
 } from '@codex/shared'
-import { wrapShellCommand } from '@codex/tools'
+import { wrapShellCommand, resolveAgentShellEnv } from '@codex/tools'
 import { matchGlob } from './rules-loader'
 import { loadHooksConfig } from './hooks-loader'
 
@@ -45,6 +45,8 @@ export interface HooksRuntimeOptions {
   runSkill?: HookSkillRunner
   /** Shell timeout ms (default 60s) */
   shellTimeoutMs?: number
+  /** Env for hook shell commands (defaults to workspace agent.env merge). */
+  getShellEnv?: (workspaceRoot: string) => NodeJS.ProcessEnv
 }
 
 function expandCommand(template: string, ctx: HookDispatchContext): string {
@@ -76,12 +78,13 @@ function runShellCommand(
   command: string,
   cwd: string,
   timeoutMs: number,
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<{ success: boolean; output: string }> {
   return new Promise((resolve) => {
     const wrapped = wrapShellCommand(command)
     const proc = spawn(wrapped.file, wrapped.args, {
       cwd,
-      env: process.env,
+      env,
       windowsHide: true,
     })
     let stdout = ''
@@ -122,11 +125,14 @@ export class HooksRuntime {
   private loadConfig: (workspaceRoot: string) => Promise<HooksConfig>
   private runSkill?: HookSkillRunner
   private shellTimeoutMs: number
+  private getShellEnv: (workspaceRoot: string) => NodeJS.ProcessEnv
 
   constructor(options: HooksRuntimeOptions = {}) {
     this.loadConfig = options.loadConfig ?? loadHooksConfig
     this.runSkill = options.runSkill
     this.shellTimeoutMs = options.shellTimeoutMs ?? 60_000
+    this.getShellEnv =
+      options.getShellEnv ?? ((root) => resolveAgentShellEnv(root))
   }
 
   /** True while a hook action is executing (used by callers to skip nested saves). */
@@ -168,7 +174,12 @@ export class HooksRuntime {
 
         if (hook.action.type === 'shell') {
           const command = expandCommand(hook.action.command, dispatchCtx)
-          const result = await runShellCommand(command, ctx.workspaceRoot, this.shellTimeoutMs)
+          const result = await runShellCommand(
+            command,
+            ctx.workspaceRoot,
+            this.shellTimeoutMs,
+            this.getShellEnv(ctx.workspaceRoot),
+          )
           results.push({ type: 'shell', command, ...result })
         } else if (hook.action.type === 'skill') {
           const skill = hook.action.skill

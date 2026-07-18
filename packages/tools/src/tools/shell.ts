@@ -20,7 +20,8 @@ export const shellTool: Tool = {
   name: 'Shell',
   description:
     'Run a shell command in the workspace. Use for build, test, or git commands. ' +
-    'Login/profile files (e.g. ~/.bash_profile, ~/.zshrc) are sourced automatically — do not prepend source yourself.',
+    'Login/profile files (e.g. ~/.bash_profile, ~/.zshrc) are sourced automatically — do not prepend source yourself. ' +
+    'Extra env comes from `.codex/agent.env` and any environment synced from the integrated Terminal.',
   requiresApproval: true,
   parameters: {
     type: 'object',
@@ -59,9 +60,10 @@ export const shellTool: Tool = {
     }
 
     return new Promise((resolve) => {
+      const env = ctx.getShellEnv?.() ?? process.env
       const proc = spawn(wrapped.file, wrapped.args, {
         cwd,
-        env: process.env,
+        env,
         // Avoid nested shell:true — profile + command already wrapped for this shell.
         windowsHide: true,
       })

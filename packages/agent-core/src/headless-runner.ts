@@ -8,7 +8,7 @@ import {
   type LLMProviderId,
   type PermissionProfile,
 } from '@codex/shared'
-import { defaultToolRegistry, resolveWithinWorkspace } from '@codex/tools'
+import { defaultToolRegistry, resolveWithinWorkspace, resolveAgentShellEnv } from '@codex/tools'
 import {
   collectSkills,
   formatSkillPrompt,
@@ -138,6 +138,7 @@ export async function runHeadlessAgent(
     rulesPrompt,
     skillPrompt,
     subagentDepth: 0,
+    getShellEnv: () => resolveAgentShellEnv(workspaceRoot),
     runSubagent: async ({ prompt: subPrompt, description }) => {
       const result = await runLimited(() =>
         runSubagentTask({
