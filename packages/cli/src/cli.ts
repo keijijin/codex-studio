@@ -15,9 +15,11 @@ import { defaultToolRegistry, resolveWithinWorkspace } from '@codex/tools'
 import {
   DEFAULT_FALLBACK_CHAIN,
   DEFAULT_OLLAMA_BASE_URL,
+  DEFAULT_XAI_BASE_URL,
   type LLMProviderId,
 } from '@codex/shared'
 import { parseArgs, type CliArgs } from './parse-args.js'
+import { loadDesktopModelsSettings } from './desktop-settings.js'
 
 function printHelp(): void {
   console.log(`codex-studio — headless Codex Studio agent / teams
@@ -30,7 +32,7 @@ Usage:
 
 Options:
   -w, --workspace <path>   Workspace root (default: cwd)
-  -p, --provider <id>      openai | anthropic | ollama (default: openai)
+  -p, --provider <id>      openai | anthropic | xai | ollama (default: openai)
   -m, --model <id>         Model id
   --profile <name>         readonly | ask | allow (default: readonly)
   --routing <mode>         fixed | auto | fallback-only (default: fixed)
@@ -40,7 +42,8 @@ Options:
   -h, --help               Show help
 
 Environment:
-  OPENAI_API_KEY / ANTHROPIC_API_KEY / OLLAMA_BASE_URL
+  OPENAI_API_KEY / ANTHROPIC_API_KEY / XAI_API_KEY / OLLAMA_BASE_URL / XAI_BASE_URL
+  (unset keys fall back to Codex Studio Settings: Application Support/codex-studio)
 
 Examples:
   pnpm cli -- agent "README を要約して" -w .
@@ -56,20 +59,49 @@ Notes:
 }
 
 function resolveApiKey(provider: LLMProviderId): { apiKey: string; baseUrl?: string } | null {
+  const stored = loadDesktopModelsSettings()
+
   if (provider === 'ollama') {
     return {
       apiKey: 'ollama',
-      baseUrl: process.env.OLLAMA_BASE_URL || DEFAULT_OLLAMA_BASE_URL,
+      baseUrl:
+        process.env.OLLAMA_BASE_URL ||
+        stored?.ollamaBaseUrl ||
+        DEFAULT_OLLAMA_BASE_URL,
     }
   }
   if (provider === 'anthropic') {
-    const apiKey = process.env.ANTHROPIC_API_KEY
+    const apiKey = process.env.ANTHROPIC_API_KEY || stored?.anthropicApiKey
     if (!apiKey) return null
     return { apiKey }
   }
-  const apiKey = process.env.OPENAI_API_KEY
+  if (provider === 'xai') {
+    const apiKey = process.env.XAI_API_KEY || stored?.xaiApiKey
+    if (!apiKey) return null
+    return {
+      apiKey,
+      baseUrl: process.env.XAI_BASE_URL || stored?.xaiBaseUrl || DEFAULT_XAI_BASE_URL,
+    }
+  }
+  const apiKey = process.env.OPENAI_API_KEY || stored?.openaiApiKey
   if (!apiKey) return null
   return { apiKey }
+}
+
+function missingKeyHint(provider: LLMProviderId): string {
+  if (provider === 'ollama') {
+    return 'Ollama が利用できません。`ollama serve` と Base URL を確認してください。'
+  }
+  const envName =
+    provider === 'anthropic'
+      ? 'ANTHROPIC_API_KEY'
+      : provider === 'xai'
+        ? 'XAI_API_KEY'
+        : 'OPENAI_API_KEY'
+  return (
+    `${provider} の API キーがありません。` +
+    `環境変数 ${envName} を設定するか、Codex Studio の設定画面にキーを保存してください。`
+  )
 }
 
 function isCliCandidateAvailable(candidate: ModelCandidate): boolean {
@@ -85,7 +117,7 @@ async function runAgentOnce(
     return {
       success: false,
       text: '',
-      error: `Missing API key for ${candidate.provider}`,
+      error: missingKeyHint(candidate.provider),
       events: [],
     }
   }
@@ -119,6 +151,12 @@ async function runAgent(args: CliArgs): Promise<HeadlessAgentResult & {
   routing?: { mode: string; reason: string; selected: ModelCandidate; tried: ModelCandidate[] }
 }> {
   const primary: ModelCandidate = { provider: args.provider, model: args.model }
+
+  // Explicit `-p` in fixed mode: require that provider's key (do not silently use Ollama).
+  if (args.routing === 'fixed' && !isCliCandidateAvailable(primary)) {
+    throw new Error(missingKeyHint(args.provider))
+  }
+
   const decision = decideRouting({
     mode: args.routing,
     primary,
@@ -254,7 +292,7 @@ async function runTeamCli(args: CliArgs): Promise<void> {
     console.error(`\nBoard: ${result.boardPath}`)
     if (!result.success) {
       const hint = /429|quota/i.test(result.synthesis)
-        ? '\nヒント: OpenAI のクォータ超過です。`-p anthropic` や `-p ollama` を試すか、課金・枠を確認してください。'
+        ? '\nヒント: OpenAI のクォータ超過です。`-p anthropic` / `-p xai` / `-p ollama` を試すか、課金・枠を確認してください。'
         : ''
       if (hint) console.error(hint)
     }

@@ -9,6 +9,7 @@ import { auditLog } from '../services/audit-log'
 import { fileWatcherService } from '../services/file-watcher'
 import { terminalService } from '../services/terminal-service'
 import { agentEnvService } from '../services/agent-env-service'
+import { modelCatalogService } from '../services/model-catalog-service'
 import { rulesService } from '../services/rules-service'
 import { skillsService } from '../services/skills-service'
 import { hooksService } from '../services/hooks-service'
@@ -122,6 +123,15 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.MODELS_LIST, async (_event, provider) => {
     return chatService.listModels(provider)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.MODEL_CATALOG_GET, () => {
+    return modelCatalogService.getCached()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.MODEL_CATALOG_REFRESH, async () => {
+    const settings = settingsService.get()
+    return modelCatalogService.refresh(settings, true)
   })
 
   ipcMain.handle(IPC_CHANNELS.SESSION_SET_MODE, (_event, sessionId: string, mode) => {

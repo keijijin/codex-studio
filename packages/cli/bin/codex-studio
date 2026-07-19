@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Host entry for `codex-studio` bin — sanitize NODE_OPTIONS before Node starts.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+exec bash "$ROOT/scripts/sanitize-node-options-and-run.sh" node "$SCRIPT_DIR/codex-studio.mjs" "$@"

@@ -10,12 +10,14 @@ describe('llm-adapters utils', () => {
     expect(getProviderInstance('openai').id).toBe('openai')
     expect(getProviderInstance('anthropic').id).toBe('anthropic')
     expect(getProviderInstance('ollama').id).toBe('ollama')
+    expect(getProviderInstance('xai').id).toBe('xai')
   })
 
   it('providerDisplayName maps ids to labels', () => {
     expect(providerDisplayName('openai')).toBe('OpenAI')
     expect(providerDisplayName('anthropic')).toBe('Anthropic')
     expect(providerDisplayName('ollama')).toBe('Ollama')
+    expect(providerDisplayName('xai')).toBe('xAI (Grok)')
   })
 
   it('toOpenAIMessages converts tool and assistant tool_calls', () => {

@@ -1,6 +1,7 @@
 import type { LLMProviderId, ModelInfo } from './types'
 import { createOpenAIClient } from './create-clients'
 import { getSystemCaFetch } from './system-ca-fetch'
+import { DEFAULT_XAI_BASE_URL } from './xai-provider'
 
 const ANTHROPIC_MODELS: ModelInfo[] = [
   { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', provider: 'anthropic' },
@@ -11,11 +12,18 @@ const ANTHROPIC_MODELS: ModelInfo[] = [
 ]
 
 const OPENAI_FALLBACK: ModelInfo[] = [
+  { id: 'gpt-5.4-nano', name: 'GPT-5.4 nano', provider: 'openai' },
+  { id: 'gpt-5.4-mini', name: 'GPT-5.4 mini', provider: 'openai' },
+  { id: 'gpt-5.5', name: 'GPT-5.5', provider: 'openai' },
   { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai' },
   { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'openai' },
-  { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', provider: 'openai' },
-  { id: 'o1', name: 'o1', provider: 'openai' },
-  { id: 'o1-mini', name: 'o1 Mini', provider: 'openai' },
+]
+
+const XAI_FALLBACK: ModelInfo[] = [
+  { id: 'grok-4.5', name: 'Grok 4.5', provider: 'xai' },
+  { id: 'grok-4.3', name: 'Grok 4.3', provider: 'xai' },
+  { id: 'grok-4-1-fast-non-reasoning', name: 'Grok 4.1 Fast', provider: 'xai' },
+  { id: 'grok-3', name: 'Grok 3', provider: 'xai' },
 ]
 
 function isChatModel(id: string): boolean {
@@ -26,6 +34,16 @@ function isChatModel(id: string): boolean {
     id.startsWith('o4') ||
     id.startsWith('chatgpt-')
   )
+}
+
+function isGrokChatModel(id: string): boolean {
+  const lower = id.toLowerCase()
+  if (!lower.startsWith('grok')) return false
+  // Skip image/video/voice endpoints that are not chat completions
+  if (lower.includes('imagine') || lower.includes('voice') || lower.includes('image') || lower.includes('video')) {
+    return false
+  }
+  return true
 }
 
 export async function listModels(
@@ -63,6 +81,26 @@ export async function listModels(
     return ANTHROPIC_MODELS
   }
 
+  if (provider === 'xai') {
+    try {
+      const client = createOpenAIClient({
+        apiKey,
+        baseURL: (options?.baseUrl ?? DEFAULT_XAI_BASE_URL).replace(/\/$/, ''),
+      })
+      const page = await client.models.list()
+      const models: ModelInfo[] = []
+      for await (const model of page) {
+        if (isGrokChatModel(model.id)) {
+          models.push({ id: model.id, name: model.id, provider: 'xai' })
+        }
+      }
+      models.sort((a, b) => a.id.localeCompare(b.id))
+      return models.length > 0 ? models : XAI_FALLBACK
+    } catch {
+      return XAI_FALLBACK
+    }
+  }
+
   try {
     const client = createOpenAIClient({ apiKey })
     const page = await client.models.list()
@@ -81,6 +119,7 @@ export async function listModels(
 
 export function getProviderForModel(modelId: string): LLMProviderId {
   if (modelId.startsWith('claude')) return 'anthropic'
+  if (modelId.startsWith('grok')) return 'xai'
   if (modelId.includes(':') || modelId.startsWith('llama') || modelId.startsWith('mistral')) {
     return 'ollama'
   }

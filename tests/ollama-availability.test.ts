@@ -78,7 +78,9 @@ describe('ollama availability probe', () => {
       prompt: 'こんにちは',
     })
 
-    expect(decision.selected.provider).toBe('anthropic')
+    // Auto cost routing picks a lite model; Ollama stays skipped when probe fails.
+    expect(decision.tier).toBe('lite')
+    expect(['xai', 'openai', 'anthropic']).toContain(decision.selected.provider)
     expect(decision.queue.map((c) => c.provider)).not.toContain('ollama')
   })
 

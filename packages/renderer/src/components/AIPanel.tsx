@@ -42,20 +42,26 @@ export function AIPanel() {
       ? true
       : settings?.models.defaultProvider === 'anthropic'
         ? Boolean(settings?.models.anthropicApiKey)
-        : Boolean(settings?.models.openaiApiKey)
+        : settings?.models.defaultProvider === 'xai'
+          ? Boolean(settings?.models.xaiApiKey)
+          : Boolean(settings?.models.openaiApiKey)
 
   const providerLabel =
     routingInfo?.provider === 'anthropic'
       ? 'Anthropic'
       : routingInfo?.provider === 'ollama'
         ? 'Ollama'
-        : routingInfo?.provider === 'openai'
-          ? 'OpenAI'
-          : settings?.models.defaultProvider === 'anthropic'
-            ? 'Anthropic'
-            : settings?.models.defaultProvider === 'ollama'
-              ? 'Ollama'
-              : 'OpenAI'
+        : routingInfo?.provider === 'xai'
+          ? 'xAI'
+          : routingInfo?.provider === 'openai'
+            ? 'OpenAI'
+            : settings?.models.defaultProvider === 'anthropic'
+              ? 'Anthropic'
+              : settings?.models.defaultProvider === 'ollama'
+                ? 'Ollama'
+                : settings?.models.defaultProvider === 'xai'
+                  ? 'xAI'
+                  : 'OpenAI'
   const modelLabel =
     routingInfo?.model ??
     (sessionMode === 'agent'

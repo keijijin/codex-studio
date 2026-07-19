@@ -14,7 +14,7 @@ pnpm dev
 - [x] pnpm monorepo + Electron + Monaco + 型安全 IPC
 - [x] ワークスペース + 索引 + ripgrep 検索
 - [x] **chokidar ファイルウォッチャー** + 索引増分更新
-- [x] OpenAI / Anthropic / **Ollama** チャット + Agent モード
+- [x] OpenAI / Anthropic / **xAI (Grok)** / **Ollama** チャット + Agent モード
 - [x] Agent ツール（Read / Grep / Glob / Write / StrReplace / Delete / Shell）
 - [x] 承認ダイアログ + Diff + YOLO モード設定
 - [x] `.md` プレビュー / 編集切替
@@ -63,6 +63,7 @@ pnpm typecheck
 |-----------|----------|
 | OpenAI | 設定画面で API キー |
 | Anthropic | 設定画面で API キー |
+| xAI (Grok) | 設定画面で API キー（環境変数 `XAI_API_KEY` も可） |
 | Ollama | Base URL（既定 `http://localhost:11434`）+ ローカルモデル |
 
 ## プロジェクト構成

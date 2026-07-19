@@ -100,6 +100,7 @@ function migrateFromDisplayNameDirIfNeeded(): void {
           ...currentSettings.models,
           openaiApiKey: currentSettings.models.openaiApiKey || other.models.openaiApiKey,
           anthropicApiKey: currentSettings.models.anthropicApiKey || other.models.anthropicApiKey,
+          xaiApiKey: currentSettings.models.xaiApiKey || other.models.xaiApiKey,
           ollamaBaseUrl: currentSettings.models.ollamaBaseUrl || other.models.ollamaBaseUrl,
         },
       })

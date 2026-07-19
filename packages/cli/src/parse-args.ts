@@ -21,6 +21,7 @@ export interface CliArgs {
 function defaultModel(provider: LLMProviderId): string {
   if (provider === 'anthropic') return 'claude-sonnet-4-6'
   if (provider === 'ollama') return 'llama3.2'
+  if (provider === 'xai') return 'grok-4.5'
   return 'gpt-4o'
 }
 
@@ -60,7 +61,7 @@ function parseSharedOptions(args: string[]): Omit<CliArgs, 'command' | 'prompt' 
       workspace = resolve(args.shift() ?? process.cwd())
     } else if (token === '-p' || token === '--provider') {
       const p = (args.shift() ?? 'openai') as LLMProviderId
-      if (p !== 'openai' && p !== 'anthropic' && p !== 'ollama') {
+      if (p !== 'openai' && p !== 'anthropic' && p !== 'ollama' && p !== 'xai') {
         throw new Error(`Unknown provider: ${p}`)
       }
       provider = p

@@ -163,9 +163,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               : tc,
           ),
         }))
-        if (event.success && event.filePath) {
-          void get().openChangedFile(event.filePath)
-        }
+        // Do not auto-open files from Agent tools — user opens via Explorer / Search / tool card.
       } else if (event.type === 'approval_required') {
         set({
           pendingApproval: {
@@ -354,20 +352,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     openingPaths.add(path)
 
     try {
-      const name = path.split(/[/\\]/).pop() ?? path
       const { tabs } = get()
       const existing = tabs.find((t) => t.path === path)
 
+      // Only refresh tabs the user already opened — never auto-open new ones.
       if (existing) {
         const content = await window.codex.invoke(IPC_CHANNELS.FILE_READ, path)
         set({
           tabs: get().tabs.map((t) =>
             t.path === path ? { ...t, content, isDirty: false } : t,
           ),
-          activeTabPath: path,
         })
-      } else {
-        await get().openFile(path, name)
       }
       await get().refreshFileTree()
     } catch (err) {

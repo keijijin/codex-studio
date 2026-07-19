@@ -43,9 +43,11 @@ export interface Attachment {
   content?: string
 }
 
-export type LLMProviderId = 'openai' | 'anthropic' | 'ollama'
+export type LLMProviderId = 'openai' | 'anthropic' | 'ollama' | 'xai'
 
 export const DEFAULT_OLLAMA_BASE_URL = 'http://localhost:11434'
+export const DEFAULT_XAI_BASE_URL = 'https://api.x.ai/v1'
+export const DEFAULT_XAI_MODEL = 'grok-4.5'
 
 export interface ModelInfo {
   id: string
@@ -68,7 +70,11 @@ export interface AppSettings {
     defaultAgentModel: string
     openaiApiKey?: string
     anthropicApiKey?: string
+    /** xAI (Grok) API key */
+    xaiApiKey?: string
     ollamaBaseUrl?: string
+    /** Override xAI OpenAI-compatible base (default https://api.x.ai/v1) */
+    xaiBaseUrl?: string
   }
   /** Multi-model routing (fixed | auto | fallback-only). Default: fixed. */
   routing: RoutingSettings

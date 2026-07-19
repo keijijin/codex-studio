@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
+  classifyTask,
   classifyTaskKind,
   decideRouting,
   isConnectionError,
   isRetryableError,
+  buildCostOptimizedProfile,
+  createDefaultCatalog,
+  resolveModelId,
 } from '../packages/llm-adapters/src/router/index'
 import {
   DEFAULT_ROUTING,
@@ -76,7 +80,40 @@ describe('model router', () => {
     expect(decision.queue.map((c) => c.provider)).toEqual(['openai', 'ollama'])
   })
 
-  it('auto classifies agent code tasks and prefers quality models', () => {
+  it('classifies simple chat as lite tier', () => {
+    const result = classifyTask({ prompt: 'こんにちは', runMode: 'chat' })
+    expect(result.taskKind).toBe('chat_simple')
+    expect(result.tier).toBe('lite')
+  })
+
+  it('classifies hard architecture agent work as premium', () => {
+    const result = classifyTask({
+      prompt: '分散システムのアーキテクチャ全体を設計し、障害の根本原因分析も行う',
+      runMode: 'agent',
+    })
+    expect(result.taskKind).toBe('agent_hard')
+    expect(result.tier).toBe('premium')
+  })
+
+  it('auto picks cost-optimized lite models for simple chat (not user primary first)', () => {
+    const decision = decideRouting({
+      mode: 'auto',
+      primary: { provider: 'openai', model: 'gpt-5.5' },
+      fallbackChain: DEFAULT_ROUTING.fallbackChain,
+      maxAttempts: 3,
+      isAvailable: (c) => c.provider !== 'ollama',
+      runMode: 'chat',
+      prompt: 'hello',
+      catalog: createDefaultCatalog(),
+    })
+    expect(decision.taskKind).toBe('chat_simple')
+    expect(decision.tier).toBe('lite')
+    // Should start on a cheap model, not the expensive primary
+    expect(decision.selected.model).not.toBe('gpt-5.5')
+    expect(['xai', 'openai', 'anthropic']).toContain(decision.selected.provider)
+  })
+
+  it('auto agent code prefers coding-capable mid tier before premium', () => {
     const kind = classifyTaskKind({
       prompt: 'TypeScript のバグを修正して実装する',
       runMode: 'agent',
@@ -85,17 +122,17 @@ describe('model router', () => {
 
     const decision = decideRouting({
       mode: 'auto',
-      primary: { provider: 'openai', model: 'gpt-4o' },
+      primary: { provider: 'openai', model: 'gpt-5.5' },
       fallbackChain: DEFAULT_ROUTING.fallbackChain,
-      maxAttempts: 3,
-      isAvailable: () => true,
+      maxAttempts: 4,
+      isAvailable: (c) => c.provider !== 'ollama',
       runMode: 'agent',
       prompt: 'TypeScript のバグを修正して実装する',
+      catalog: createDefaultCatalog(),
     })
     expect(decision.taskKind).toBe('agent_code')
-    // User primary comes first; quality profile models follow.
-    expect(decision.queue[0]?.provider).toBe('openai')
-    expect(decision.queue.map((c) => c.provider)).toContain('anthropic')
+    expect(decision.queue.length).toBeGreaterThan(1)
+    expect(decision.reason).toMatch(/Auto \(agent_code\//)
   })
 
   it('auto skips offline Ollama and uses cloud providers', () => {
@@ -111,8 +148,27 @@ describe('model router', () => {
       runMode: 'chat',
       prompt: 'hello',
     })
-    expect(decision.selected).toEqual({ provider: 'anthropic', model: 'claude-sonnet-4-6' })
     expect(decision.queue.map((c) => c.provider)).not.toContain('ollama')
+  })
+
+  it('resolveModelId prefers exact then prefix matches', () => {
+    expect(resolveModelId(['gpt-5.4-nano', 'gpt-4o-mini'], ['gpt-4o-mini', 'gpt-4o'])).toBe(
+      'gpt-4o-mini',
+    )
+    expect(
+      resolveModelId(['gpt-5.4-mini'], ['gpt-5.4-mini-2026-03-17', 'gpt-4o']),
+    ).toBe('gpt-5.4-mini-2026-03-17')
+  })
+
+  it('buildCostOptimizedProfile cascades lite → standard → premium', () => {
+    const profile = buildCostOptimizedProfile('lite', createDefaultCatalog(), {
+      taskHint: 'chat',
+      includeOllama: false,
+    })
+    expect(profile[0]?.provider).toBe('xai')
+    expect(profile.some((c) => c.model.includes('grok'))).toBe(true)
+    expect(profile.some((c) => c.provider === 'openai')).toBe(true)
+    expect(profile.some((c) => c.provider === 'anthropic')).toBe(true)
   })
 
   it('normalizeRoutingSettings defaults missing values to fixed', () => {

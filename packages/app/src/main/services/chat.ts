@@ -21,14 +21,16 @@ import {
   formatLlmConnectionError,
   getApiKeyForProvider,
   missingApiKeyMessage,
+  modelsOllamaBaseUrl,
+  modelsXaiBaseUrl,
   noteProviderConnectionFailure,
   resolveRoutingDecisionAsync,
   runtimeFromCandidate,
 } from './llm-config'
-import { DEFAULT_OLLAMA_BASE_URL } from '@codex/shared'
 import { formatSkillPrompt, formatSkillUserMessage, compactMessageContents, detectReplyLanguage, formatLanguageInstruction } from '@codex/agent-core'
 import { rulesService } from './rules-service'
 import { skillsService } from './skills-service'
+import { modelCatalogService } from './model-catalog-service'
 
 const SYSTEM_PROMPT = `You are Codex Studio, an AI coding assistant integrated into a developer IDE.
 Help the user with code understanding, debugging, refactoring, and general programming questions.
@@ -50,8 +52,16 @@ export class ChatService {
     if (!apiKey && provider !== 'ollama') {
       throw new Error(missingApiKeyMessage(provider))
     }
-    const baseUrl = settings.models.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || DEFAULT_OLLAMA_BASE_URL
-    return listModels(provider, apiKey ?? 'ollama', { baseUrl })
+    const baseUrl =
+      provider === 'ollama'
+        ? modelsOllamaBaseUrl(settings.models)
+        : provider === 'xai'
+          ? modelsXaiBaseUrl(settings.models)
+          : undefined
+    const list = await listModels(provider, apiKey ?? 'ollama', { baseUrl })
+    // Refresh cost-routing catalog in the background when models are listed
+    void modelCatalogService.refresh(settings).catch(() => undefined)
+    return list
   }
 
   async send(params: ChatSendParams, webContents: WebContents): Promise<void> {

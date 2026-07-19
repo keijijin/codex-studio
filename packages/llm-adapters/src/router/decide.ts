@@ -1,4 +1,10 @@
-import { classifyTaskKind } from './classify'
+import {
+  buildCostOptimizedProfile,
+  createDefaultCatalog,
+  type CostTier,
+  type ModelCatalogSnapshot,
+} from './catalog'
+import { classifyTask } from './classify'
 import type {
   DecideRoutingInput,
   ModelCandidate,
@@ -6,41 +12,40 @@ import type {
   TaskKind,
 } from './types'
 
-/** Keep in sync with @codex/shared DEFAULT_ANTHROPIC_* (avoid circular dep). */
-const SONNET = 'claude-sonnet-4-6'
-const HAIKU = 'claude-haiku-4-5'
+export function builtinProfileFor(
+  taskKind: TaskKind,
+  tier: CostTier,
+  catalog: ModelCatalogSnapshot = createDefaultCatalog(),
+): ModelCandidate[] {
+  const taskHint =
+    taskKind === 'agent_code' || taskKind === 'agent_hard'
+      ? 'code'
+      : taskKind === 'team'
+        ? 'team'
+        : 'chat'
+  const startTier: CostTier =
+    taskKind === 'agent_hard' || taskKind === 'team'
+      ? 'premium'
+      : taskKind === 'chat_simple' || taskKind === 'agent_explore'
+        ? tier === 'premium'
+          ? 'standard'
+          : tier
+        : tier
 
+  return buildCostOptimizedProfile(startTier, catalog, {
+    taskHint,
+  })
+}
+
+/** @deprecated Use builtinProfileFor with catalog — static snapshot for tests */
 export const BUILTIN_AUTO_PROFILES: Record<TaskKind, ModelCandidate[]> = {
-  chat_simple: [
-    { provider: 'ollama', model: 'qwen2.5-coder:7b' },
-    { provider: 'openai', model: 'gpt-4o-mini' },
-    { provider: 'anthropic', model: HAIKU },
-  ],
-  chat_long: [
-    { provider: 'anthropic', model: SONNET },
-    { provider: 'openai', model: 'gpt-4o' },
-    { provider: 'ollama', model: 'qwen2.5-coder:14b' },
-  ],
-  agent_code: [
-    { provider: 'anthropic', model: SONNET },
-    { provider: 'openai', model: 'gpt-4o' },
-    { provider: 'ollama', model: 'qwen2.5-coder:14b' },
-  ],
-  agent_explore: [
-    { provider: 'openai', model: 'gpt-4o-mini' },
-    { provider: 'anthropic', model: HAIKU },
-    { provider: 'ollama', model: 'qwen2.5-coder:7b' },
-  ],
-  team: [
-    { provider: 'anthropic', model: SONNET },
-    { provider: 'openai', model: 'gpt-4o' },
-    { provider: 'ollama', model: 'qwen2.5-coder:14b' },
-  ],
-  unknown: [
-    { provider: 'openai', model: 'gpt-4o' },
-    { provider: 'anthropic', model: SONNET },
-    { provider: 'ollama', model: 'qwen2.5-coder:14b' },
-  ],
+  chat_simple: builtinProfileFor('chat_simple', 'lite'),
+  chat_long: builtinProfileFor('chat_long', 'standard'),
+  agent_code: builtinProfileFor('agent_code', 'standard'),
+  agent_explore: builtinProfileFor('agent_explore', 'lite'),
+  agent_hard: builtinProfileFor('agent_hard', 'premium'),
+  team: builtinProfileFor('team', 'premium'),
+  unknown: builtinProfileFor('unknown', 'standard'),
 }
 
 function keyOf(c: ModelCandidate): string {
@@ -75,12 +80,13 @@ function buildFallbackQueue(
 
 /**
  * Resolve which models to try for this turn.
+ * Auto mode uses cost-tier cascade (lite → standard → premium) from the catalog.
  */
 export function decideRouting(input: DecideRoutingInput): RoutingDecision {
   const maxAttempts = Math.min(5, Math.max(1, input.maxAttempts || 1))
+  const catalog = input.catalog ?? createDefaultCatalog()
 
   if (input.mode === 'fixed') {
-    // Prefer the primary model, but keep available fallbacks for connection errors.
     const raw = buildFallbackQueue(input.primary, input.fallbackChain)
     const queue = filterAvailable(raw, input.isAvailable).slice(0, maxAttempts)
     const primaryAvailable = input.isAvailable(input.primary)
@@ -109,28 +115,30 @@ export function decideRouting(input: DecideRoutingInput): RoutingDecision {
     }
   }
 
-  // auto
-  const taskKind = classifyTaskKind({
+  // auto — cost-optimized cascade (do not force user's primary first)
+  const classified = classifyTask({
     prompt: input.prompt ?? '',
     runMode: input.runMode,
     isTeam: input.isTeam,
   })
+  const taskKind = classified.taskKind
   const profile =
     input.profiles?.[taskKind] ??
-    BUILTIN_AUTO_PROFILES[taskKind] ??
-    BUILTIN_AUTO_PROFILES.unknown
+    builtinProfileFor(taskKind, classified.tier, catalog)
 
-  // Prefer the user's configured primary, then task profile, then fallback chain.
-  // (Avoid starting on a local Ollama that may be offline while cloud keys exist.)
-  const raw = dedupe([input.primary, ...profile, ...input.fallbackChain])
+  const raw = dedupe([...profile, ...input.fallbackChain, input.primary])
   const queue = filterAvailable(raw, input.isAvailable).slice(0, maxAttempts)
   const selected = queue[0] ?? input.primary
 
   return {
     mode: 'auto',
     selected,
-    reason: `Auto (${taskKind}) → ${selected.provider}:${selected.model}`,
+    reason:
+      `Auto (${taskKind}/${classified.tier}, ~${classified.estimatedTokens} tok, score ${classified.score})` +
+      ` → ${selected.provider}:${selected.model}`,
     queue: queue.length > 0 ? queue : [input.primary],
     taskKind,
+    tier: classified.tier,
+    complexityScore: classified.score,
   }
 }

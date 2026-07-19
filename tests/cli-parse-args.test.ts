@@ -34,4 +34,10 @@ describe('cli parseArgs', () => {
     expect(args.routing).toBe('auto')
     expect(parseArgs(['agent', 'hi']).routing).toBe('fixed')
   })
+
+  it('parses -p xai and defaults grok model', () => {
+    const args = parseArgs(['agent', 'hi', '-p', 'xai'])
+    expect(args.provider).toBe('xai')
+    expect(args.model).toBe('grok-4.5')
+  })
 })

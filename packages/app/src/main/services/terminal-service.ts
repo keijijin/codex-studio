@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from '
 import { dirname, isAbsolute, join, relative, resolve } from 'path'
 import type { WebContents } from 'electron'
 import * as pty from 'node-pty'
-import { IPC_EVENTS } from '@codex/shared'
+import { IPC_EVENTS, envWithoutElectronOnlyNodeOptions } from '@codex/shared'
 import {
   defaultShell,
   isCmd,
@@ -71,7 +71,7 @@ export class TerminalService {
       rows,
       cwd: resolveCwd(cwd),
       env: {
-        ...(process.env as Record<string, string>),
+        ...envWithoutElectronOnlyNodeOptions(process.env),
         TERM: 'xterm-256color',
         COLORTERM: 'truecolor',
       },

@@ -1,5 +1,6 @@
 import {
   DEFAULT_OLLAMA_BASE_URL,
+  DEFAULT_XAI_BASE_URL,
   migrateModelId,
   normalizeRoutingSettings,
   type AppSettings,
@@ -18,6 +19,7 @@ import {
   markOllamaAvailability,
   probeOllamaAvailable,
 } from './ollama-availability'
+import { modelCatalogService } from './model-catalog-service'
 
 export interface LlmRuntimeConfig {
   provider: LLMProviderId
@@ -40,6 +42,9 @@ export function getApiKeyForProvider(
   }
   if (provider === 'anthropic') {
     return models.anthropicApiKey || process.env.ANTHROPIC_API_KEY
+  }
+  if (provider === 'xai') {
+    return models.xaiApiKey || process.env.XAI_API_KEY
   }
   return models.openaiApiKey || process.env.OPENAI_API_KEY
 }
@@ -64,9 +69,12 @@ export function runtimeFromCandidate(
   settings: AppSettings,
 ): LlmRuntimeConfig {
   const apiKey = getApiKeyForProvider(candidate.provider, settings.models)
-  const baseUrl = candidate.provider === 'ollama'
-    ? modelsOllamaBaseUrl(settings.models)
-    : undefined
+  const baseUrl =
+    candidate.provider === 'ollama'
+      ? modelsOllamaBaseUrl(settings.models)
+      : candidate.provider === 'xai'
+        ? modelsXaiBaseUrl(settings.models)
+        : undefined
   return {
     provider: candidate.provider,
     apiKey: apiKey ?? '',
@@ -78,6 +86,10 @@ export function runtimeFromCandidate(
 
 export function modelsOllamaBaseUrl(models: AppSettings['models']): string {
   return models.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || DEFAULT_OLLAMA_BASE_URL
+}
+
+export function modelsXaiBaseUrl(models: AppSettings['models']): string {
+  return models.xaiBaseUrl || process.env.XAI_BASE_URL || DEFAULT_XAI_BASE_URL
 }
 
 /**
@@ -130,6 +142,7 @@ function decideWithAvailability(
     prompt: options.prompt,
     runMode: options.runMode,
     isTeam: options.isTeam,
+    catalog: modelCatalogService.getForRouting(settings),
   })
 }
 
@@ -155,6 +168,11 @@ export async function resolveRoutingDecisionAsync(
 
   if (maybeNeedsOllama) {
     await probeOllamaAvailable(modelsOllamaBaseUrl(settings.models))
+  }
+
+  // Ensure catalog is reasonably fresh for Auto cost routing
+  if ((options.modeOverride ?? routing.mode) === 'auto') {
+    await modelCatalogService.refresh(settings).catch(() => undefined)
   }
 
   return decideWithAvailability(settings, options, (c) => isCandidateAvailable(c, settings))

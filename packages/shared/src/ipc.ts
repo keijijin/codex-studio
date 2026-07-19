@@ -35,6 +35,8 @@ export const IPC_CHANNELS = {
   CHAT_SEND: 'chat:send',
   CHAT_CANCEL: 'chat:cancel',
   MODELS_LIST: 'models:list',
+  MODEL_CATALOG_GET: 'models:catalogGet',
+  MODEL_CATALOG_REFRESH: 'models:catalogRefresh',
   SESSION_SET_MODE: 'session:setMode',
   AGENT_APPROVAL_RESPOND: 'agent:approvalRespond',
   TERMINAL_CREATE: 'terminal:create',
@@ -89,6 +91,30 @@ export interface IpcInvokeMap {
   [IPC_CHANNELS.CHAT_SEND]: { args: [params: ChatSendParams]; result: void }
   [IPC_CHANNELS.CHAT_CANCEL]: { args: [sessionId: string]; result: void }
   [IPC_CHANNELS.MODELS_LIST]: { args: [provider: LLMProviderId]; result: ModelInfo[] }
+  [IPC_CHANNELS.MODEL_CATALOG_GET]: {
+    args: []
+    result: {
+      updatedAt: string
+      expiresAt: string
+      tiers: {
+        openai: { lite: string; standard: string; premium: string }
+        anthropic: { lite: string; standard: string; premium: string }
+        xai: { lite: string; standard: string; premium: string }
+      }
+    }
+  }
+  [IPC_CHANNELS.MODEL_CATALOG_REFRESH]: {
+    args: []
+    result: {
+      updatedAt: string
+      expiresAt: string
+      tiers: {
+        openai: { lite: string; standard: string; premium: string }
+        anthropic: { lite: string; standard: string; premium: string }
+        xai: { lite: string; standard: string; premium: string }
+      }
+    }
+  }
   [IPC_CHANNELS.SESSION_SET_MODE]: { args: [sessionId: string, mode: SessionMode]; result: Session }
   [IPC_CHANNELS.AGENT_APPROVAL_RESPOND]: { args: [sessionId: string, toolCallId: string, approved: boolean]; result: void }
   [IPC_CHANNELS.TERMINAL_CREATE]: { args: [cwd?: string]; result: { id: string } }

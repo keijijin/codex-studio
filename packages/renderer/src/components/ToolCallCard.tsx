@@ -26,7 +26,7 @@ function getWritePreview(args: unknown): string | null {
 
 export function ToolCallCard({ toolCall }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false)
-  const openChangedFile = useAppStore((s) => s.openChangedFile)
+  const openFile = useAppStore((s) => s.openFile)
   const workspace = useAppStore((s) => s.workspace)
 
   const statusIcon =
@@ -57,14 +57,15 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
   const canOpen =
     toolCall.status === 'done' &&
     filePathArg &&
-    ['Write', 'StrReplace'].includes(toolCall.name) &&
+    ['Read', 'Write', 'StrReplace', 'Delete'].includes(toolCall.name) &&
     workspace
 
   const handleOpenFile = () => {
     if (!filePathArg || !workspace) return
     const root = workspace.rootPaths[0]
     const absolute = filePathArg.startsWith('/') ? filePathArg : `${root}/${filePathArg}`
-    void openChangedFile(absolute)
+    const name = absolute.split(/[/\\]/).pop() ?? absolute
+    void openFile(absolute, name)
   }
 
   return (

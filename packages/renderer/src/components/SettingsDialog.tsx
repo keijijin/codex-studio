@@ -99,6 +99,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
   const [tab, setTab] = useState<'models' | 'rules'>('models')
   const [openaiKey, setOpenaiKey] = useState('')
   const [anthropicKey, setAnthropicKey] = useState('')
+  const [xaiKey, setXaiKey] = useState('')
   const [ollamaBaseUrl, setOllamaBaseUrl] = useState(DEFAULT_OLLAMA_BASE_URL)
   const [yoloMode, setYoloMode] = useState(false)
   const [maxIterations, setMaxIterations] = useState(100)
@@ -125,6 +126,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
     oKey: string,
     aKey: string,
     ollamaUrl: string,
+    xKey: string,
     options?: FetchModelsOptions,
   ) => {
     if (!hasCodexApi()) return
@@ -137,6 +139,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
           ...current.models,
           openaiApiKey: oKey || current.models.openaiApiKey,
           anthropicApiKey: aKey || current.models.anthropicApiKey,
+          xaiApiKey: xKey || current.models.xaiApiKey,
           ollamaBaseUrl: ollamaUrl || current.models.ollamaBaseUrl,
         },
       })
@@ -168,6 +171,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
         const p = settings.models.defaultProvider ?? 'openai'
         const oKey = settings.models.openaiApiKey ?? ''
         const aKey = settings.models.anthropicApiKey ?? ''
+        const xKey = settings.models.xaiApiKey ?? ''
         const savedModel = settings.models.defaultChatModel
         const ollamaUrl = settings.models.ollamaBaseUrl ?? DEFAULT_OLLAMA_BASE_URL
         setProvider(p)
@@ -181,6 +185,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
         setMaxAttempts(settings.routing?.maxAttempts ?? 3)
         setOpenaiKey(oKey)
         setAnthropicKey(aKey)
+        setXaiKey(xKey)
         setOllamaBaseUrl(ollamaUrl)
         setYoloMode(settings.agent.yoloMode)
         setMaxIterations(settings.agent.maxIterations)
@@ -191,7 +196,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
         setCompactTokenThreshold(settings.agent.compactTokenThreshold ?? 80_000)
         setAutoMemory(Boolean(settings.agent.autoMemory))
         setMaxSubagents(settings.agent.maxSubagents ?? 3)
-        await fetchModels(p, oKey, aKey, ollamaUrl, { preferredModel: savedModel })
+        await fetchModels(p, oKey, aKey, ollamaUrl, xKey, { preferredModel: savedModel })
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : '設定の読み込みに失敗しました')
@@ -201,7 +206,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
 
   const handleProviderChange = (p: LLMProviderId) => {
     setProvider(p)
-    void fetchModels(p, openaiKey, anthropicKey, ollamaBaseUrl, { resetModel: true })
+    void fetchModels(p, openaiKey, anthropicKey, ollamaBaseUrl, xaiKey, { resetModel: true })
   }
 
   const handleSubmit = async (e: FormEvent) => {
@@ -215,6 +220,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
           defaultProvider: provider,
           openaiApiKey: openaiKey,
           anthropicApiKey: anthropicKey,
+          xaiApiKey: xaiKey,
           ollamaBaseUrl,
           defaultChatModel: model,
           defaultAgentModel: model,
@@ -318,6 +324,17 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                 autoComplete="off"
               />
 
+              <label style={labelStyle} htmlFor="xai-api-key">xAI (Grok) API Key</label>
+              <input
+                id="xai-api-key"
+                type="password"
+                style={inputStyle}
+                placeholder="xai-..."
+                value={xaiKey}
+                onChange={(e) => setXaiKey(e.target.value)}
+                autoComplete="off"
+              />
+
               <label style={labelStyle} htmlFor="provider">プロバイダ</label>
               <select
                 id="provider"
@@ -327,6 +344,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
               >
                 <option value="openai">OpenAI</option>
                 <option value="anthropic">Anthropic</option>
+                <option value="xai">xAI (Grok)</option>
                 <option value="ollama">Ollama (Local)</option>
               </select>
 
@@ -350,7 +368,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                   type="button"
                   style={{ ...btnSecondary, padding: '4px 10px', fontSize: 12 }}
                   disabled={loadingModels}
-                  onClick={() => void fetchModels(provider, openaiKey, anthropicKey, ollamaBaseUrl)}
+                  onClick={() => void fetchModels(provider, openaiKey, anthropicKey, ollamaBaseUrl, xaiKey)}
                 >
                   {loadingModels ? '取得中...' : 'モデル一覧を更新'}
                 </button>
@@ -373,7 +391,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                 )}
               </select>
               <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6e6e6e' }}>
-                {models.length} 件のモデル · 環境変数 OPENAI_API_KEY / ANTHROPIC_API_KEY / OLLAMA_BASE_URL も利用可
+                {models.length} 件のモデル · 環境変数 OPENAI_API_KEY / ANTHROPIC_API_KEY / XAI_API_KEY / OLLAMA_BASE_URL も利用可
               </p>
 
               <label style={labelStyle} htmlFor="routing-mode">モデルルーティング</label>
@@ -385,10 +403,11 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
               >
                 <option value="fixed">固定（既定モデルのみ）</option>
                 <option value="fallback-only">フォールバック（失敗時に切替）</option>
-                <option value="auto">Auto（タスクに応じて選択）</option>
+                <option value="auto">Auto（複雑度・トークン量で課金最適化）</option>
               </select>
               <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6e6e6e' }}>
-                Auto / フォールバック時は API キーがあるプロバイダへ自動切替します（ツール開始後は切替しません）
+                Auto は lite（安価）→ standard → premium の階層で選択し、失敗時に昇格します。
+                モデル ID は各 API の一覧から約 24 時間ごとに自動更新されます（ツール開始後は切替しません）。
               </p>
 
               {routingMode !== 'fixed' && (
@@ -439,6 +458,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                       >
                         <option value="openai">OpenAI</option>
                         <option value="anthropic">Anthropic</option>
+                        <option value="xai">xAI</option>
                         <option value="ollama">Ollama</option>
                       </select>
                       <input

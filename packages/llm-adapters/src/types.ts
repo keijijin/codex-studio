@@ -1,6 +1,6 @@
 import type { ToolDefinition } from '@codex/tools'
 
-export type LLMProviderId = 'openai' | 'anthropic' | 'ollama'
+export type LLMProviderId = 'openai' | 'anthropic' | 'ollama' | 'xai'
 
 export interface ModelInfo {
   id: string

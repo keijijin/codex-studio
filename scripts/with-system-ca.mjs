@@ -1,14 +1,10 @@
 /**
- * Ensure Electron (Node 22) trusts the OS certificate store.
- * Must be set before the Electron process starts.
+ * Electron 向けに `--use-system-ca` を NODE_OPTIONS へ入れると、
+ * 統合ターミナル経由のホスト Node / tsx が起動時に失敗する
+ * (`--use-system-ca is not allowed in NODE_OPTIONS`)。
+ * TLS は packages/llm-adapters の system-ca-fetch で賄う。
  */
 import { spawn } from 'node:child_process'
-
-const flag = '--use-system-ca'
-const existing = process.env.NODE_OPTIONS ?? ''
-if (!existing.split(/\s+/).includes(flag)) {
-  process.env.NODE_OPTIONS = existing ? `${existing} ${flag}` : flag
-}
 
 const args = process.argv.slice(2)
 if (args.length === 0) {
