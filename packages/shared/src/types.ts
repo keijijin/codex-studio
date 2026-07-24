@@ -59,6 +59,27 @@ import type { AgentPermissions } from './permissions'
 import { DEFAULT_AGENT_PERMISSIONS } from './permissions'
 import { DEFAULT_ROUTING, type RoutingSettings } from './routing'
 
+export interface CostSettings {
+  /** Append LLM usage lines to logs/usage.jsonl (default true) */
+  logUsage: boolean
+  /** Cap completion tokens per Chat turn (default 4096) */
+  maxOutputTokens: number
+  /** Cap completion tokens per Agent LLM call (default 8192) */
+  maxOutputTokensAgent: number
+  /** Soft daily spend cap in USD; 0 = unlimited (default 5) */
+  dailyBudgetUsd: number
+  /** Enable Anthropic/OpenAI-style prompt caching when supported (default true) */
+  enablePromptCache: boolean
+}
+
+export const DEFAULT_COST_SETTINGS: CostSettings = {
+  logUsage: true,
+  maxOutputTokens: 4096,
+  maxOutputTokensAgent: 8192,
+  dailyBudgetUsd: 5,
+  enablePromptCache: true,
+}
+
 export interface AppSettings {
   general: {
     theme: 'dark' | 'light' | 'system'
@@ -89,6 +110,8 @@ export interface AppSettings {
     /** Max concurrent Task subagents (1–8) */
     maxSubagents: number
   }
+  /** Cost controls and usage logging */
+  cost: CostSettings
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -98,19 +121,20 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   models: {
     defaultProvider: 'openai',
-    defaultChatModel: 'gpt-4o',
-    defaultAgentModel: 'gpt-4o',
+    defaultChatModel: 'gpt-5.4-mini',
+    defaultAgentModel: 'gpt-5.4-mini',
     ollamaBaseUrl: DEFAULT_OLLAMA_BASE_URL,
   },
   routing: { ...DEFAULT_ROUTING, fallbackChain: [...DEFAULT_ROUTING.fallbackChain] },
   agent: {
-    maxIterations: 100,
+    maxIterations: 50,
     yoloMode: false,
     permissions: { ...DEFAULT_AGENT_PERMISSIONS },
-    compactTokenThreshold: 80_000,
+    compactTokenThreshold: 40_000,
     autoMemory: false,
     maxSubagents: 3,
   },
+  cost: { ...DEFAULT_COST_SETTINGS },
 }
 
 export type AgentEvent =

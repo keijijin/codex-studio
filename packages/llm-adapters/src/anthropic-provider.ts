@@ -6,6 +6,7 @@ import type {
   ChatMessage,
   ChatOptions,
   LLMProvider,
+  LlmUsage,
   StreamChunk,
   ToolCall,
 } from './types'
@@ -73,6 +74,44 @@ function toAnthropicMessages(messages: AgentMessage[]): {
   return { system, messages: chatMessages }
 }
 
+function systemParam(
+  system: string,
+  enableCache: boolean,
+): string | Anthropic.TextBlockParam[] | undefined {
+  if (!system) return undefined
+  if (!enableCache) return system
+  return [
+    {
+      type: 'text',
+      text: system,
+      cache_control: { type: 'ephemeral' },
+    },
+  ]
+}
+
+/** Prefer accumulating: input from message_start, output from message_delta. */
+function applyAnthropicUsageEvent(
+  usage: LlmUsage,
+  event: Anthropic.MessageStreamEvent,
+): LlmUsage {
+  if (event.type === 'message_start') {
+    const u = event.message.usage
+    return {
+      inputTokens: u.input_tokens ?? 0,
+      outputTokens: u.output_tokens ?? 0,
+      cachedInputTokens: (u as { cache_read_input_tokens?: number }).cache_read_input_tokens ?? 0,
+    }
+  }
+  if (event.type === 'message_delta' && event.usage) {
+    return {
+      inputTokens: usage.inputTokens,
+      outputTokens: event.usage.output_tokens ?? usage.outputTokens,
+      cachedInputTokens: usage.cachedInputTokens,
+    }
+  }
+  return usage
+}
+
 export class AnthropicProvider implements LLMProvider {
   id = 'anthropic' as const
 
@@ -86,22 +125,25 @@ export class AnthropicProvider implements LLMProvider {
         role: m.role as 'user' | 'assistant',
         content: m.content,
       }))
+    const enableCache = options.enablePromptCache !== false
 
     try {
       const stream = await client.messages.create({
         model: options.model,
-        max_tokens: 8192,
-        system,
+        max_tokens: options.maxTokens ?? 4096,
+        system: systemParam(system, enableCache),
         messages: chatMessages,
         stream: true,
       }, { signal: options.signal })
 
+      let usage: LlmUsage = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 }
       for await (const event of stream) {
+        usage = applyAnthropicUsageEvent(usage, event)
         if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
           yield { type: 'text', delta: event.delta.text }
         }
       }
-      yield { type: 'done' }
+      yield { type: 'done', usage }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown LLM error'
       yield { type: 'error', error: options.signal?.aborted ? 'Cancelled' : message }
@@ -114,12 +156,13 @@ export class AnthropicProvider implements LLMProvider {
   ): AsyncGenerator<AgentStreamChunk> {
     const client = createAnthropicClient({ apiKey: options.apiKey })
     const { system, messages: chatMessages } = toAnthropicMessages(messages)
+    const enableCache = options.enablePromptCache !== false
 
     try {
       const stream = await client.messages.create({
         model: options.model,
-        max_tokens: 8192,
-        system,
+        max_tokens: options.maxTokens ?? 8192,
+        system: systemParam(system, enableCache),
         messages: chatMessages,
         tools: options.tools.map((t) => ({
           name: t.name,
@@ -131,8 +174,11 @@ export class AnthropicProvider implements LLMProvider {
 
       const toolUses = new Map<number, { id: string; name: string; inputJson: string }>()
       let yieldedTools = false
+      let usage: LlmUsage = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 }
 
       for await (const event of stream) {
+        usage = applyAnthropicUsageEvent(usage, event)
+
         if (event.type === 'content_block_start' && event.content_block.type === 'tool_use') {
           toolUses.set(event.index, {
             id: event.content_block.id,
@@ -179,7 +225,7 @@ export class AnthropicProvider implements LLMProvider {
         yield { type: 'tool_calls', calls }
       }
 
-      yield { type: 'done' }
+      yield { type: 'done', usage }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown LLM error'
       yield { type: 'error', error: options.signal?.aborted ? 'Cancelled' : message }

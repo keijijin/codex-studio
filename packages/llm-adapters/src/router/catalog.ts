@@ -61,9 +61,10 @@ export const DEFAULT_PROVIDER_TIERS: Record<'openai' | 'anthropic' | 'xai', Prov
 }
 
 export const OLLAMA_BY_TIER: Record<CostTier, string> = {
+  // Prefer installed lightweight coder; heavier tags are often absent locally
   lite: 'qwen2.5-coder:7b',
-  standard: 'qwen2.5-coder:14b',
-  premium: 'qwen2.5-coder:32b',
+  standard: 'qwen2.5-coder:7b',
+  premium: 'qwen2.5-coder:7b',
 }
 
 export interface ModelCatalogSnapshot {
@@ -163,14 +164,21 @@ export function cascadeTiers(start: CostTier): CostTier[] {
 }
 
 /** Provider preference within a tier (cost / coding strength). */
-function providersForTier(tier: CostTier, taskHint: 'chat' | 'code' | 'team'): Array<'xai' | 'openai' | 'anthropic'> {
-  if (tier === 'lite') {
-    // Cheapest / fastest first — Grok Fast & OpenAI nano
-    return ['xai', 'openai', 'anthropic']
-  }
+function providersForTier(
+  tier: CostTier,
+  taskHint: 'chat' | 'code' | 'team',
+): Array<'xai' | 'openai' | 'anthropic'> {
   if (taskHint === 'code' || taskHint === 'team') {
-    // Claude strong on coding; then Grok mid; then OpenAI
-    return ['anthropic', 'xai', 'openai']
+    if (tier === 'lite') {
+      // Coding-capable cheap models first (avoid non-reasoning Grok as primary for code)
+      return ['openai', 'anthropic', 'xai']
+    }
+    // Claude strong on coding; then OpenAI; Grok as alternate
+    return ['anthropic', 'openai', 'xai']
+  }
+  if (tier === 'lite') {
+    // Cheapest / fastest chat first
+    return ['xai', 'openai', 'anthropic']
   }
   return ['xai', 'anthropic', 'openai']
 }

@@ -27,10 +27,11 @@ import {
   resolveRoutingDecisionAsync,
   runtimeFromCandidate,
 } from './llm-config'
-import { formatSkillPrompt, formatSkillUserMessage, compactMessageContents, detectReplyLanguage, formatLanguageInstruction } from '@codex/agent-core'
+import { formatSkillPrompt, formatSkillUserMessage, compactMessageContents, detectReplyLanguage, formatLanguageInstruction, estimateTokens } from '@codex/agent-core'
 import { rulesService } from './rules-service'
 import { skillsService } from './skills-service'
 import { modelCatalogService } from './model-catalog-service'
+import { assertUnderDailyBudget, recordLlmTurn } from './usage-helpers'
 
 const SYSTEM_PROMPT = `You are Codex Studio, an AI coding assistant integrated into a developer IDE.
 Help the user with code understanding, debugging, refactoring, and general programming questions.
@@ -113,6 +114,12 @@ export class ChatService {
     }
 
     const settings = settingsService.get()
+    const budgetError = await assertUnderDailyBudget(settings)
+    if (budgetError) {
+      this.emit(webContents, sessionId, { type: 'error', message: budgetError })
+      return
+    }
+
     const decision = await resolveRoutingDecisionAsync(settings, {
       runMode: 'chat',
       prompt: content,
@@ -148,7 +155,30 @@ export class ChatService {
       ...attachments.map((a) => a.path),
     ]
     const rulesPrompt = (await rulesService.buildPrompt(contextPaths)) + skillPrompt
-    const llmMessages = this.buildMessages(history, attachments, rulesPrompt)
+    let llmMessages = this.buildMessages(history, attachments, rulesPrompt)
+
+    // Soft trim Ask context using the same compact threshold as Agent
+    const askBudget = settings.agent.compactTokenThreshold
+    if (askBudget && askBudget > 0) {
+      const estimated = llmMessages.reduce((sum, m) => sum + estimateTokens(m.content), 0)
+      if (estimated > askBudget) {
+        const compacted = compactMessageContents(
+          llmMessages.filter((m) => m.role !== 'system').map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
+          8,
+        )
+        const system = llmMessages.find((m) => m.role === 'system')
+        llmMessages = [
+          ...(system ? [system] : []),
+          ...compacted.map((m) => ({
+            role: m.role as 'system' | 'user' | 'assistant',
+            content: m.content,
+          })),
+        ]
+      }
+    }
 
     this.emitRouting(webContents, sessionId, decision)
 
@@ -187,6 +217,8 @@ export class ChatService {
         const llm = getProviderInstance(runtime.provider)
         let assistantContent = ''
         let rawStreamError: string | null = null
+        let turnUsage: { inputTokens: number; outputTokens: number; cachedInputTokens: number } | undefined
+        const startedAt = Date.now()
 
         try {
           for await (const chunk of llm.chat(llmMessages, {
@@ -194,10 +226,14 @@ export class ChatService {
             apiKey: runtime.apiKey,
             baseUrl: runtime.baseUrl,
             signal: abortController.signal,
+            maxTokens: settings.cost?.maxOutputTokens ?? 4096,
+            enablePromptCache: settings.cost?.enablePromptCache !== false,
           })) {
             if (chunk.type === 'text') {
               assistantContent += chunk.delta
               this.emit(webContents, sessionId, { type: 'text_delta', content: chunk.delta })
+            } else if (chunk.type === 'done') {
+              turnUsage = chunk.usage
             } else if (chunk.type === 'error') {
               rawStreamError = chunk.error
               break
@@ -208,12 +244,25 @@ export class ChatService {
         }
 
         if (!rawStreamError) {
+          const usagePayload = await recordLlmTurn({
+            settings,
+            sessionId,
+            provider: runtime.provider,
+            model: runtime.model,
+            mode: 'ask',
+            latencyMs: Date.now() - startedAt,
+            usage: turnUsage,
+          })
           const saved = sessionService.addMessage(sessionId, {
             sessionId,
             role: 'assistant',
             content: assistantContent,
           })
-          this.emit(webContents, sessionId, { type: 'done', messageId: saved.id })
+          this.emit(webContents, sessionId, {
+            type: 'done',
+            messageId: saved.id,
+            usage: usagePayload,
+          })
           return
         }
 

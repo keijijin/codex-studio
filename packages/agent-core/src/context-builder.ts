@@ -1,15 +1,40 @@
 import type { AgentMessage } from '@codex/llm-adapters'
 
-const CHARS_PER_TOKEN = 4
-const DEFAULT_BUDGET = 100_000
-
+/**
+ * Improved heuristic token estimate:
+ * - ASCII / latin: ~4 chars per token
+ * - CJK / fullwidth: ~1.5 chars per token (closer to real BPE for JP/CN)
+ * - Includes tool_calls JSON when present
+ */
 export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / CHARS_PER_TOKEN)
+  if (!text) return 0
+  let ascii = 0
+  let other = 0
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+    if (code <= 0x7f) ascii++
+    else other++
+  }
+  return Math.max(1, Math.ceil(ascii / 4 + other / 1.5))
+}
+
+function estimateMessageTokens(m: AgentMessage): number {
+  let total = estimateTokens(m.content ?? '')
+  if (m.tool_calls?.length) {
+    for (const tc of m.tool_calls) {
+      total += estimateTokens(tc.name) + estimateTokens(JSON.stringify(tc.arguments ?? {})) + 8
+    }
+  }
+  if (m.tool_call_id) total += 4
+  return total + 4 // role overhead
 }
 
 export function estimateMessagesTokens(messages: AgentMessage[]): number {
-  return messages.reduce((sum, m) => sum + estimateTokens(m.content), 0)
+  return messages.reduce((sum, m) => sum + estimateMessageTokens(m), 0)
 }
+
+const CHARS_PER_TOKEN_ASCII = 4
+const DEFAULT_BUDGET = 100_000
 
 /**
  * Drop orphan tool messages / incomplete tool_call groups so OpenAI/Anthropic
@@ -78,7 +103,7 @@ export function trimAgentHistory(
   const middle = lastUserIdx >= 0 ? rest.slice(0, lastUserIdx) : rest.slice(0, -1)
 
   const tokenCount = (msgs: AgentMessage[]) =>
-    msgs.reduce((sum, m) => sum + estimateTokens(m.content), 0)
+    msgs.reduce((sum, m) => sum + estimateMessageTokens(m), 0)
 
   let budget = budgetTokens - tokenCount(system) - tokenCount(pinned)
   const kept: AgentMessage[] = []
@@ -87,14 +112,14 @@ export function trimAgentHistory(
   for (let i = middle.length - 1; i >= 0; i--) {
     const msg = middle[i]
     let content = msg.content
-    const tokens = estimateTokens(content)
+    const tokens = estimateMessageTokens({ ...msg, content })
 
     if (tokens > budget && msg.role === 'tool' && budget > 0) {
-      const maxChars = Math.max(0, budget * CHARS_PER_TOKEN - 20)
+      const maxChars = Math.max(0, budget * CHARS_PER_TOKEN_ASCII - 20)
       content = content.slice(0, maxChars) + '\n...(truncated)'
     }
 
-    const used = estimateTokens(content)
+    const used = estimateMessageTokens({ ...msg, content })
     if (used > budget && kept.length > 0) {
       dropped += i + 1
       break

@@ -55,7 +55,7 @@ export const DEFAULT_FALLBACK_CHAIN: ModelCandidate[] = [
   { provider: 'openai', model: 'gpt-5.4-nano' },
   { provider: 'anthropic', model: DEFAULT_ANTHROPIC_HAIKU },
   { provider: 'xai', model: 'grok-4-1-fast-non-reasoning' },
-  { provider: 'ollama', model: 'qwen2.5-coder:14b' },
+  { provider: 'ollama', model: 'qwen2.5-coder:7b' },
 ]
 
 export const DEFAULT_ROUTING: RoutingSettings = {

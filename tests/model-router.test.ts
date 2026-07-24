@@ -95,6 +95,42 @@ describe('model router', () => {
     expect(result.tier).toBe('premium')
   })
 
+  it('does not escalate everyday 修正/実装 to premium', () => {
+    const result = classifyTask({
+      prompt: 'TypeScript のバグを修正して実装する',
+      runMode: 'agent',
+    })
+    expect(result.taskKind).toBe('agent_code')
+    expect(result.tier).toBe('standard')
+  })
+
+  it('keeps rename / light edits on lite', () => {
+    const result = classifyTask({
+      prompt: 'このファイルを V020__enable_rls_tenant_isolation.sql にリネームするだけ',
+      runMode: 'agent',
+    })
+    expect(result.taskKind).toBe('agent_code')
+    expect(result.tier).toBe('lite')
+  })
+
+  it('explore-only stays lite', () => {
+    const result = classifyTask({
+      prompt: 'RLS 関連の SQL ファイルはどこにある？一覧して',
+      runMode: 'agent',
+    })
+    expect(result.taskKind).toBe('agent_explore')
+    expect(result.tier).toBe('lite')
+  })
+
+  it('single soft hard word (migration) without scope stays standard', () => {
+    const result = classifyTask({
+      prompt: 'Flyway migration のコメントを直して',
+      runMode: 'agent',
+    })
+    expect(result.tier).not.toBe('premium')
+    expect(result.taskKind).toBe('agent_code')
+  })
+
   it('auto picks cost-optimized lite models for simple chat (not user primary first)', () => {
     const decision = decideRouting({
       mode: 'auto',
@@ -131,8 +167,26 @@ describe('model router', () => {
       catalog: createDefaultCatalog(),
     })
     expect(decision.taskKind).toBe('agent_code')
+    expect(decision.tier).toBe('standard')
+    expect(decision.selected.provider).toBe('anthropic')
+    expect(decision.selected.model).toMatch(/sonnet|haiku|opus/i)
     expect(decision.queue.length).toBeGreaterThan(1)
-    expect(decision.reason).toMatch(/Auto \(agent_code\//)
+    expect(decision.reason).toMatch(/Auto \(agent_code\/standard/)
+  })
+
+  it('auto light rename starts on openai nano-class for code lite', () => {
+    const decision = decideRouting({
+      mode: 'auto',
+      primary: { provider: 'openai', model: 'gpt-5.5' },
+      fallbackChain: DEFAULT_ROUTING.fallbackChain,
+      maxAttempts: 3,
+      isAvailable: (c) => c.provider !== 'ollama',
+      runMode: 'agent',
+      prompt: 'ファイル名をリネームするだけ',
+      catalog: createDefaultCatalog(),
+    })
+    expect(decision.tier).toBe('lite')
+    expect(decision.selected.provider).toBe('openai')
   })
 
   it('auto skips offline Ollama and uses cloud providers', () => {

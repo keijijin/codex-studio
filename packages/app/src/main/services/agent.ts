@@ -41,6 +41,7 @@ import { rulesService } from './rules-service'
 import { hooksService } from './hooks-service'
 import { sessionService, settingsService } from './settings'
 import { workspaceService } from './workspace'
+import { assertUnderDailyBudget, recordLlmTurn } from './usage-helpers'
 
 const ALL_AGENT_TOOLS = [
   'Read',
@@ -81,6 +82,12 @@ export class AgentService {
         type: 'error',
         message: 'ワークスペースを開いてから Agent を使用してください。',
       })
+      return
+    }
+
+    const budgetError = await assertUnderDailyBudget(settings)
+    if (budgetError) {
+      this.emit(webContents, sessionId, { type: 'error', message: budgetError })
       return
     }
 
@@ -255,13 +262,26 @@ export class AgentService {
         })
 
         if (outcome.status === 'ok') {
+          const usagePayload = await recordLlmTurn({
+            settings,
+            sessionId,
+            provider: runtime.provider,
+            model: runtime.model,
+            mode: 'agent',
+            latencyMs: outcome.latencyMs,
+            usage: outcome.usage,
+          })
           const saved = sessionService.addMessage(sessionId, {
             sessionId,
             role: 'assistant',
             content: outcome.assistantContent,
             toolCalls: outcome.toolCalls.length > 0 ? outcome.toolCalls : undefined,
           })
-          this.emit(webContents, sessionId, { type: 'done', messageId: saved.id })
+          this.emit(webContents, sessionId, {
+            type: 'done',
+            messageId: saved.id,
+            usage: usagePayload,
+          })
           void hooksService.onAgentComplete(sessionId)
 
           if (settings.agent.autoMemory && outcome.assistantContent.trim()) {
@@ -318,7 +338,13 @@ export class AgentService {
     runLimited: ReturnType<typeof createConcurrencyLimiter>
     notifyFileChanged: (absolutePath: string) => void
   }): Promise<
-    | { status: 'ok'; assistantContent: string; toolCalls: ToolCallRecord[] }
+    | {
+        status: 'ok'
+        assistantContent: string
+        toolCalls: ToolCallRecord[]
+        usage?: { inputTokens: number; outputTokens: number; cachedInputTokens: number }
+        latencyMs: number
+      }
     | { status: 'error'; error: string; toolsStarted: boolean }
   > {
     const {
@@ -343,6 +369,8 @@ export class AgentService {
     let assistantContent = ''
     const toolCalls: ToolCallRecord[] = []
     let toolsStarted = false
+    let usage: { inputTokens: number; outputTokens: number; cachedInputTokens: number } | undefined
+    const startedAt = Date.now()
 
     try {
       for await (const event of this.orchestrator.run(history, {
@@ -356,6 +384,8 @@ export class AgentService {
         yoloMode: isE2eMock ? false : settings.agent.yoloMode,
         permissions,
         compactTokenThreshold: settings.agent.compactTokenThreshold,
+        maxTokens: settings.cost?.maxOutputTokensAgent ?? 8192,
+        enablePromptCache: settings.cost?.enablePromptCache !== false,
         signal: abortController.signal,
         resolvePath: (p) => workspaceService.resolveWithinWorkspace(p),
         getRelativePath: (p) => workspaceService.getRelativePath(p),
@@ -466,11 +496,18 @@ export class AgentService {
         } else if (event.type === 'error') {
           return { status: 'error', error: event.message, toolsStarted }
         } else if (event.type === 'done') {
+          usage = event.usage
           break
         }
       }
 
-      return { status: 'ok', assistantContent, toolCalls }
+      return {
+        status: 'ok',
+        assistantContent,
+        toolCalls,
+        usage,
+        latencyMs: Date.now() - startedAt,
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Agent failed'
       return { status: 'error', error: message, toolsStarted }

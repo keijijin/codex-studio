@@ -134,7 +134,7 @@ export function decideRouting(input: DecideRoutingInput): RoutingDecision {
     mode: 'auto',
     selected,
     reason:
-      `Auto (${taskKind}/${classified.tier}, ~${classified.estimatedTokens} tok, score ${classified.score})` +
+      `Auto (${taskKind}/${classified.tier}, ${classified.rule}, ~${classified.estimatedTokens} tok, score ${classified.score})` +
       ` → ${selected.provider}:${selected.model}`,
     queue: queue.length > 0 ? queue : [input.primary],
     taskKind,

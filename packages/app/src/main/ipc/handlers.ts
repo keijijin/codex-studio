@@ -14,6 +14,8 @@ import { rulesService } from '../services/rules-service'
 import { skillsService } from '../services/skills-service'
 import { hooksService } from '../services/hooks-service'
 import { assertFilePath, assertNonEmptyString, assertSessionId, assertTerminalId } from '../utils/validate-ipc'
+import { redactSettingsForRenderer } from '../services/settings-redact'
+import { getDailyUsageSummary, listRecentUsage } from '../services/usage-log'
 
 export function registerIpcHandlers(): void {
   indexService.setProgressCallback((status: IndexStatus) => {
@@ -76,11 +78,11 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle(IPC_CHANNELS.SETTINGS_GET, () => {
-    return settingsService.get()
+    return redactSettingsForRenderer(settingsService.get())
   })
 
   ipcMain.handle(IPC_CHANNELS.SETTINGS_SET, (_event, partial) => {
-    return settingsService.set(partial)
+    return redactSettingsForRenderer(settingsService.set(partial))
   })
 
   ipcMain.handle(IPC_CHANNELS.SESSION_LIST, () => {
@@ -204,5 +206,13 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.CHAT_COMPACT, async (_event, sessionId: string) => {
     return chatService.compactSession(assertSessionId(sessionId))
+  })
+
+  ipcMain.handle(IPC_CHANNELS.USAGE_RECENT, async (_event, limit?: number) => {
+    return listRecentUsage(typeof limit === 'number' ? limit : 50)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.USAGE_DAILY, async () => {
+    return getDailyUsageSummary()
   })
 }

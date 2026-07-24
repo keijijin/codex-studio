@@ -2,6 +2,7 @@ import { createHash } from 'crypto'
 import { realpath, readdir, readFile, stat, writeFile } from 'fs/promises'
 import { dirname, join, relative, resolve } from 'path'
 import type { FileNode, Workspace } from '@codex/shared'
+import { isPathInsideRoot } from '@codex/shared'
 
 export function workspaceIdFromPath(resolvedPath: string): string {
   return createHash('sha256').update(resolvedPath).digest('hex').slice(0, 24)
@@ -69,12 +70,12 @@ export class WorkspaceService {
     const normalizedRoot = resolve(root)
     const resolved = resolve(targetPath)
 
-    if (resolved.startsWith(normalizedRoot)) {
+    if (isPathInsideRoot(normalizedRoot, resolved)) {
       return resolved
     }
 
     const relativeResolved = resolve(normalizedRoot, targetPath)
-    if (!relativeResolved.startsWith(normalizedRoot)) {
+    if (!isPathInsideRoot(normalizedRoot, relativeResolved)) {
       throw new Error('Path is outside workspace')
     }
     return relativeResolved
@@ -115,7 +116,7 @@ export class WorkspaceService {
       resolved = resolve(normalizedRoot, target)
     }
 
-    if (!resolved.startsWith(normalizedRoot)) {
+    if (!isPathInsideRoot(normalizedRoot, resolved)) {
       throw new Error('Path is outside workspace')
     }
     return resolved

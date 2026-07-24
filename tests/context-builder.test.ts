@@ -13,6 +13,12 @@ describe('context-builder', () => {
     expect(estimateTokens('a'.repeat(8))).toBe(2)
   })
 
+  it('estimates CJK denser than ASCII', () => {
+    const ascii = estimateTokens('a'.repeat(30))
+    const cjk = estimateTokens('あ'.repeat(30))
+    expect(cjk).toBeGreaterThan(ascii)
+  })
+
   it('keeps system and latest user messages when trimming', () => {
     const messages: AgentMessage[] = [
       { role: 'system', content: 'system prompt' },

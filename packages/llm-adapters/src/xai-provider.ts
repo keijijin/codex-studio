@@ -5,12 +5,14 @@ import type {
   ChatMessage,
   ChatOptions,
   LLMProvider,
+  LlmUsage,
   StreamChunk,
   ToolCall,
 } from './types'
 import { parseToolArguments } from './types'
 import { toOpenAIMessages } from './openai-messages'
 import { createOpenAIClient } from './create-clients'
+import { usageFromOpenAIChunk } from './usage-utils'
 
 /** OpenAI-compatible Chat Completions endpoint for Grok. */
 export const DEFAULT_XAI_BASE_URL = 'https://api.x.ai/v1'
@@ -37,13 +39,18 @@ export class XaiProvider implements LLMProvider {
         model: options.model,
         messages: messages.map((m) => ({ role: m.role, content: m.content })),
         stream: true,
+        stream_options: { include_usage: true },
+        ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
       }, { signal: options.signal })
 
+      let usage: LlmUsage | undefined
       for await (const chunk of stream) {
         const delta = chunk.choices[0]?.delta?.content
         if (delta) yield { type: 'text', delta }
+        const chunkUsage = usageFromOpenAIChunk(chunk)
+        if (chunkUsage) usage = chunkUsage
       }
-      yield { type: 'done' }
+      yield { type: 'done', usage }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown LLM error'
       yield { type: 'error', error: options.signal?.aborted ? 'Cancelled' : message }
@@ -70,14 +77,19 @@ export class XaiProvider implements LLMProvider {
         })),
         tool_choice: 'auto',
         stream: true,
+        stream_options: { include_usage: true },
+        ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
       }, { signal: options.signal })
 
       const pending: Record<number, { id: string; name: string; arguments: string }> = {}
       let yieldedTools = false
+      let usage: LlmUsage | undefined
 
       for await (const chunk of stream) {
         const choice = chunk.choices[0]
         const delta = choice?.delta
+        const chunkUsage = usageFromOpenAIChunk(chunk)
+        if (chunkUsage) usage = chunkUsage
 
         if (delta?.content) {
           yield { type: 'text', delta: delta.content }
@@ -123,7 +135,7 @@ export class XaiProvider implements LLMProvider {
         }
       }
 
-      yield { type: 'done' }
+      yield { type: 'done', usage }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown LLM error'
       yield { type: 'error', error: options.signal?.aborted ? 'Cancelled' : message }

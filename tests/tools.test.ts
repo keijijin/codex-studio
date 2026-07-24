@@ -203,4 +203,10 @@ describe('resolveWithinWorkspace', () => {
   it('throws for paths outside workspace', () => {
     expect(() => resolveWithinWorkspace('/tmp/workspace', '/etc/passwd')).toThrow(/outside workspace/)
   })
+
+  it('rejects sibling prefix path traversal (/workspace vs /workspace-evil)', () => {
+    expect(() => resolveWithinWorkspace('/tmp/workspace', '/tmp/workspace-evil/secret')).toThrow(
+      /outside workspace/,
+    )
+  })
 })

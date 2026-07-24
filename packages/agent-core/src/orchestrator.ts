@@ -1,4 +1,5 @@
-import type { LLMProvider, AgentMessage, ToolCall } from '@codex/llm-adapters'
+import type { LLMProvider, AgentMessage, ToolCall, LlmUsage } from '@codex/llm-adapters'
+import { addUsage, emptyUsage } from '@codex/llm-adapters'
 import type { AgentPermissions, ApprovalRequest } from '@codex/shared'
 import { DEFAULT_AGENT_PERMISSIONS, permissionForTool } from '@codex/shared'
 import type { ToolRegistry, ToolResult } from '@codex/tools'
@@ -21,6 +22,10 @@ export interface AgentRunContext {
   permissions?: AgentPermissions
   /** Auto-compact when estimated history tokens exceed this (0 = use default budget only) */
   compactTokenThreshold?: number
+  /** Cap completion tokens per LLM call */
+  maxTokens?: number
+  /** Anthropic/OpenAI prompt cache when supported */
+  enablePromptCache?: boolean
   signal: AbortSignal
   resolvePath: (path: string) => string
   getRelativePath: (absolutePath: string) => string
@@ -51,7 +56,10 @@ export type AgentOrchestratorEvent =
   | { type: 'tool_call_start'; toolCallId: string; tool: string; args: unknown }
   | { type: 'tool_call_result'; toolCallId: string; tool: string; result: string; success: boolean; filePath?: string }
   | { type: 'approval_required'; request: ApprovalRequest }
-  | { type: 'done' }
+  | {
+      type: 'done'
+      usage?: { inputTokens: number; outputTokens: number; cachedInputTokens: number }
+    }
   | { type: 'error'; message: string }
 
 const buildSystemPrompt = (
@@ -163,6 +171,8 @@ export class AgentOrchestrator {
         ? ctx.compactTokenThreshold
         : undefined
 
+    let totalUsage: LlmUsage = emptyUsage()
+
     for (let i = 0; i < ctx.maxIterations; i++) {
       if (ctx.signal.aborted) {
         yield { type: 'error', message: 'Cancelled' }
@@ -184,12 +194,16 @@ export class AgentOrchestrator {
         baseUrl: ctx.baseUrl,
         tools,
         signal: ctx.signal,
+        maxTokens: ctx.maxTokens,
+        enablePromptCache: ctx.enablePromptCache,
       })) {
         if (chunk.type === 'text') {
           assistantText += chunk.delta
           yield { type: 'text_delta', content: chunk.delta }
         } else if (chunk.type === 'tool_calls') {
           pendingToolCalls = chunk.calls
+        } else if (chunk.type === 'done') {
+          totalUsage = addUsage(totalUsage, chunk.usage)
         } else if (chunk.type === 'error') {
           yield { type: 'error', message: chunk.error }
           return
@@ -197,7 +211,7 @@ export class AgentOrchestrator {
       }
 
       if (pendingToolCalls.length === 0) {
-        yield { type: 'done' }
+        yield { type: 'done', usage: totalUsage }
         return
       }
 

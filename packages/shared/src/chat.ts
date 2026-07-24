@@ -36,5 +36,15 @@ export type ChatStreamEvent =
       attempt: number
       previousError: string
     }
-  | { type: 'done'; messageId: string }
+  | {
+      type: 'done'
+      messageId: string
+      usage?: {
+        inputTokens: number
+        outputTokens: number
+        cachedInputTokens: number
+        latencyMs: number
+        estimatedCostUsd: number
+      }
+    }
   | { type: 'error'; message: string }

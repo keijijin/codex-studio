@@ -52,8 +52,30 @@ function createWindow(): void {
   })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    try {
+      const parsed = new URL(url)
+      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+        void shell.openExternal(url)
+      }
+    } catch {
+      // ignore invalid URLs
+    }
     return { action: 'deny' }
+  })
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const isDev = Boolean(process.env.ELECTRON_RENDERER_URL)
+    if (isDev && url.startsWith(process.env.ELECTRON_RENDERER_URL!)) return
+    if (url.startsWith('file://')) return
+    event.preventDefault()
+    try {
+      const parsed = new URL(url)
+      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+        void shell.openExternal(url)
+      }
+    } catch {
+      // ignore
+    }
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {

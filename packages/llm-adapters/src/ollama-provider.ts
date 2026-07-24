@@ -33,6 +33,7 @@ export class OllamaProvider implements LLMProvider {
         model: options.model,
         messages: messages.map((m) => ({ role: m.role, content: m.content })),
         stream: true,
+        ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
       }, { signal: options.signal })
 
       for await (const chunk of stream) {

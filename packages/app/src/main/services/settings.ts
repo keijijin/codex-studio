@@ -5,6 +5,7 @@ import { join } from 'path'
 import {
   APP_USER_DATA_DIR,
   DEFAULT_AGENT_PERMISSIONS,
+  DEFAULT_COST_SETTINGS,
   DEFAULT_SETTINGS,
   migrateModelId,
   normalizeRoutingSettings,
@@ -13,6 +14,7 @@ import {
   type Session,
 } from '@codex/shared'
 import { randomUUID } from 'crypto'
+import { API_KEY_REDACTED, isRedactedApiKey } from '@codex/shared'
 
 interface StoreSchema {
   settings: AppSettings
@@ -160,6 +162,16 @@ export class SettingsService {
     } else {
       agent.maxSubagents = Math.min(8, Math.max(1, Math.floor(agent.maxSubagents)))
     }
+    const cost = {
+      ...DEFAULT_COST_SETTINGS,
+      ...stored.cost,
+    }
+    cost.maxOutputTokens = Math.min(128_000, Math.max(256, Math.floor(cost.maxOutputTokens) || 4096))
+    cost.maxOutputTokensAgent = Math.min(
+      128_000,
+      Math.max(256, Math.floor(cost.maxOutputTokensAgent) || 8192),
+    )
+    cost.dailyBudgetUsd = Math.max(0, Number(cost.dailyBudgetUsd) || 0)
     return {
       ...DEFAULT_SETTINGS,
       ...stored,
@@ -176,6 +188,7 @@ export class SettingsService {
       },
       routing: normalizeRoutingSettings(stored.routing ?? DEFAULT_SETTINGS.routing),
       agent,
+      cost,
     }
   }
 
@@ -193,13 +206,43 @@ export class SettingsService {
     if (typeof agent.maxSubagents === 'number') {
       agent.maxSubagents = Math.min(8, Math.max(1, Math.floor(agent.maxSubagents)))
     }
+
+    const keepKey = (cur: string | undefined, next: string | undefined): string | undefined => {
+      if (next === undefined) return cur
+      if (next === '' || isRedactedApiKey(next) || next === API_KEY_REDACTED) return cur
+      return next
+    }
+
+    const cost = {
+      ...DEFAULT_COST_SETTINGS,
+      ...current.cost,
+      ...partial.cost,
+    }
+    cost.maxOutputTokens = Math.min(128_000, Math.max(256, Math.floor(cost.maxOutputTokens) || 4096))
+    cost.maxOutputTokensAgent = Math.min(
+      128_000,
+      Math.max(256, Math.floor(cost.maxOutputTokensAgent) || 8192),
+    )
+    cost.dailyBudgetUsd = Math.max(0, Number(cost.dailyBudgetUsd) || 0)
+    cost.logUsage = partial.cost?.logUsage ?? current.cost?.logUsage ?? DEFAULT_COST_SETTINGS.logUsage
+    cost.enablePromptCache =
+      partial.cost?.enablePromptCache ??
+      current.cost?.enablePromptCache ??
+      DEFAULT_COST_SETTINGS.enablePromptCache
+
     // User explicitly saved — do not re-run legacy bump.
     store.set('migratedMaxIterationsV2', true)
     const updated: AppSettings = {
       ...current,
       ...partial,
       general: { ...current.general, ...partial.general },
-      models: { ...current.models, ...partial.models },
+      models: {
+        ...current.models,
+        ...partial.models,
+        openaiApiKey: keepKey(current.models.openaiApiKey, partial.models?.openaiApiKey),
+        anthropicApiKey: keepKey(current.models.anthropicApiKey, partial.models?.anthropicApiKey),
+        xaiApiKey: keepKey(current.models.xaiApiKey, partial.models?.xaiApiKey),
+      },
       routing: normalizeRoutingSettings({
         ...current.routing,
         ...partial.routing,
@@ -207,6 +250,7 @@ export class SettingsService {
         profiles: partial.routing?.profiles ?? current.routing.profiles,
       }),
       agent,
+      cost,
     }
     store.set('settings', updated)
     return updated

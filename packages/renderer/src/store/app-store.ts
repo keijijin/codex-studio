@@ -28,6 +28,14 @@ interface EditorTab {
 
 type SidebarView = 'explorer' | 'search'
 
+function toolLogFromMessages(messages: Message[]): ToolCallRecord[] {
+  const log: ToolCallRecord[] = []
+  for (const m of messages) {
+    if (m.toolCalls?.length) log.push(...m.toolCalls)
+  }
+  return log
+}
+
 interface AppState {
   workspace: Workspace | null
   fileTree: FileNode[]
@@ -45,6 +53,15 @@ interface AppState {
   isStreaming: boolean
   streamingContent: string
   streamingToolCalls: ToolCallRecord[]
+  /** Session-scoped tool history for the Tools panel (survives stream end) */
+  sessionToolLog: ToolCallRecord[]
+  lastUsage: {
+    inputTokens: number
+    outputTokens: number
+    cachedInputTokens: number
+    latencyMs: number
+    estimatedCostUsd: number
+  } | null
   chatError: string | null
   routingInfo: {
     provider: string
@@ -83,6 +100,7 @@ interface AppState {
   setRoutingMode: (mode: RoutingMode) => Promise<void>
   respondApproval: (approved: boolean) => Promise<void>
   refreshIndexStatus: () => Promise<void>
+  clearSessionToolLog: () => void
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -102,6 +120,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   isStreaming: false,
   streamingContent: '',
   streamingToolCalls: [],
+  sessionToolLog: [],
+  lastUsage: null,
   chatError: null,
   routingInfo: null,
   sessionMode: 'ask',
@@ -140,29 +160,33 @@ export const useAppStore = create<AppState>((set, get) => ({
           chatError: null,
         }))
       } else if (event.type === 'tool_call_start') {
-        set((s) => ({
-          streamingToolCalls: [
-            ...s.streamingToolCalls,
-            {
-              id: event.toolCallId,
-              name: event.tool,
-              args: event.args,
-              status: 'running' as const,
-            },
-          ],
-        }))
+        set((s) => {
+          const next: ToolCallRecord = {
+            id: event.toolCallId,
+            name: event.tool,
+            args: event.args,
+            status: 'running' as const,
+          }
+          return {
+            streamingToolCalls: [...s.streamingToolCalls, next],
+            sessionToolLog: [...s.sessionToolLog, next],
+          }
+        })
       } else if (event.type === 'tool_call_result') {
-        set((s) => ({
-          streamingToolCalls: s.streamingToolCalls.map((tc) =>
+        set((s) => {
+          const patch = (tc: ToolCallRecord) =>
             tc.id === event.toolCallId
               ? {
                   ...tc,
                   result: event.result,
                   status: event.success ? ('done' as const) : ('error' as const),
                 }
-              : tc,
-          ),
-        }))
+              : tc
+          return {
+            streamingToolCalls: s.streamingToolCalls.map(patch),
+            sessionToolLog: s.sessionToolLog.map(patch),
+          }
+        })
         // Do not auto-open files from Agent tools — user opens via Explorer / Search / tool card.
       } else if (event.type === 'approval_required') {
         set({
@@ -212,6 +236,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             streamingToolCalls: [],
             chatError: null,
             pendingApproval: null,
+            lastUsage: event.usage ?? null,
           })
         })()
       } else if (event.type === 'error') {
@@ -475,6 +500,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       messages,
       streamingContent: '',
       streamingToolCalls: [],
+      sessionToolLog: toolLogFromMessages(messages),
+      lastUsage: null,
       chatError: null,
       isStreaming: false,
       sessionMode: session?.mode ?? 'ask',
@@ -489,10 +516,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       messages: [],
       streamingContent: '',
       streamingToolCalls: [],
+      sessionToolLog: [],
+      lastUsage: null,
       chatError: null,
       sessionMode: session.mode,
     })
   },
+
+  clearSessionToolLog: () => set({ sessionToolLog: [] }),
 
   setSessionMode: async (mode: SessionMode) => {
     const { activeSessionId, sessions } = get()

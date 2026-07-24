@@ -1,16 +1,21 @@
-import { useLayoutEffect, useRef } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { useAppStore } from '@renderer/store/app-store'
 import { ChatInput } from './ChatInput'
 import { MessageList } from './MessageList'
+import { ToolLogPanel } from './ToolLogPanel'
 import { useSettingsDialog } from './SettingsDialog'
 import { ApprovalDialog } from './ApprovalDialog'
-import type { RoutingMode, SessionMode } from '@codex/shared'
+import { isRedactedApiKey, type RoutingMode, type SessionMode } from '@codex/shared'
 
 const ROUTING_QUICK: { id: RoutingMode; label: string; title: string }[] = [
   { id: 'fixed', label: 'Fixed', title: '既定モデルのみ（固定）' },
   { id: 'fallback-only', label: 'Fallback', title: '失敗時に次のモデルへ切替' },
   { id: 'auto', label: 'Auto', title: 'タスクに応じてモデルを自動選択' },
 ]
+
+function hasConfiguredKey(value: string | undefined): boolean {
+  return Boolean(value) && (isRedactedApiKey(value) || value!.length > 0)
+}
 
 export function AIPanel() {
   const workspace = useAppStore((s) => s.workspace)
@@ -19,6 +24,8 @@ export function AIPanel() {
   const messages = useAppStore((s) => s.messages)
   const streamingContent = useAppStore((s) => s.streamingContent)
   const streamingToolCalls = useAppStore((s) => s.streamingToolCalls)
+  const sessionToolLog = useAppStore((s) => s.sessionToolLog)
+  const lastUsage = useAppStore((s) => s.lastUsage)
   const isStreaming = useAppStore((s) => s.isStreaming)
   const chatError = useAppStore((s) => s.chatError)
   const routingInfo = useAppStore((s) => s.routingInfo)
@@ -34,17 +41,19 @@ export function AIPanel() {
   const pendingApproval = useAppStore((s) => s.pendingApproval)
   const respondApproval = useAppStore((s) => s.respondApproval)
   const toggleAiPanel = useAppStore((s) => s.toggleAiPanel)
+  const clearSessionToolLog = useAppStore((s) => s.clearSessionToolLog)
   const { openSettings, settingsDialog } = useSettingsDialog()
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [panelTab, setPanelTab] = useState<'chat' | 'tools'>('chat')
 
   const hasApiKey =
     settings?.models.defaultProvider === 'ollama'
       ? true
       : settings?.models.defaultProvider === 'anthropic'
-        ? Boolean(settings?.models.anthropicApiKey)
+        ? hasConfiguredKey(settings?.models.anthropicApiKey)
         : settings?.models.defaultProvider === 'xai'
-          ? Boolean(settings?.models.xaiApiKey)
-          : Boolean(settings?.models.openaiApiKey)
+          ? hasConfiguredKey(settings?.models.xaiApiKey)
+          : hasConfiguredKey(settings?.models.openaiApiKey)
 
   const providerLabel =
     routingInfo?.provider === 'anthropic'
@@ -87,9 +96,9 @@ export function AIPanel() {
 
   useLayoutEffect(() => {
     const el = scrollRef.current
-    if (!el) return
+    if (!el || panelTab !== 'chat') return
     el.scrollTop = el.scrollHeight
-  }, [activeSessionId, messages, streamingContent, streamingToolCalls, isStreaming, chatError])
+  }, [activeSessionId, messages, streamingContent, streamingToolCalls, isStreaming, chatError, panelTab])
 
   return (
     <aside className="flex w-96 min-w-80 flex-col border-l border-surface-border bg-surface-raised">
@@ -200,6 +209,31 @@ export function AIPanel() {
           ))}
         </div>
 
+        <div className="mt-2 flex gap-1" role="tablist" aria-label="パネル">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={panelTab === 'chat'}
+            className={`flex-1 rounded px-2 py-1 text-xs ${
+              panelTab === 'chat' ? 'bg-accent text-white' : 'bg-surface text-text-secondary hover:bg-white/10'
+            }`}
+            onClick={() => setPanelTab('chat')}
+          >
+            Chat
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={panelTab === 'tools'}
+            className={`flex-1 rounded px-2 py-1 text-xs ${
+              panelTab === 'tools' ? 'bg-accent text-white' : 'bg-surface text-text-secondary hover:bg-white/10'
+            }`}
+            onClick={() => setPanelTab('tools')}
+          >
+            Tools{sessionToolLog.length > 0 ? ` (${sessionToolLog.length})` : ''}
+          </button>
+        </div>
+
         <p className="mt-2 text-xs text-text-muted">
           {sessionMode === 'agent' ? 'Agent' : 'Ask'} · {providerLabel}: {modelLabel ?? 'gpt-4o'}
           {!hasApiKey && (
@@ -224,25 +258,42 @@ export function AIPanel() {
             {isStreaming ? routingInfo?.reason : routingHint}
           </p>
         )}
-      </div>
-
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto p-3">
-        <MessageList
-          messages={messages}
-          streamingContent={streamingContent}
-          streamingToolCalls={streamingToolCalls}
-          isStreaming={isStreaming}
-          error={chatError}
-        />
-        {workspace && messages.length === 0 && !isStreaming && (
-          <p className="mt-4 text-xs text-text-muted">
-            Workspace: <span className="text-accent">{workspace.name}</span>
+        {lastUsage && (
+          <p className="mt-1 truncate text-[10px] text-text-muted" title="推定課金（参考値）">
+            直近: in {lastUsage.inputTokens}
+            {lastUsage.cachedInputTokens > 0 ? ` (cache ${lastUsage.cachedInputTokens})` : ''}
+            {' / '}out {lastUsage.outputTokens} · {lastUsage.latencyMs}ms · $
+            {lastUsage.estimatedCostUsd.toFixed(4)}
           </p>
         )}
       </div>
 
+      {panelTab === 'chat' ? (
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto p-3">
+          <MessageList
+            messages={messages}
+            streamingContent={streamingContent}
+            streamingToolCalls={streamingToolCalls}
+            isStreaming={isStreaming}
+            error={chatError}
+          />
+          {workspace && messages.length === 0 && !isStreaming && (
+            <p className="mt-4 text-xs text-text-muted">
+              Workspace: <span className="text-accent">{workspace.name}</span>
+            </p>
+          )}
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1">
+          <ToolLogPanel toolCalls={sessionToolLog} onClear={clearSessionToolLog} />
+        </div>
+      )}
+
       <ChatInput
-        onSend={(content, attachments) => void sendMessage(content, attachments)}
+        onSend={(content, attachments) => {
+          setPanelTab('chat')
+          void sendMessage(content, attachments)
+        }}
         onCancel={() => void cancelChat()}
         isStreaming={isStreaming}
       />

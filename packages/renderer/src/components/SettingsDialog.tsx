@@ -2,10 +2,14 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Form
 import { createPortal } from 'react-dom'
 import {
   IPC_CHANNELS,
+  API_KEY_REDACTED,
   DEFAULT_OLLAMA_BASE_URL,
   DEFAULT_AGENT_PERMISSIONS,
+  DEFAULT_COST_SETTINGS,
   DEFAULT_FALLBACK_CHAIN,
+  isRedactedApiKey,
   type AgentPermissions,
+  type CostSettings,
   type LLMProviderId,
   type ModelCandidate,
   type ModelInfo,
@@ -104,9 +108,10 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
   const [yoloMode, setYoloMode] = useState(false)
   const [maxIterations, setMaxIterations] = useState(100)
   const [permissions, setPermissions] = useState<AgentPermissions>({ ...DEFAULT_AGENT_PERMISSIONS })
-  const [compactTokenThreshold, setCompactTokenThreshold] = useState(80_000)
+  const [compactTokenThreshold, setCompactTokenThreshold] = useState(40_000)
   const [autoMemory, setAutoMemory] = useState(false)
   const [maxSubagents, setMaxSubagents] = useState(3)
+  const [cost, setCost] = useState<CostSettings>({ ...DEFAULT_COST_SETTINGS })
   const [provider, setProvider] = useState<LLMProviderId>('openai')
   const [model, setModel] = useState('gpt-4o')
   const [routingMode, setRoutingMode] = useState<RoutingMode>('fixed')
@@ -193,9 +198,10 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
           ...DEFAULT_AGENT_PERMISSIONS,
           ...settings.agent.permissions,
         })
-        setCompactTokenThreshold(settings.agent.compactTokenThreshold ?? 80_000)
+        setCompactTokenThreshold(settings.agent.compactTokenThreshold ?? 40_000)
         setAutoMemory(Boolean(settings.agent.autoMemory))
         setMaxSubagents(settings.agent.maxSubagents ?? 3)
+        setCost({ ...DEFAULT_COST_SETTINGS, ...settings.cost })
         await fetchModels(p, oKey, aKey, ollamaUrl, xKey, { preferredModel: savedModel })
       })
       .catch((err: unknown) => {
@@ -239,6 +245,16 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
           compactTokenThreshold: Math.max(0, Math.floor(compactTokenThreshold) || 0),
           autoMemory,
           maxSubagents: Math.min(8, Math.max(1, Math.floor(maxSubagents) || 3)),
+        },
+        cost: {
+          ...current.cost,
+          ...cost,
+          maxOutputTokens: Math.min(128_000, Math.max(256, Math.floor(cost.maxOutputTokens) || 4096)),
+          maxOutputTokensAgent: Math.min(
+            128_000,
+            Math.max(256, Math.floor(cost.maxOutputTokensAgent) || 8192),
+          ),
+          dailyBudgetUsd: Math.max(0, Number(cost.dailyBudgetUsd) || 0),
         },
       })
       setSaved(true)
@@ -307,20 +323,29 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                 id="openai-api-key"
                 type="password"
                 style={inputStyle}
-                placeholder="sk-..."
-                value={openaiKey}
-                onChange={(e) => setOpenaiKey(e.target.value)}
+                placeholder={isRedactedApiKey(openaiKey) ? '設定済み（変更時のみ入力）' : 'sk-...'}
+                value={isRedactedApiKey(openaiKey) ? '' : openaiKey}
+                onChange={(e) => setOpenaiKey(e.target.value || (openaiKey && isRedactedApiKey(openaiKey) ? API_KEY_REDACTED : ''))}
                 autoComplete="off"
               />
+              {isRedactedApiKey(openaiKey) && (
+                <p style={{ margin: '4px 0 0', fontSize: 11, color: '#6e6e6e' }}>
+                  キーは保存済みです。変更する場合のみ新しいキーを入力してください。
+                </p>
+              )}
 
               <label style={labelStyle} htmlFor="anthropic-api-key">Anthropic API Key</label>
               <input
                 id="anthropic-api-key"
                 type="password"
                 style={inputStyle}
-                placeholder="sk-ant-..."
-                value={anthropicKey}
-                onChange={(e) => setAnthropicKey(e.target.value)}
+                placeholder={isRedactedApiKey(anthropicKey) ? '設定済み（変更時のみ入力）' : 'sk-ant-...'}
+                value={isRedactedApiKey(anthropicKey) ? '' : anthropicKey}
+                onChange={(e) =>
+                  setAnthropicKey(
+                    e.target.value || (anthropicKey && isRedactedApiKey(anthropicKey) ? API_KEY_REDACTED : ''),
+                  )
+                }
                 autoComplete="off"
               />
 
@@ -329,9 +354,11 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                 id="xai-api-key"
                 type="password"
                 style={inputStyle}
-                placeholder="xai-..."
-                value={xaiKey}
-                onChange={(e) => setXaiKey(e.target.value)}
+                placeholder={isRedactedApiKey(xaiKey) ? '設定済み（変更時のみ入力）' : 'xai-...'}
+                value={isRedactedApiKey(xaiKey) ? '' : xaiKey}
+                onChange={(e) =>
+                  setXaiKey(e.target.value || (xaiKey && isRedactedApiKey(xaiKey) ? API_KEY_REDACTED : ''))
+                }
                 autoComplete="off"
               />
 
@@ -645,6 +672,73 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
               />
               <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6e6e6e' }}>
                 Agent 履歴がこの推定トークンを超えると自動 Compact（0 で既定の履歴予算のみ）
+              </p>
+
+              <p style={{ ...labelStyle, marginTop: 24, marginBottom: 0, color: '#cccccc', fontSize: 13 }}>
+                コスト制御
+              </p>
+              <label style={labelStyle} htmlFor="max-out-tokens">
+                Ask 最大出力トークン
+              </label>
+              <input
+                id="max-out-tokens"
+                type="number"
+                min={256}
+                max={128000}
+                step={256}
+                style={inputStyle}
+                value={cost.maxOutputTokens}
+                onChange={(e) =>
+                  setCost((c) => ({ ...c, maxOutputTokens: Number(e.target.value) || 4096 }))
+                }
+              />
+              <label style={labelStyle} htmlFor="max-out-tokens-agent">
+                Agent 最大出力トークン（各 LLM 呼び出し）
+              </label>
+              <input
+                id="max-out-tokens-agent"
+                type="number"
+                min={256}
+                max={128000}
+                step={256}
+                style={inputStyle}
+                value={cost.maxOutputTokensAgent}
+                onChange={(e) =>
+                  setCost((c) => ({ ...c, maxOutputTokensAgent: Number(e.target.value) || 8192 }))
+                }
+              />
+              <label style={labelStyle} htmlFor="daily-budget">
+                日次予算上限（USD・0 で無制限）
+              </label>
+              <input
+                id="daily-budget"
+                type="number"
+                min={0}
+                step={0.5}
+                style={inputStyle}
+                value={cost.dailyBudgetUsd}
+                onChange={(e) =>
+                  setCost((c) => ({ ...c, dailyBudgetUsd: Number(e.target.value) || 0 }))
+                }
+              />
+              <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8, marginTop: 16 }}>
+                <input
+                  type="checkbox"
+                  checked={cost.enablePromptCache}
+                  onChange={(e) => setCost((c) => ({ ...c, enablePromptCache: e.target.checked }))}
+                />
+                プロンプトキャッシュ（Anthropic など対応プロバイダ）
+              </label>
+              <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={cost.logUsage}
+                  onChange={(e) => setCost((c) => ({ ...c, logUsage: e.target.checked }))}
+                />
+                課金・レイテンシを usage.jsonl に記録
+              </label>
+              <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6e6e6e' }}>
+                既定の日次予算は $5。超過すると送信をブロックします（推定値ベース）。
               </p>
 
               <label style={labelStyle} htmlFor="max-subagents">

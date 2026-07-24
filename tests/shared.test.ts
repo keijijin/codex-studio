@@ -4,7 +4,7 @@ import { APP_NAME, DEFAULT_SETTINGS, IPC_CHANNELS } from './packages/shared/src/
 describe('shared', () => {
   it('exports default settings', () => {
     expect(DEFAULT_SETTINGS.general.theme).toBe('dark')
-    expect(DEFAULT_SETTINGS.agent.maxIterations).toBe(100)
+    expect(DEFAULT_SETTINGS.agent.maxIterations).toBe(50)
     expect(DEFAULT_SETTINGS.routing.mode).toBe('fixed')
   })
 
