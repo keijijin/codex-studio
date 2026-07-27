@@ -13,6 +13,7 @@ import { parseToolArguments } from './types'
 import { toOpenAIMessages } from './openai-messages'
 import { createOpenAIClient } from './create-clients'
 import { usageFromOpenAIChunk } from './usage-utils'
+import { openAiMaxOutputParams } from './openai-params'
 
 export class OpenAIProvider implements LLMProvider {
   id = 'openai' as const
@@ -26,7 +27,7 @@ export class OpenAIProvider implements LLMProvider {
         messages: messages.map((m) => ({ role: m.role, content: m.content })),
         stream: true,
         stream_options: { include_usage: true },
-        ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
+        ...openAiMaxOutputParams(options.maxTokens),
       }, { signal: options.signal })
 
       let usage: LlmUsage | undefined
@@ -64,7 +65,7 @@ export class OpenAIProvider implements LLMProvider {
         tool_choice: 'auto',
         stream: true,
         stream_options: { include_usage: true },
-        ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
+        ...openAiMaxOutputParams(options.maxTokens),
       }, { signal: options.signal })
 
       const pending: Record<number, { id: string; name: string; arguments: string }> = {}

@@ -4,6 +4,7 @@ import {
   providerDisplayName,
 } from '@codex/llm-adapters'
 import { toOpenAIMessages } from '../packages/llm-adapters/src/openai-messages'
+import { openAiMaxOutputParams } from '../packages/llm-adapters/src/openai-params'
 
 describe('llm-adapters utils', () => {
   it('getProviderInstance returns provider by id', () => {
@@ -18,6 +19,12 @@ describe('llm-adapters utils', () => {
     expect(providerDisplayName('anthropic')).toBe('Anthropic')
     expect(providerDisplayName('ollama')).toBe('Ollama')
     expect(providerDisplayName('xai')).toBe('xAI (Grok)')
+  })
+
+  it('openAiMaxOutputParams uses max_completion_tokens (not max_tokens)', () => {
+    expect(openAiMaxOutputParams(4096)).toEqual({ max_completion_tokens: 4096 })
+    expect(openAiMaxOutputParams(undefined)).toEqual({})
+    expect(openAiMaxOutputParams(0)).toEqual({})
   })
 
   it('toOpenAIMessages converts tool and assistant tool_calls', () => {
