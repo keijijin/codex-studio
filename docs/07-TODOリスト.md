@@ -387,9 +387,26 @@
 
 ## 今週のフォーカス
 
-1. Shell 環境同期と Phase R の dogfooding
-2. α 安定化
+1. α 安定化 / コスト・ルーティングの dogfooding
+2. 動画生成 V1 / プレゼン生成 V1 の dogfooding
 3. Cloud/Remote は [09](./09-PhaseD-設計ゲート.md) の条件が揃うまで着手しない
+
+---
+
+## Phase V: 動画生成
+
+- [x] V1: `packages/media` + slides/TTS/FFmpeg + Runway + `GenerateVideo` Tool + `/video-tutorial` Skill  
+  詳細: [12-動画生成プラン.md](./12-動画生成プラン.md)
+- [ ] V2: Veo/Kling 差し替え、進捗 UI、ffmpeg 同梱検討
+
+---
+
+## Phase P: プレゼン生成
+
+- [x] V1: Deck Director + PPTX/SVG + `GeneratePresentation` Tool + `/presentation` Skill  
+  詳細: [13-プレゼン生成プラン.md](./13-プレゼン生成プラン.md)
+- [x] V1.1 品質: 日本語折返し / フォント / レイアウト多様化 / Director 強化 / resvg SVG→PNG
+- [ ] V2: CLI、プレビュー UI、Deck→Shotlist dual export
 
 ---
 
@@ -397,6 +414,13 @@
 
 | 日付 | 内容 |
 |------|------|
+| **2026-07-30** | **メディア品質改善**（resvg・日本語タイポ・Director・heuristic 多様化） |
+| **2026-07-29** | **プレゼン生成 V1 実装**（PPTX / GeneratePresentation / 4 テーマ） |
+| **2026-07-29** | **プレゼンは Agent-native Deck。Canva/Gamma API 外注は本線にしない**（プラン 13） |
+| **2026-07-29** | **動画生成 V1 実装**（`packages/media` / GenerateVideo / hybrid / Runway） |
+| **2026-07-29** | **動画生成の第1プロバイダを Runway に決定**（プラン 12） |
+| | **NotebookLM 外注は本線にしない。既定レンダーは hybrid（手順=slides+TTS、概念=Runway）** |
+| | **Sora は候補外。Veo/Kling は VideoProvider 差し替えで後続** |
 | 2026-07-15 | プロジェクト名「Codex Studio（仮称）」で文書一式作成 |
 | | Electron + React + Monaco で MVP 構築方針決定 |
 | | MCP / Tab 補完は Post-MVP に延期 |

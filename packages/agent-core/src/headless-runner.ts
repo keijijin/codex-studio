@@ -42,6 +42,8 @@ const ALL_TOOLS = [
   'Team',
   'WebSearch',
   'MemoryAppend',
+  'GenerateVideo',
+  'GeneratePresentation',
 ]
 
 export interface HeadlessAgentOptions {
@@ -60,6 +62,11 @@ export interface HeadlessAgentOptions {
   yoloMode?: boolean
   maxSubagents?: number
   autoMemory?: boolean
+  /** Video generation settings (GenerateVideo) */
+  video?: import('@codex/shared').VideoSettings
+  runwayApiKey?: string
+  /** Presentation generation settings (GeneratePresentation) */
+  presentation?: import('@codex/shared').PresentationSettings
   signal?: AbortSignal
   onEvent?: (event: AgentOrchestratorEvent) => void
   /** Inject LLM for tests */
@@ -139,6 +146,34 @@ export async function runHeadlessAgent(
     skillPrompt,
     subagentDepth: 0,
     getShellEnv: () => resolveAgentShellEnv(workspaceRoot),
+    getVideoConfig: () => ({
+      video: options.video ?? {
+        enabled: true,
+        mode: 'hybrid' as const,
+        runwayModel: 'gen4.5',
+        ttsProvider: 'openai' as const,
+        ttsVoice: 'alloy',
+        maxShots: 12,
+        maxGenerativeShots: 4,
+        outputDir: '.codex/video',
+        runwayApiKey: options.runwayApiKey,
+      },
+      openaiApiKey: options.apiKey || process.env.OPENAI_API_KEY,
+      runwayApiKey:
+        options.runwayApiKey ||
+        process.env.RUNWAYML_API_SECRET ||
+        process.env.RUNWAY_API_KEY,
+    }),
+    getPresentationConfig: () => ({
+      presentation: options.presentation ?? {
+        enabled: true,
+        themeId: 'midnight' as const,
+        maxSlides: 16,
+        includeNotes: true,
+        outputDir: '.codex/presentation',
+      },
+      openaiApiKey: options.apiKey || process.env.OPENAI_API_KEY,
+    }),
     runSubagent: async ({ prompt: subPrompt, description }) => {
       const result = await runLimited(() =>
         runSubagentTask({

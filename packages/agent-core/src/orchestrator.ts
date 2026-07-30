@@ -49,6 +49,10 @@ export interface AgentRunContext {
   }) => Promise<ToolResult>
   /** Env for Shell / hooks (workspace agent.env + terminal sync). */
   getShellEnv?: () => NodeJS.ProcessEnv
+  /** Keys/settings for GenerateVideo. */
+  getVideoConfig?: ToolContext['getVideoConfig']
+  /** Keys/settings for GeneratePresentation. */
+  getPresentationConfig?: ToolContext['getPresentationConfig']
 }
 
 export type AgentOrchestratorEvent =
@@ -92,10 +96,14 @@ Tools available:
 - Team — run a local multi-role team from .codex/teams/ (shared BOARD.md)
 - WebSearch — search the public web for external docs / errors
 - MemoryAppend — append durable project notes to .codex/memory/MEMORY.md
+- GenerateVideo — Markdown / 手順書から解説動画を生成（slides+TTS / Runway / hybrid）。出力は .codex/video/
+- GeneratePresentation — Markdown からプレゼン資料（PPTX + SVG）を生成。出力は .codex/presentation/
 
 For code questions, use Read/Grep/Glob first. For independent research threads, spawn Task subagents then synthesize.
 For multi-perspective reviews, prefer Team when a matching team exists.
 To make changes, use Write or StrReplace.
+When the user asks for a tutorial / explainer video from docs or Markdown, use GenerateVideo (or the /video-tutorial skill).
+When the user asks for slides / presentation / PPTX / deck from docs or Markdown, use GeneratePresentation (or the /presentation skill).
 Use workspace-relative paths (e.g. README.md, packages/app/src/main/index.ts).
 Use markdown for formatting.${languageBlock}${rules}${skillBlock}`
 }
@@ -164,6 +172,8 @@ export class AgentOrchestrator {
       runSubagent: ctx.runSubagent,
       runTeam: ctx.runTeam,
       getShellEnv: ctx.getShellEnv,
+      getVideoConfig: ctx.getVideoConfig,
+      getPresentationConfig: ctx.getPresentationConfig,
     }
 
     const budget =

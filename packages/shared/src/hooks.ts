@@ -1,5 +1,7 @@
 /** Hooks configuration (`.codex/hooks.json`). */
 
+import type { AgentPermissions } from './permissions'
+
 export type HookEvent = 'onFileSave' | 'onAgentComplete'
 
 export type HookActionType = 'shell' | 'skill'
@@ -41,15 +43,25 @@ export const DEFAULT_HOOK_COOLDOWN_MS = 1000
 export type PermissionProfile = 'readonly' | 'ask' | 'allow'
 
 export const PERMISSION_PROFILES = {
-  readonly: { read: 'allow', edit: 'deny', shell: 'deny', network: 'allow' },
-  ask: { read: 'allow', edit: 'ask', shell: 'ask', network: 'ask' },
-  allow: { read: 'allow', edit: 'allow', shell: 'allow', network: 'allow' },
-} as const satisfies Record<
-  PermissionProfile,
-  {
-    read: 'allow' | 'ask' | 'deny'
-    edit: 'allow' | 'ask' | 'deny'
-    shell: 'allow' | 'ask' | 'deny'
-    network: 'allow' | 'ask' | 'deny'
-  }
->
+  readonly: {
+    read: 'allow',
+    edit: 'deny',
+    shell: 'deny',
+    network: 'allow',
+    media: 'deny',
+  },
+  ask: {
+    read: 'allow',
+    edit: 'ask',
+    shell: 'ask',
+    network: 'ask',
+    media: 'ask',
+  },
+  allow: {
+    read: 'allow',
+    edit: 'allow',
+    shell: 'allow',
+    network: 'allow',
+    media: 'allow',
+  },
+} as const satisfies Record<PermissionProfile, AgentPermissions>

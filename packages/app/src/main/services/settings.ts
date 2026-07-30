@@ -7,6 +7,8 @@ import {
   DEFAULT_AGENT_PERMISSIONS,
   DEFAULT_COST_SETTINGS,
   DEFAULT_SETTINGS,
+  DEFAULT_PRESENTATION_SETTINGS,
+  DEFAULT_VIDEO_SETTINGS,
   migrateModelId,
   normalizeRoutingSettings,
   type AppSettings,
@@ -172,6 +174,39 @@ export class SettingsService {
       Math.max(256, Math.floor(cost.maxOutputTokensAgent) || 8192),
     )
     cost.dailyBudgetUsd = Math.max(0, Number(cost.dailyBudgetUsd) || 0)
+    const video = {
+      ...DEFAULT_VIDEO_SETTINGS,
+      ...stored.video,
+    }
+    video.maxShots = Math.min(30, Math.max(2, Math.floor(video.maxShots) || 12))
+    video.maxGenerativeShots = Math.min(
+      video.maxShots,
+      Math.max(0, Math.floor(video.maxGenerativeShots) || 0),
+    )
+    video.mode =
+      video.mode === 'slides' || video.mode === 'generative' || video.mode === 'hybrid'
+        ? video.mode
+        : DEFAULT_VIDEO_SETTINGS.mode
+    video.ttsProvider = video.ttsProvider === 'none' ? 'none' : 'openai'
+    video.enabled = video.enabled !== false
+    video.outputDir = video.outputDir?.trim() || DEFAULT_VIDEO_SETTINGS.outputDir
+    video.runwayModel = video.runwayModel?.trim() || DEFAULT_VIDEO_SETTINGS.runwayModel
+    const presentation = {
+      ...DEFAULT_PRESENTATION_SETTINGS,
+      ...stored.presentation,
+    }
+    presentation.enabled = presentation.enabled !== false
+    presentation.maxSlides = Math.min(40, Math.max(3, Math.floor(presentation.maxSlides) || 16))
+    presentation.includeNotes = presentation.includeNotes !== false
+    presentation.outputDir =
+      presentation.outputDir?.trim() || DEFAULT_PRESENTATION_SETTINGS.outputDir
+    presentation.themeId =
+      presentation.themeId === 'paper' ||
+      presentation.themeId === 'forest' ||
+      presentation.themeId === 'coral' ||
+      presentation.themeId === 'midnight'
+        ? presentation.themeId
+        : DEFAULT_PRESENTATION_SETTINGS.themeId
     return {
       ...DEFAULT_SETTINGS,
       ...stored,
@@ -189,6 +224,8 @@ export class SettingsService {
       routing: normalizeRoutingSettings(stored.routing ?? DEFAULT_SETTINGS.routing),
       agent,
       cost,
+      video,
+      presentation,
     }
   }
 
@@ -230,6 +267,58 @@ export class SettingsService {
       current.cost?.enablePromptCache ??
       DEFAULT_COST_SETTINGS.enablePromptCache
 
+    const video = {
+      ...DEFAULT_VIDEO_SETTINGS,
+      ...current.video,
+      ...partial.video,
+      runwayApiKey: keepKey(current.video?.runwayApiKey, partial.video?.runwayApiKey),
+    }
+    video.maxShots = Math.min(30, Math.max(2, Math.floor(video.maxShots) || 12))
+    video.maxGenerativeShots = Math.min(
+      video.maxShots,
+      Math.max(0, Math.floor(Number(video.maxGenerativeShots)) || 0),
+    )
+    video.mode =
+      video.mode === 'slides' || video.mode === 'generative' || video.mode === 'hybrid'
+        ? video.mode
+        : DEFAULT_VIDEO_SETTINGS.mode
+    video.ttsProvider = video.ttsProvider === 'none' ? 'none' : 'openai'
+    video.enabled = partial.video?.enabled ?? current.video?.enabled ?? DEFAULT_VIDEO_SETTINGS.enabled
+    video.outputDir =
+      (partial.video?.outputDir ?? current.video?.outputDir)?.trim() ||
+      DEFAULT_VIDEO_SETTINGS.outputDir
+    video.runwayModel =
+      (partial.video?.runwayModel ?? current.video?.runwayModel)?.trim() ||
+      DEFAULT_VIDEO_SETTINGS.runwayModel
+
+    const presentation = {
+      ...DEFAULT_PRESENTATION_SETTINGS,
+      ...current.presentation,
+      ...partial.presentation,
+    }
+    presentation.enabled =
+      partial.presentation?.enabled ??
+      current.presentation?.enabled ??
+      DEFAULT_PRESENTATION_SETTINGS.enabled
+    presentation.maxSlides = Math.min(
+      40,
+      Math.max(3, Math.floor(Number(presentation.maxSlides)) || 16),
+    )
+    presentation.includeNotes =
+      partial.presentation?.includeNotes ??
+      current.presentation?.includeNotes ??
+      DEFAULT_PRESENTATION_SETTINGS.includeNotes
+    presentation.outputDir =
+      (partial.presentation?.outputDir ?? current.presentation?.outputDir)?.trim() ||
+      DEFAULT_PRESENTATION_SETTINGS.outputDir
+    presentation.themeId =
+      presentation.themeId === 'paper' ||
+      presentation.themeId === 'forest' ||
+      presentation.themeId === 'coral' ||
+      presentation.themeId === 'midnight'
+        ? presentation.themeId
+        : DEFAULT_PRESENTATION_SETTINGS.themeId
+
     // User explicitly saved — do not re-run legacy bump.
     store.set('migratedMaxIterationsV2', true)
     const updated: AppSettings = {
@@ -251,6 +340,8 @@ export class SettingsService {
       }),
       agent,
       cost,
+      video,
+      presentation,
     }
     store.set('settings', updated)
     return updated

@@ -149,7 +149,7 @@ describe('model router', () => {
     expect(['xai', 'openai', 'anthropic']).toContain(decision.selected.provider)
   })
 
-  it('auto agent code prefers coding-capable mid tier before premium', () => {
+  it('auto agent code prefers Grok mid tier before premium', () => {
     const kind = classifyTaskKind({
       prompt: 'TypeScript のバグを修正して実装する',
       runMode: 'agent',
@@ -168,13 +168,18 @@ describe('model router', () => {
     })
     expect(decision.taskKind).toBe('agent_code')
     expect(decision.tier).toBe('standard')
-    expect(decision.selected.provider).toBe('anthropic')
-    expect(decision.selected.model).toMatch(/sonnet|haiku|opus/i)
+    expect(decision.selected.provider).toBe('xai')
+    expect(decision.selected.model).toMatch(/grok/i)
     expect(decision.queue.length).toBeGreaterThan(1)
+    expect(decision.queue.map((c) => c.provider).slice(0, 3)).toEqual([
+      'xai',
+      'openai',
+      'anthropic',
+    ])
     expect(decision.reason).toMatch(/Auto \(agent_code\/standard/)
   })
 
-  it('auto light rename starts on openai nano-class for code lite', () => {
+  it('auto light rename starts on Grok for code lite', () => {
     const decision = decideRouting({
       mode: 'auto',
       primary: { provider: 'openai', model: 'gpt-5.5' },
@@ -186,7 +191,22 @@ describe('model router', () => {
       catalog: createDefaultCatalog(),
     })
     expect(decision.tier).toBe('lite')
-    expect(decision.selected.provider).toBe('openai')
+    expect(decision.selected.provider).toBe('xai')
+  })
+
+  it('auto hard agent still prefers Claude premium first', () => {
+    const decision = decideRouting({
+      mode: 'auto',
+      primary: { provider: 'openai', model: 'gpt-5.5' },
+      fallbackChain: DEFAULT_ROUTING.fallbackChain,
+      maxAttempts: 3,
+      isAvailable: (c) => c.provider !== 'ollama',
+      runMode: 'agent',
+      prompt: '分散システムのアーキテクチャ全体を設計し、障害の根本原因分析も行う',
+      catalog: createDefaultCatalog(),
+    })
+    expect(decision.tier).toBe('premium')
+    expect(decision.selected.provider).toBe('anthropic')
   })
 
   it('auto skips offline Ollama and uses cloud providers', () => {

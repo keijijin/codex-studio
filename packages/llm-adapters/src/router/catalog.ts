@@ -163,21 +163,24 @@ export function cascadeTiers(start: CostTier): CostTier[] {
   return ['premium', 'standard', 'lite']
 }
 
-/** Provider preference within a tier (cost / coding strength). */
+/**
+ * Provider preference within a tier.
+ * Auto 既定: Grok (xAI) を先頭。premium の code/team のみ品質優先で Claude 先頭。
+ */
 function providersForTier(
   tier: CostTier,
   taskHint: 'chat' | 'code' | 'team',
 ): Array<'xai' | 'openai' | 'anthropic'> {
   if (taskHint === 'code' || taskHint === 'team') {
-    if (tier === 'lite') {
-      // Coding-capable cheap models first (avoid non-reasoning Grok as primary for code)
-      return ['openai', 'anthropic', 'xai']
+    if (tier === 'premium') {
+      // Hard / Team: quality-first
+      return ['anthropic', 'openai', 'xai']
     }
-    // Claude strong on coding; then OpenAI; Grok as alternate
-    return ['anthropic', 'openai', 'xai']
+    // lite / standard Agent coding: Grok first, then OpenAI, then Claude
+    return ['xai', 'openai', 'anthropic']
   }
+  // chat: already Grok-first
   if (tier === 'lite') {
-    // Cheapest / fastest chat first
     return ['xai', 'openai', 'anthropic']
   }
   return ['xai', 'anthropic', 'openai']

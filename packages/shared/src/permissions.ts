@@ -1,7 +1,7 @@
 export type PermissionAction = 'allow' | 'ask' | 'deny'
 
 /** Coarse tool categories for permission policy. */
-export type ToolPermissionCategory = 'read' | 'edit' | 'shell' | 'network'
+export type ToolPermissionCategory = 'read' | 'edit' | 'shell' | 'network' | 'media'
 
 export interface AgentPermissions {
   read: PermissionAction
@@ -9,6 +9,8 @@ export interface AgentPermissions {
   shell: PermissionAction
   /** WebSearch and other outbound network tools */
   network: PermissionAction
+  /** GenerateVideo / GeneratePresentation and other media synthesis tools */
+  media: PermissionAction
 }
 
 export const DEFAULT_AGENT_PERMISSIONS: AgentPermissions = {
@@ -16,6 +18,7 @@ export const DEFAULT_AGENT_PERMISSIONS: AgentPermissions = {
   edit: 'ask',
   shell: 'ask',
   network: 'allow',
+  media: 'ask',
 }
 
 export const TOOL_PERMISSION_CATEGORY: Record<string, ToolPermissionCategory> = {
@@ -30,6 +33,8 @@ export const TOOL_PERMISSION_CATEGORY: Record<string, ToolPermissionCategory> = 
   Task: 'read',
   Team: 'read',
   MemoryAppend: 'edit',
+  GenerateVideo: 'media',
+  GeneratePresentation: 'media',
 }
 
 export function permissionForTool(

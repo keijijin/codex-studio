@@ -50,6 +50,7 @@ export default defineConfig({
       '@codex/llm-adapters': resolve(__dirname, 'packages/llm-adapters/src/index.ts'),
       '@codex/agent-core': resolve(__dirname, 'packages/agent-core/src/index.ts'),
       '@codex/indexer': resolve(__dirname, 'packages/indexer/src/index.ts'),
+      '@codex/media': resolve(__dirname, 'packages/media/src/index.ts'),
     },
   },
 })

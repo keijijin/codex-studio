@@ -14,6 +14,8 @@ describe('permissions', () => {
     expect(permissionForTool('Shell', DEFAULT_AGENT_PERMISSIONS)).toBe('ask')
     expect(permissionForTool('WebSearch', DEFAULT_AGENT_PERMISSIONS)).toBe('allow')
     expect(permissionForTool('MemoryAppend', DEFAULT_AGENT_PERMISSIONS)).toBe('ask')
+    expect(permissionForTool('GenerateVideo', DEFAULT_AGENT_PERMISSIONS)).toBe('ask')
+    expect(permissionForTool('GeneratePresentation', DEFAULT_AGENT_PERMISSIONS)).toBe('ask')
   })
 
   it('respects per-category overrides including network', () => {
@@ -22,10 +24,13 @@ describe('permissions', () => {
       edit: 'allow',
       shell: 'deny',
       network: 'deny',
+      media: 'deny',
     }
     expect(permissionForTool('Glob', permissions)).toBe('deny')
     expect(permissionForTool('StrReplace', permissions)).toBe('allow')
     expect(permissionForTool('Shell', permissions)).toBe('deny')
     expect(permissionForTool('WebSearch', permissions)).toBe('deny')
+    expect(permissionForTool('GenerateVideo', permissions)).toBe('deny')
+    expect(permissionForTool('GeneratePresentation', permissions)).toBe('deny')
   })
 })
