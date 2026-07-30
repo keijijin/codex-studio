@@ -55,6 +55,8 @@ const ALL_AGENT_TOOLS = [
   'Team',
   'WebSearch',
   'MemoryAppend',
+  'GenerateVideo',
+  'GeneratePresentation',
 ]
 
 export class AgentService {
@@ -446,6 +448,24 @@ export class AgentService {
           }
         },
         getShellEnv: () => agentEnvService.resolve(root),
+        getVideoConfig: () => {
+          const s = settingsService.get()
+          return {
+            video: s.video,
+            openaiApiKey: s.models.openaiApiKey || process.env.OPENAI_API_KEY,
+            runwayApiKey:
+              s.video?.runwayApiKey ||
+              process.env.RUNWAYML_API_SECRET ||
+              process.env.RUNWAY_API_KEY,
+          }
+        },
+        getPresentationConfig: () => {
+          const s = settingsService.get()
+          return {
+            presentation: s.presentation,
+            openaiApiKey: s.models.openaiApiKey || process.env.OPENAI_API_KEY,
+          }
+        },
         requestApproval: async (request: ApprovalRequest) => {
           this.emit(webContents, sessionId, {
             type: 'approval_required',

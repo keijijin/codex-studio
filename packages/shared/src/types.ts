@@ -80,6 +80,52 @@ export const DEFAULT_COST_SETTINGS: CostSettings = {
   enablePromptCache: true,
 }
 
+export type VideoRenderMode = 'hybrid' | 'slides' | 'generative'
+
+export interface VideoSettings {
+  enabled: boolean
+  mode: VideoRenderMode
+  runwayApiKey?: string
+  /** Runway model id (text-to-video), e.g. gen4.5 */
+  runwayModel: string
+  ttsProvider: 'openai' | 'none'
+  ttsVoice: string
+  maxShots: number
+  maxGenerativeShots: number
+  /** Relative to workspace root */
+  outputDir: string
+}
+
+export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
+  enabled: true,
+  mode: 'hybrid',
+  runwayModel: 'gen4.5',
+  ttsProvider: 'openai',
+  ttsVoice: 'alloy',
+  maxShots: 12,
+  maxGenerativeShots: 4,
+  outputDir: '.codex/video',
+}
+
+export type PresentationThemeId = 'midnight' | 'paper' | 'forest' | 'coral'
+
+export interface PresentationSettings {
+  enabled: boolean
+  themeId: PresentationThemeId
+  maxSlides: number
+  includeNotes: boolean
+  /** Relative to workspace root */
+  outputDir: string
+}
+
+export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
+  enabled: true,
+  themeId: 'midnight',
+  maxSlides: 16,
+  includeNotes: true,
+  outputDir: '.codex/presentation',
+}
+
 export interface AppSettings {
   general: {
     theme: 'dark' | 'light' | 'system'
@@ -112,6 +158,10 @@ export interface AppSettings {
   }
   /** Cost controls and usage logging */
   cost: CostSettings
+  /** Tutorial video generation (Runway + slides/TTS) */
+  video: VideoSettings
+  /** Presentation (PPTX) generation */
+  presentation: PresentationSettings
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -135,6 +185,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
     maxSubagents: 3,
   },
   cost: { ...DEFAULT_COST_SETTINGS },
+  video: { ...DEFAULT_VIDEO_SETTINGS },
+  presentation: { ...DEFAULT_PRESENTATION_SETTINGS },
 }
 
 export type AgentEvent =

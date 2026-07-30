@@ -32,6 +32,17 @@ export interface ToolContext {
    * Prefer merging process.env + `.codex/agent.env` + terminal-captured overlay.
    */
   getShellEnv?: () => NodeJS.ProcessEnv
+  /** Keys/settings for GenerateVideo (wired by Electron main / headless). */
+  getVideoConfig?: () => {
+    video: import('@codex/shared').VideoSettings
+    openaiApiKey?: string
+    runwayApiKey?: string
+  }
+  /** Keys/settings for GeneratePresentation. */
+  getPresentationConfig?: () => {
+    presentation: import('@codex/shared').PresentationSettings
+    openaiApiKey?: string
+  }
 }
 
 export interface ToolResult {

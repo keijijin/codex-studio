@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@codex/indexer": "workspace:*",
+    "@codex/media": "workspace:*",
     "@codex/shared": "workspace:*"
   },
   "devDependencies": {

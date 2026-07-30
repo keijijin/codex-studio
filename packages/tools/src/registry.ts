@@ -10,11 +10,13 @@ import { taskTool } from './tools/task'
 import { webSearchTool } from './tools/web-search'
 import { memoryAppendTool } from './tools/memory-append'
 import { teamTool } from './tools/team'
+import { generateVideoTool } from './tools/generate-video'
+import { generatePresentationTool } from './tools/generate-presentation'
 
 const DEFAULT_TOOLS: Tool[] = [
   readTool, grepTool, globTool,
   writeTool, strReplaceTool, deleteTool, shellTool,
-  taskTool, webSearchTool, memoryAppendTool, teamTool,
+  taskTool, webSearchTool, memoryAppendTool, teamTool, generateVideoTool, generatePresentationTool,
 ]
 
 export class ToolRegistry {

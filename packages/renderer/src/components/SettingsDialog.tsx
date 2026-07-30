@@ -7,6 +7,8 @@ import {
   DEFAULT_AGENT_PERMISSIONS,
   DEFAULT_COST_SETTINGS,
   DEFAULT_FALLBACK_CHAIN,
+  DEFAULT_PRESENTATION_SETTINGS,
+  DEFAULT_VIDEO_SETTINGS,
   isRedactedApiKey,
   type AgentPermissions,
   type CostSettings,
@@ -14,7 +16,11 @@ import {
   type ModelCandidate,
   type ModelInfo,
   type PermissionAction,
+  type PresentationSettings,
+  type PresentationThemeId,
   type RoutingMode,
+  type VideoRenderMode,
+  type VideoSettings,
 } from '@codex/shared'
 import { useAppStore } from '@renderer/store/app-store'
 import { hasCodexApi } from './ErrorBoundary'
@@ -112,6 +118,11 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
   const [autoMemory, setAutoMemory] = useState(false)
   const [maxSubagents, setMaxSubagents] = useState(3)
   const [cost, setCost] = useState<CostSettings>({ ...DEFAULT_COST_SETTINGS })
+  const [video, setVideo] = useState<VideoSettings>({ ...DEFAULT_VIDEO_SETTINGS })
+  const [presentation, setPresentation] = useState<PresentationSettings>({
+    ...DEFAULT_PRESENTATION_SETTINGS,
+  })
+  const [runwayKey, setRunwayKey] = useState('')
   const [provider, setProvider] = useState<LLMProviderId>('openai')
   const [model, setModel] = useState('gpt-4o')
   const [routingMode, setRoutingMode] = useState<RoutingMode>('fixed')
@@ -202,6 +213,9 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
         setAutoMemory(Boolean(settings.agent.autoMemory))
         setMaxSubagents(settings.agent.maxSubagents ?? 3)
         setCost({ ...DEFAULT_COST_SETTINGS, ...settings.cost })
+        setVideo({ ...DEFAULT_VIDEO_SETTINGS, ...settings.video })
+        setPresentation({ ...DEFAULT_PRESENTATION_SETTINGS, ...settings.presentation })
+        setRunwayKey(settings.video?.runwayApiKey ?? '')
         await fetchModels(p, oKey, aKey, ollamaUrl, xKey, { preferredModel: savedModel })
       })
       .catch((err: unknown) => {
@@ -255,6 +269,15 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
             Math.max(256, Math.floor(cost.maxOutputTokensAgent) || 8192),
           ),
           dailyBudgetUsd: Math.max(0, Number(cost.dailyBudgetUsd) || 0),
+        },
+        video: {
+          ...current.video,
+          ...video,
+          runwayApiKey: runwayKey,
+        },
+        presentation: {
+          ...current.presentation,
+          ...presentation,
         },
       })
       setSaved(true)
@@ -636,6 +659,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                 ['edit', '編集（Write / StrReplace / Delete / MemoryAppend）'],
                 ['shell', 'Shell'],
                 ['network', 'ネットワーク（WebSearch）'],
+                ['media', 'メディア（GenerateVideo / GeneratePresentation）'],
               ] as const).map(([key, label]) => (
                 <label key={key} style={labelStyle} htmlFor={`perm-${key}`}>
                   {label}
@@ -672,6 +696,120 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
               />
               <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6e6e6e' }}>
                 Agent 履歴がこの推定トークンを超えると自動 Compact（0 で既定の履歴予算のみ）
+              </p>
+
+              <p style={{ ...labelStyle, marginTop: 24, marginBottom: 0, color: '#cccccc', fontSize: 13 }}>
+                動画生成（GenerateVideo）
+              </p>
+              <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={video.enabled}
+                  onChange={(e) => setVideo((v) => ({ ...v, enabled: e.target.checked }))}
+                />
+                動画生成を有効にする
+              </label>
+              <label style={labelStyle} htmlFor="video-mode">
+                既定レンダーモード
+              </label>
+              <select
+                id="video-mode"
+                style={selectStyle}
+                value={video.mode}
+                onChange={(e) =>
+                  setVideo((v) => ({ ...v, mode: e.target.value as VideoRenderMode }))
+                }
+              >
+                <option value="hybrid">hybrid（手順=slides、概念=Runway）</option>
+                <option value="slides">slides（slides+TTS のみ）</option>
+                <option value="generative">generative（可能な限り Runway）</option>
+              </select>
+              <label style={labelStyle} htmlFor="runway-key">
+                Runway API キー
+              </label>
+              <input
+                id="runway-key"
+                type="password"
+                style={inputStyle}
+                value={runwayKey}
+                onChange={(e) => setRunwayKey(e.target.value)}
+                placeholder="未設定時は slides にフォールバック（環境変数 RUNWAYML_API_SECRET 可）"
+                autoComplete="off"
+              />
+              <label style={labelStyle} htmlFor="tts-voice">
+                TTS ボイス（OpenAI）
+              </label>
+              <input
+                id="tts-voice"
+                style={inputStyle}
+                value={video.ttsVoice}
+                onChange={(e) => setVideo((v) => ({ ...v, ttsVoice: e.target.value || 'alloy' }))}
+              />
+              <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6e6e6e' }}>
+                要: ffmpeg（PATH または FFMPEG_PATH）。Skill: /video-tutorial
+              </p>
+
+              <p style={{ ...labelStyle, marginTop: 24, marginBottom: 0, color: '#cccccc', fontSize: 13 }}>
+                プレゼン生成（GeneratePresentation）
+              </p>
+              <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={presentation.enabled}
+                  onChange={(e) =>
+                    setPresentation((p) => ({ ...p, enabled: e.target.checked }))
+                  }
+                />
+                プレゼン生成を有効にする
+              </label>
+              <label style={labelStyle} htmlFor="presentation-theme">
+                既定テーマ
+              </label>
+              <select
+                id="presentation-theme"
+                style={selectStyle}
+                value={presentation.themeId}
+                onChange={(e) =>
+                  setPresentation((p) => ({
+                    ...p,
+                    themeId: e.target.value as PresentationThemeId,
+                  }))
+                }
+              >
+                <option value="midnight">midnight（ダーク・技術）</option>
+                <option value="paper">paper（ライト・文書）</option>
+                <option value="forest">forest（ダークグリーン）</option>
+                <option value="coral">coral（ライト・提案）</option>
+              </select>
+              <label style={labelStyle} htmlFor="presentation-max-slides">
+                最大スライド数
+              </label>
+              <input
+                id="presentation-max-slides"
+                type="number"
+                min={3}
+                max={40}
+                style={inputStyle}
+                value={presentation.maxSlides}
+                onChange={(e) =>
+                  setPresentation((p) => ({
+                    ...p,
+                    maxSlides: Number(e.target.value) || 16,
+                  }))
+                }
+              />
+              <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={presentation.includeNotes}
+                  onChange={(e) =>
+                    setPresentation((p) => ({ ...p, includeNotes: e.target.checked }))
+                  }
+                />
+                話者ノートを PPTX に含める
+              </label>
+              <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6e6e6e' }}>
+                Skill: /presentation。OpenAI キー無しでも heuristic で生成可
               </p>
 
               <p style={{ ...labelStyle, marginTop: 24, marginBottom: 0, color: '#cccccc', fontSize: 13 }}>

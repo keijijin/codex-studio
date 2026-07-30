@@ -15,6 +15,10 @@ export function redactSettingsForRenderer(settings: AppSettings): AppSettings {
       anthropicApiKey: settings.models.anthropicApiKey ? API_KEY_REDACTED : '',
       xaiApiKey: settings.models.xaiApiKey ? API_KEY_REDACTED : '',
     },
+    video: {
+      ...settings.video,
+      runwayApiKey: settings.video?.runwayApiKey ? API_KEY_REDACTED : '',
+    },
   }
 }
 
@@ -60,6 +64,17 @@ export function mergeSettingsPartial(
     general: { ...current.general, ...partial.general },
     models,
     cost,
+    video: {
+      ...DEFAULT_SETTINGS.video,
+      ...current.video,
+      ...partial.video,
+      runwayApiKey: keepOrReplaceKey(current.video?.runwayApiKey, partial.video?.runwayApiKey),
+    },
+    presentation: {
+      ...DEFAULT_SETTINGS.presentation,
+      ...current.presentation,
+      ...partial.presentation,
+    },
     agent: {
       ...current.agent,
       ...partial.agent,
