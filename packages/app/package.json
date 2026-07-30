@@ -13,6 +13,7 @@
     "@codex/llm-adapters": "workspace:*",
     "@codex/shared": "workspace:*",
     "@codex/tools": "workspace:*",
+    "@resvg/resvg-js": "^2.6.2",
     "@vscode/ripgrep": "^1.18.0",
     "chokidar": "^4.0.3",
     "electron-store": "^10.1.0",

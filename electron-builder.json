@@ -20,7 +20,9 @@
   "asar": true,
   "asarUnpack": [
     "**/node_modules/@vscode/ripgrep/**",
-    "**/node_modules/node-pty/**"
+    "**/node_modules/node-pty/**",
+    "**/node_modules/@resvg/resvg-js/**",
+    "**/node_modules/@resvg/resvg-js-*/**"
   ],
   "npmRebuild": false,
   "nodeGypRebuild": false,

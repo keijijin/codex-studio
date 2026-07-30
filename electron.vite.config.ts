@@ -8,17 +8,38 @@ const sharedAlias = {
   '@codex/llm-adapters': resolve(__dirname, 'packages/llm-adapters/src/index.ts'),
   '@codex/tools': resolve(__dirname, 'packages/tools/src/index.ts'),
   '@codex/agent-core': resolve(__dirname, 'packages/agent-core/src/index.ts'),
+  '@codex/media': resolve(__dirname, 'packages/media/src/index.ts'),
 }
+
+/** Native / special deps that must not be bundled into Electron main. */
+const mainExternals = [
+  '@vscode/ripgrep',
+  /^@vscode\/ripgrep-/,
+  'node-pty',
+  '@resvg/resvg-js',
+  /^@resvg\/resvg-js-/,
+]
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin({ exclude: ['@codex/shared', '@codex/indexer', '@codex/llm-adapters', '@codex/tools', '@codex/agent-core'] })],
+    plugins: [
+      externalizeDepsPlugin({
+        exclude: [
+          '@codex/shared',
+          '@codex/indexer',
+          '@codex/llm-adapters',
+          '@codex/tools',
+          '@codex/agent-core',
+          '@codex/media',
+        ],
+      }),
+    ],
     resolve: {
       alias: sharedAlias,
     },
     build: {
       rollupOptions: {
-        external: ['@vscode/ripgrep', /^@vscode\/ripgrep-/, 'node-pty'],
+        external: mainExternals,
         input: {
           index: resolve(__dirname, 'packages/app/src/main/index.ts'),
         },
