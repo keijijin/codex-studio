@@ -5,16 +5,32 @@ import {
 } from './shotlist'
 import type { Shotlist, VideoRenderMode } from './types'
 
-const DIRECTOR_SYSTEM = `You are a tutorial video director. Given markdown documentation, produce a JSON shotlist for a short educational video.
+const DIRECTOR_SYSTEM = `You are a senior tutorial video director for developer education.
+Given markdown documentation, produce a JSON shotlist for a short, watchable educational video.
 
-Rules:
-- Output ONLY valid JSON (no markdown fences).
-- Schema: { "title": string, "voice": "alloy", "shots": Shot[] }
-- Shot: { "id": "01", "kind": "title"|"slide"|"generative", "narration": string, "durationSec": number, "slideMarkdown"?: string, "runwayPrompt"?: string, "titleText"?: string }
-- Use "slide" for any code, commands, file paths, or precise steps (never generative for code).
-- Use "generative" only for conceptual/metaphor B-roll (abstract visuals, no readable text in prompt).
-- Keep total shots small (about 4–10). Narration should be speakable Japanese if the source is Japanese, else English.
-- durationSec between 3 and 12.`
+Output ONLY valid JSON (no markdown fences).
+Schema: { "title": string, "voice": "alloy", "shots": Shot[] }
+Shot: {
+  "id": "01",
+  "kind": "title"|"slide"|"generative",
+  "narration": string,
+  "durationSec": number,
+  "slideMarkdown"?: string,
+  "runwayPrompt"?: string,
+  "titleText"?: string
+}
+
+Narrative craft:
+- Open with a title shot that states the payoff in one sentence.
+- Alternate concept (generative) and concrete steps (slide). Avoid 5 slide-only shots in a row.
+- Narration must be speakable aloud (short sentences). Japanese if source is Japanese, else English.
+- One idea per shot. Prefer 5–9 shots total unless the doc is tiny.
+
+Visual rules:
+- kind=slide for ANY code, CLI, file paths, config, or precise steps. Put the exact snippet in slideMarkdown (from source; never invent code).
+- kind=generative ONLY for abstract metaphor B-roll. runwayPrompt: cinematic, no readable text/UI chrome, 16:9.
+- durationSec between 3 and 12. Match length to narration density.
+- For slide shots with code fences, keep the fence in slideMarkdown so the renderer can show a code card.`
 
 export async function buildShotlistWithLlm(options: {
   markdown: string
@@ -29,6 +45,9 @@ export async function buildShotlistWithLlm(options: {
   const user = `Render mode: ${options.mode}
 Max shots: ${options.maxShots}
 Max generative shots: ${options.maxGenerativeShots}
+
+Audience: engineers who will apply this in a real codebase.
+Story arc: hook → why it matters → concrete steps/code → takeaway.
 
 --- MARKDOWN ---
 ${options.markdown.slice(0, 24_000)}
@@ -80,33 +99,52 @@ export async function buildShotlist(options: {
   openaiApiKey?: string
   directorModel?: string
   signal?: AbortSignal
-}): Promise<{ shotlist: Shotlist; usedLlm: boolean }> {
-  if (options.openaiApiKey) {
-    try {
-      const shotlist = await buildShotlistWithLlm({
-        markdown: options.markdown,
+}): Promise<{ shotlist: Shotlist; usedLlm: boolean; fallbackReason?: string }> {
+  if (!options.openaiApiKey) {
+    const shotlist = normalizeShotlist(
+      buildHeuristicShotlist(options.markdown, {
         mode: options.mode,
         maxShots: options.maxShots,
         maxGenerativeShots: options.maxGenerativeShots,
-        openaiApiKey: options.openaiApiKey,
-        model: options.directorModel,
-        signal: options.signal,
-      })
-      return { shotlist, usedLlm: true }
-    } catch {
-      // fall through to heuristic
+      }),
+      options.mode,
+      options.maxShots,
+      options.maxGenerativeShots,
+    )
+    return {
+      shotlist,
+      usedLlm: false,
+      fallbackReason: 'OpenAI API key が未設定のため heuristic shotlist を使用',
     }
   }
 
-  const shotlist = normalizeShotlist(
-    buildHeuristicShotlist(options.markdown, {
+  try {
+    const shotlist = await buildShotlistWithLlm({
+      markdown: options.markdown,
       mode: options.mode,
       maxShots: options.maxShots,
       maxGenerativeShots: options.maxGenerativeShots,
-    }),
-    options.mode,
-    options.maxShots,
-    options.maxGenerativeShots,
-  )
-  return { shotlist, usedLlm: false }
+      openaiApiKey: options.openaiApiKey,
+      model: options.directorModel,
+      signal: options.signal,
+    })
+    return { shotlist, usedLlm: true }
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    const shotlist = normalizeShotlist(
+      buildHeuristicShotlist(options.markdown, {
+        mode: options.mode,
+        maxShots: options.maxShots,
+        maxGenerativeShots: options.maxGenerativeShots,
+      }),
+      options.mode,
+      options.maxShots,
+      options.maxGenerativeShots,
+    )
+    return {
+      shotlist,
+      usedLlm: false,
+      fallbackReason: `Director LLM 失敗のため heuristic に降格: ${detail.slice(0, 180)}`,
+    }
+  }
 }

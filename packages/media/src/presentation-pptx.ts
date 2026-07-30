@@ -2,6 +2,7 @@ import { mkdir } from 'fs/promises'
 import { dirname } from 'path'
 import PptxGenJSImport from 'pptxgenjs'
 import type { Deck, DeckSlide, ThemeTokens } from './presentation-types'
+import { PPTX_MONO, PPTX_SANS, PPTX_SERIF } from './text'
 import { resolveTheme } from './themes'
 
 type PptxGenCtor = typeof PptxGenJSImport
@@ -59,7 +60,7 @@ function renderSlide(
       w: 8.8,
       h: 1.4,
       fontSize: layout === 'title' ? 40 : 34,
-      fontFace: 'Arial',
+      fontFace: PPTX_SANS,
       bold: true,
       color: theme.pptxText,
       valign: 'middle',
@@ -71,7 +72,7 @@ function renderSlide(
         w: 8.8,
         h: 0.6,
         fontSize: 18,
-        fontFace: 'Arial',
+        fontFace: PPTX_SANS,
         color: theme.pptxMuted,
       })
     }
@@ -82,7 +83,7 @@ function renderSlide(
       w: 8.4,
       h: 2.4,
       fontSize: 26,
-      fontFace: 'Georgia',
+      fontFace: PPTX_SERIF,
       italic: true,
       color: theme.pptxText,
       valign: 'middle',
@@ -94,18 +95,19 @@ function renderSlide(
         w: 8.4,
         h: 0.4,
         fontSize: 14,
-        fontFace: 'Arial',
+        fontFace: PPTX_SANS,
         color: theme.pptxMuted,
       })
     }
   } else if (layout === 'code') {
-    s.addText(slide.title, {
+    const langLabel = slide.codeLanguage ? `  ·  ${slide.codeLanguage}` : ''
+    s.addText(`${slide.title}${langLabel}`, {
       x: 0.6,
       y: 0.45,
       w: 8.8,
       h: 0.5,
-      fontSize: 24,
-      fontFace: 'Arial',
+      fontSize: 22,
+      fontFace: PPTX_SANS,
       bold: true,
       color: theme.pptxAccent,
     })
@@ -123,7 +125,7 @@ function renderSlide(
       w: 8.6,
       h: 3.4,
       fontSize: 12,
-      fontFace: 'Consolas',
+      fontFace: PPTX_MONO,
       color: theme.pptxText,
       valign: 'top',
     })
@@ -134,7 +136,7 @@ function renderSlide(
       w: 8.8,
       h: 0.5,
       fontSize: 24,
-      fontFace: 'Arial',
+      fontFace: PPTX_SANS,
       bold: true,
       color: theme.pptxAccent,
     })
@@ -144,7 +146,7 @@ function renderSlide(
       w: 4.0,
       h: 0.35,
       fontSize: 14,
-      fontFace: 'Arial',
+      fontFace: PPTX_SANS,
       bold: true,
       color: theme.pptxMuted,
     })
@@ -154,7 +156,7 @@ function renderSlide(
       w: 4.0,
       h: 0.35,
       fontSize: 14,
-      fontFace: 'Arial',
+      fontFace: PPTX_SANS,
       bold: true,
       color: theme.pptxMuted,
     })
@@ -166,7 +168,7 @@ function renderSlide(
         w: 4.0,
         h: 3.2,
         fontSize: 15,
-        fontFace: 'Arial',
+        fontFace: PPTX_SANS,
         color: theme.pptxText,
         paraSpaceAfter: 8,
       },
@@ -179,7 +181,7 @@ function renderSlide(
         w: 4.0,
         h: 3.2,
         fontSize: 15,
-        fontFace: 'Arial',
+        fontFace: PPTX_SANS,
         color: theme.pptxText,
         paraSpaceAfter: 8,
       },
@@ -191,7 +193,7 @@ function renderSlide(
       w: 8.8,
       h: 0.55,
       fontSize: layout === 'closing' ? 30 : 24,
-      fontFace: 'Arial',
+      fontFace: PPTX_SANS,
       bold: true,
       color: theme.pptxAccent,
     })
@@ -202,7 +204,7 @@ function renderSlide(
         w: 8.8,
         h: 0.35,
         fontSize: 14,
-        fontFace: 'Arial',
+        fontFace: PPTX_SANS,
         color: theme.pptxMuted,
       })
     }
@@ -214,7 +216,7 @@ function renderSlide(
         w: 8.8,
         h: 3.4,
         fontSize: 17,
-        fontFace: 'Arial',
+        fontFace: PPTX_SANS,
         color: theme.pptxText,
         paraSpaceAfter: 10,
       },
@@ -227,7 +229,7 @@ function renderSlide(
     w: 4,
     h: 0.25,
     fontSize: 10,
-    fontFace: 'Arial',
+    fontFace: PPTX_SANS,
     color: theme.pptxMuted,
   })
 

@@ -1,35 +1,17 @@
 import { writeFile, mkdir } from 'fs/promises'
 import { dirname } from 'path'
 import type { DeckSlide, ThemeTokens } from './presentation-types'
+import {
+  FONT_MONO,
+  FONT_SANS,
+  FONT_SERIF,
+  clampLine,
+  escapeXml,
+  wrapText,
+} from './text'
 
-function escapeXml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
-
-function wrapText(text: string, maxChars: number, maxLines: number): string[] {
-  const words = text.split(/\s+/)
-  const lines: string[] = []
-  let cur = ''
-  for (const w of words) {
-    const next = cur ? `${cur} ${w}` : w
-    if (next.length > maxChars && cur) {
-      lines.push(cur)
-      cur = w
-      if (lines.length >= maxLines) break
-    } else {
-      cur = next
-    }
-  }
-  if (cur && lines.length < maxLines) lines.push(cur)
-  return lines
-}
-
-function bulletTexts(items: string[], max = 7): string[] {
-  return items.slice(0, max).map((b) => b.slice(0, 90))
+function bulletTexts(items: string[], max = 7, maxChars = 36): string[] {
+  return items.slice(0, max).map((b) => clampLine(b, maxChars))
 }
 
 /** Write a 1280x720 SVG preview for one deck slide. */
@@ -42,87 +24,104 @@ export async function writePresentationSlideSvg(
   await mkdir(dirname(outPath), { recursive: true })
 
   const accentBar = `<rect x="0" y="0" width="12" height="720" fill="${theme.accent}"/>`
-  const footer = `<text x="64" y="688" fill="${theme.muted}" font-size="16" font-family="Helvetica, Arial, sans-serif">${escapeXml(brand)}</text>`
+  const footer = `<text x="64" y="688" fill="${theme.muted}" font-size="16" font-family="${FONT_SANS}">${escapeXml(brand)}</text>`
 
   let body = ''
   const layout = slide.layout
 
   if (layout === 'title' || layout === 'section') {
-    const titleLines = wrapText(slide.title, 28, 3)
+    const titleLines = wrapText(slide.title, 16, 3)
+    const titleSize = layout === 'title' ? 48 : 40
     const titleSvg = titleLines
       .map(
         (l, i) =>
-          `<text x="80" y="${280 + i * 56}" fill="${theme.text}" font-size="48" font-family="Helvetica, Arial, sans-serif" font-weight="700">${escapeXml(l)}</text>`,
+          `<text x="80" y="${240 + i * 58}" fill="${theme.text}" font-size="${titleSize}" font-family="${FONT_SANS}" font-weight="700">${escapeXml(l)}</text>`,
       )
       .join('\n')
-    const sub = slide.subtitle
-      ? `<text x="80" y="${300 + titleLines.length * 56}" fill="${theme.muted}" font-size="24" font-family="Helvetica, Arial, sans-serif">${escapeXml(slide.subtitle.slice(0, 80))}</text>`
-      : ''
+    const subLines = slide.subtitle ? wrapText(slide.subtitle, 28, 2) : []
+    const sub = subLines
+      .map(
+        (l, i) =>
+          `<text x="80" y="${260 + titleLines.length * 58 + i * 34}" fill="${theme.muted}" font-size="22" font-family="${FONT_SANS}">${escapeXml(l)}</text>`,
+      )
+      .join('\n')
     body = `${titleSvg}\n${sub}`
   } else if (layout === 'quote') {
     const quote = slide.quote || slide.title
-    const qLines = wrapText(quote, 36, 5)
+    const qLines = wrapText(quote, 22, 5)
     body = `
-      <text x="80" y="200" fill="${theme.accent}" font-size="72" font-family="Georgia, serif">“</text>
+      <text x="80" y="200" fill="${theme.accent}" font-size="72" font-family="${FONT_SERIF}">“</text>
       ${qLines
         .map(
           (l, i) =>
-            `<text x="100" y="${280 + i * 40}" fill="${theme.text}" font-size="28" font-family="Georgia, serif">${escapeXml(l)}</text>`,
+            `<text x="100" y="${280 + i * 42}" fill="${theme.text}" font-size="28" font-family="${FONT_SERIF}">${escapeXml(l)}</text>`,
         )
         .join('\n')}
-      ${slide.title && slide.title !== quote ? `<text x="100" y="560" fill="${theme.muted}" font-size="18" font-family="Helvetica, Arial, sans-serif">— ${escapeXml(slide.title.slice(0, 60))}</text>` : ''}
+      ${
+        slide.title && slide.title !== quote
+          ? `<text x="100" y="560" fill="${theme.muted}" font-size="18" font-family="${FONT_SANS}">— ${escapeXml(clampLine(slide.title, 40))}</text>`
+          : ''
+      }
     `
   } else if (layout === 'code') {
     const code = (slide.code || '').split('\n').slice(0, 14)
+    const lang = slide.codeLanguage || 'code'
     const codeLines = code
       .map((l, i) => {
         const y = 180 + i * 28
-        return `<text x="96" y="${y}" fill="${theme.text}" font-size="16" font-family="Menlo, Consolas, monospace">${escapeXml(l.slice(0, 88))}</text>`
+        return `<text x="96" y="${y}" fill="${theme.text}" font-size="15" font-family="${FONT_MONO}">${escapeXml(clampLine(l, 86))}</text>`
       })
       .join('\n')
     body = `
-      <text x="80" y="100" fill="${theme.accent}" font-size="32" font-family="Helvetica, Arial, sans-serif" font-weight="700">${escapeXml(slide.title.slice(0, 50))}</text>
+      <text x="80" y="100" fill="${theme.accent}" font-size="30" font-family="${FONT_SANS}" font-weight="700">${escapeXml(clampLine(slide.title, 28))}</text>
+      <text x="1100" y="100" fill="${theme.muted}" font-size="14" font-family="${FONT_MONO}" text-anchor="end">${escapeXml(lang)}</text>
       <rect x="64" y="130" width="1152" height="480" rx="12" fill="${theme.codeBg}" stroke="${theme.muted}" stroke-opacity="0.35"/>
       ${codeLines}
     `
   } else if (layout === 'two_column') {
-    const left = bulletTexts(slide.leftBullets || [], 6)
-    const right = bulletTexts(slide.rightBullets || [], 6)
-    const leftTitle = slide.leftTitle || 'A'
-    const rightTitle = slide.rightTitle || 'B'
+    const left = bulletTexts(slide.leftBullets || [], 6, 22)
+    const right = bulletTexts(slide.rightBullets || [], 6, 22)
+    const leftTitle = clampLine(slide.leftTitle || 'A', 18)
+    const rightTitle = clampLine(slide.rightTitle || 'B', 18)
     const leftItems = left
       .map(
         (b, i) =>
-          `<text x="80" y="${220 + i * 44}" fill="${theme.text}" font-size="20" font-family="Helvetica, Arial, sans-serif">• ${escapeXml(b)}</text>`,
+          `<text x="80" y="${220 + i * 44}" fill="${theme.text}" font-size="18" font-family="${FONT_SANS}">• ${escapeXml(b)}</text>`,
       )
       .join('\n')
     const rightItems = right
       .map(
         (b, i) =>
-          `<text x="680" y="${220 + i * 44}" fill="${theme.text}" font-size="20" font-family="Helvetica, Arial, sans-serif">• ${escapeXml(b)}</text>`,
+          `<text x="680" y="${220 + i * 44}" fill="${theme.text}" font-size="18" font-family="${FONT_SANS}">• ${escapeXml(b)}</text>`,
       )
       .join('\n')
     body = `
-      <text x="80" y="100" fill="${theme.accent}" font-size="32" font-family="Helvetica, Arial, sans-serif" font-weight="700">${escapeXml(slide.title.slice(0, 50))}</text>
-      <text x="80" y="160" fill="${theme.muted}" font-size="18" font-family="Helvetica, Arial, sans-serif" font-weight="600">${escapeXml(leftTitle)}</text>
-      <text x="680" y="160" fill="${theme.muted}" font-size="18" font-family="Helvetica, Arial, sans-serif" font-weight="600">${escapeXml(rightTitle)}</text>
+      <text x="80" y="100" fill="${theme.accent}" font-size="30" font-family="${FONT_SANS}" font-weight="700">${escapeXml(clampLine(slide.title, 28))}</text>
+      <text x="80" y="160" fill="${theme.muted}" font-size="16" font-family="${FONT_SANS}" font-weight="600">${escapeXml(leftTitle)}</text>
+      <text x="680" y="160" fill="${theme.muted}" font-size="16" font-family="${FONT_SANS}" font-weight="600">${escapeXml(rightTitle)}</text>
       <line x1="640" y1="140" x2="640" y2="620" stroke="${theme.muted}" stroke-opacity="0.4"/>
       ${leftItems}
       ${rightItems}
     `
   } else {
     // bullets | closing
-    const items = bulletTexts(slide.bullets || [], 7)
-    const titleSize = layout === 'closing' ? 40 : 32
+    const items = bulletTexts(slide.bullets || [], 7, 36)
+    const titleSize = layout === 'closing' ? 38 : 30
     const list = items
-      .map(
-        (b, i) =>
-          `<text x="80" y="${180 + i * 48}" fill="${theme.text}" font-size="22" font-family="Helvetica, Arial, sans-serif">• ${escapeXml(b)}</text>`,
-      )
+      .map((b, i) => {
+        const y = 190 + i * 50
+        return `
+          <circle cx="88" cy="${y - 6}" r="5" fill="${theme.accent}"/>
+          <text x="110" y="${y}" fill="${theme.text}" font-size="22" font-family="${FONT_SANS}">${escapeXml(b)}</text>
+        `
+      })
       .join('\n')
+    const sub = slide.subtitle
+      ? `<text x="80" y="148" fill="${theme.muted}" font-size="18" font-family="${FONT_SANS}">${escapeXml(clampLine(slide.subtitle, 40))}</text>`
+      : ''
     body = `
-      <text x="80" y="110" fill="${theme.accent}" font-size="${titleSize}" font-family="Helvetica, Arial, sans-serif" font-weight="700">${escapeXml(slide.title.slice(0, 50))}</text>
-      ${slide.subtitle ? `<text x="80" y="148" fill="${theme.muted}" font-size="18" font-family="Helvetica, Arial, sans-serif">${escapeXml(slide.subtitle.slice(0, 80))}</text>` : ''}
+      <text x="80" y="110" fill="${theme.accent}" font-size="${titleSize}" font-family="${FONT_SANS}" font-weight="700">${escapeXml(clampLine(slide.title, 28))}</text>
+      ${sub}
       ${list}
     `
   }

@@ -405,6 +405,7 @@
 
 - [x] V1: Deck Director + PPTX/SVG + `GeneratePresentation` Tool + `/presentation` Skill  
   詳細: [13-プレゼン生成プラン.md](./13-プレゼン生成プラン.md)
+- [x] V1.1 品質: 日本語折返し / フォント / レイアウト多様化 / Director 強化 / resvg SVG→PNG
 - [ ] V2: CLI、プレビュー UI、Deck→Shotlist dual export
 
 ---
@@ -413,6 +414,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| **2026-07-30** | **メディア品質改善**（resvg・日本語タイポ・Director・heuristic 多様化） |
 | **2026-07-29** | **プレゼン生成 V1 実装**（PPTX / GeneratePresentation / 4 テーマ） |
 | **2026-07-29** | **プレゼンは Agent-native Deck。Canva/Gamma API 外注は本線にしない**（プラン 13） |
 | **2026-07-29** | **動画生成 V1 実装**（`packages/media` / GenerateVideo / hybrid / Runway） |

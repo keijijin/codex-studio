@@ -164,8 +164,8 @@ export function buildHeuristicDeck(
       id: '01',
       layout: 'title',
       title,
-      subtitle: 'Codex Studio で生成',
-      notes: `${title}の概要を説明する。`,
+      subtitle: '要点をすばやく共有する',
+      notes: `${title}の目的と聴衆への価値を一文で述べる。`,
     },
   ]
 
@@ -180,10 +180,40 @@ export function buildHeuristicDeck(
           .map((s) => s.trim())
           .filter((s) => s.length > 15)
 
+  // Opening quote from first non-heading sentence when available
+  const firstSentence = body
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/^#+\s+.+$/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .match(/[^。.!?]{12,}[。!?]/)?.[0]
+  if (firstSentence && slides.length < options.maxSlides - 1) {
+    slides.push({
+      id: String(slides.length + 1).padStart(2, '0'),
+      layout: 'quote',
+      title,
+      quote: firstSentence.slice(0, 120),
+      notes: '問題意識やキーメッセージを強調する。',
+    })
+  }
+
   for (let i = 0; i < Math.min(chunks.length, limit); i++) {
     const chunk = chunks[i]!
     const heading = chunk.match(/^##\s+(.+)$/m)?.[1]?.trim() || `ポイント ${i + 1}`
     const hasCode = /```/.test(chunk)
+    const bullets = bulletsFromSection(chunk)
+
+    // Chapter break every few sections
+    if (i > 0 && i % 3 === 0 && slides.length < options.maxSlides - 1) {
+      slides.push({
+        id: String(slides.length + 1).padStart(2, '0'),
+        layout: 'section',
+        title: heading,
+        subtitle: '次のブロック',
+        notes: `${heading}に入る。`,
+      })
+    }
+
     if (hasCode && codeBlocks[codeIdx]) {
       const block = codeBlocks[codeIdx]!
       codeIdx++
@@ -193,14 +223,26 @@ export function buildHeuristicDeck(
         title: heading,
         code: block.code,
         codeLanguage: block.lang,
-        notes: `${heading}のコードを示す。`,
+        notes: `${heading}のコードを画面で示す。`,
+      })
+    } else if (bullets.length >= 4 && slides.length < options.maxSlides - 1) {
+      const mid = Math.ceil(bullets.length / 2)
+      slides.push({
+        id: String(slides.length + 1).padStart(2, '0'),
+        layout: 'two_column',
+        title: heading,
+        leftTitle: 'ポイント',
+        rightTitle: '詳細',
+        leftBullets: bullets.slice(0, mid),
+        rightBullets: bullets.slice(mid),
+        notes: `${heading}を対比して説明する。`,
       })
     } else {
       slides.push({
         id: String(slides.length + 1).padStart(2, '0'),
         layout: 'bullets',
         title: heading,
-        bullets: bulletsFromSection(chunk),
+        bullets,
         notes: `${heading}を説明する。`,
       })
     }

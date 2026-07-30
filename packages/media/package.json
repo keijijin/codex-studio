@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@codex/shared": "workspace:*",
+    "@resvg/resvg-js": "^2.6.2",
     "pptxgenjs": "^4.0.1"
   },
   "devDependencies": {

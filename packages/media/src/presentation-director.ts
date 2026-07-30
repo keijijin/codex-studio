@@ -5,18 +5,35 @@ import {
 } from './deck'
 import type { Deck, PresentationThemeId } from './presentation-types'
 
-const DIRECTOR_SYSTEM = `You are a presentation designer and narrative director. Given markdown documentation, produce a JSON deck for a polished slide deck.
+const DIRECTOR_SYSTEM = `You are a principal presentation designer (think: sharp tech keynote, not a wall of bullets).
+Given markdown documentation, produce a JSON deck for a polished slide deck.
 
-Rules:
-- Output ONLY valid JSON (no markdown fences).
-- Schema: { "title": string, "themeId": "midnight"|"paper"|"forest"|"coral", "slides": Slide[] }
-- Slide: { "id": "01", "layout": "title"|"section"|"bullets"|"two_column"|"code"|"quote"|"closing", "title": string, "subtitle"?: string, "bullets"?: string[], "leftTitle"?: string, "rightTitle"?: string, "leftBullets"?: string[], "rightBullets"?: string[], "code"?: string, "codeLanguage"?: string, "quote"?: string, "notes"?: string }
-- One message per slide. Max 7 bullets, short lines.
-- Use "code" ONLY for code/commands that appear in the source markdown (never invent code).
-- Prefer Japanese narration/titles if the source is Japanese, else English.
-- Always include a title slide first and a closing slide last.
-- Add speaker notes when helpful.
-- Keep total slides modest (about 5–12).`
+Output ONLY valid JSON (no markdown fences).
+Schema: { "title": string, "themeId": "midnight"|"paper"|"forest"|"coral", "slides": Slide[] }
+Slide: {
+  "id": "01",
+  "layout": "title"|"section"|"bullets"|"two_column"|"code"|"quote"|"closing",
+  "title": string,
+  "subtitle"?: string,
+  "bullets"?: string[],
+  "leftTitle"?: string,
+  "rightTitle"?: string,
+  "leftBullets"?: string[],
+  "rightBullets"?: string[],
+  "code"?: string,
+  "codeLanguage"?: string,
+  "quote"?: string,
+  "notes"?: string
+}
+
+Craft rules:
+- One message per slide. Max 5 bullets preferred (hard max 7). Each bullet ≤ 40 chars when possible.
+- Vary layouts: use section for chapter breaks, two_column for contrasts, quote for a key insight, code for real snippets.
+- code layout: copy code ONLY from the source markdown fences (never invent).
+- Always start with title and end with closing (next steps / CTA).
+- Speaker notes: what to say aloud (1–3 sentences), not a paste of bullets.
+- Language: Japanese if source is Japanese, else English.
+- Keep 6–12 slides unless the doc is tiny.`
 
 export async function buildDeckWithLlm(options: {
   markdown: string
@@ -29,6 +46,9 @@ export async function buildDeckWithLlm(options: {
   const model = options.model ?? 'gpt-4o-mini'
   const user = `Preferred themeId: ${options.themeId}
 Max slides: ${options.maxSlides}
+
+Audience: engineers / stakeholders reviewing a technical topic.
+Arc: hook → problem → approach → concrete evidence (code) → takeaway.
 
 --- MARKDOWN ---
 ${options.markdown.slice(0, 24_000)}
@@ -74,27 +94,37 @@ export async function buildDeck(options: {
   openaiApiKey?: string
   directorModel?: string
   signal?: AbortSignal
-}): Promise<{ deck: Deck; usedLlm: boolean }> {
-  if (options.openaiApiKey) {
-    try {
-      const deck = await buildDeckWithLlm({
-        markdown: options.markdown,
+}): Promise<{ deck: Deck; usedLlm: boolean; fallbackReason?: string }> {
+  if (!options.openaiApiKey) {
+    return {
+      deck: buildHeuristicDeck(options.markdown, {
         themeId: options.themeId,
         maxSlides: options.maxSlides,
-        openaiApiKey: options.openaiApiKey,
-        model: options.directorModel,
-        signal: options.signal,
-      })
-      // Prefer configured theme over LLM suggestion for consistency
-      return { deck: { ...deck, themeId: options.themeId }, usedLlm: true }
-    } catch {
-      // fall through to heuristic
+      }),
+      usedLlm: false,
+      fallbackReason: 'OpenAI API key が未設定のため heuristic deck を使用',
     }
   }
 
-  const deck = buildHeuristicDeck(options.markdown, {
-    themeId: options.themeId,
-    maxSlides: options.maxSlides,
-  })
-  return { deck, usedLlm: false }
+  try {
+    const deck = await buildDeckWithLlm({
+      markdown: options.markdown,
+      themeId: options.themeId,
+      maxSlides: options.maxSlides,
+      openaiApiKey: options.openaiApiKey,
+      model: options.directorModel,
+      signal: options.signal,
+    })
+    return { deck: { ...deck, themeId: options.themeId }, usedLlm: true }
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    return {
+      deck: buildHeuristicDeck(options.markdown, {
+        themeId: options.themeId,
+        maxSlides: options.maxSlides,
+      }),
+      usedLlm: false,
+      fallbackReason: `Director LLM 失敗のため heuristic に降格: ${detail.slice(0, 180)}`,
+    }
+  }
 }

@@ -35,7 +35,6 @@ export async function runVideoPipeline(
 
   progress('Building shotlist…')
   let shotlist = options.shotlist
-  let usedLlm = false
   if (!shotlist) {
     const built = await buildShotlist({
       markdown: options.markdown,
@@ -46,8 +45,9 @@ export async function runVideoPipeline(
       signal: options.signal,
     })
     shotlist = built.shotlist
-    usedLlm = built.usedLlm
-    if (!usedLlm) warnings.push('Director LLM unavailable — used heuristic shotlist')
+    if (!built.usedLlm && built.fallbackReason) {
+      warnings.push(built.fallbackReason)
+    }
   }
 
   const slug = options.slug || slugifyTitle(shotlist.title)

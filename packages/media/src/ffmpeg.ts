@@ -61,35 +61,33 @@ function run(
   })
 }
 
-/** Convert SVG to PNG via ffmpeg (librsvg/lavfi may vary; fallback: color frame). */
+/**
+ * Convert SVG to PNG. Prefers resvg (reliable); falls back to ffmpeg SVG decode.
+ * Never substitutes a blank color frame — that silently destroyed slide content.
+ */
 export async function svgToPng(
-  ffmpeg: string,
+  _ffmpeg: string,
   svgPath: string,
   pngPath: string,
   signal?: AbortSignal,
 ): Promise<void> {
+  if (signal?.aborted) throw new Error('ffmpeg cancelled')
   try {
-    await run(
-      ffmpeg,
-      ['-y', '-width', '1280', '-height', '720', '-i', svgPath, pngPath],
-      signal,
-    )
-  } catch {
-    // Some ffmpeg builds cannot decode SVG — solid frame fallback
-    await run(
-      ffmpeg,
-      [
-        '-y',
-        '-f',
-        'lavfi',
-        '-i',
-        'color=c=0x0f172a:s=1280x720:d=1',
-        '-frames:v',
-        '1',
-        pngPath,
-      ],
-      signal,
-    )
+    const { renderSvgToPng } = await import('./svg-render')
+    await renderSvgToPng(svgPath, pngPath)
+    return
+  } catch (resvgErr) {
+    try {
+      await run(
+        _ffmpeg,
+        ['-y', '-width', '1280', '-height', '720', '-i', svgPath, pngPath],
+        signal,
+      )
+    } catch (ffmpegErr) {
+      const a = resvgErr instanceof Error ? resvgErr.message : String(resvgErr)
+      const b = ffmpegErr instanceof Error ? ffmpegErr.message : String(ffmpegErr)
+      throw new Error(`SVG→PNG failed (resvg: ${a}; ffmpeg: ${b})`)
+    }
   }
 }
 

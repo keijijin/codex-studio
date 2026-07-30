@@ -38,12 +38,8 @@ export async function runPresentationPipeline(
     })
     deck = built.deck
     usedLlm = built.usedLlm
-    if (!usedLlm) {
-      warnings.push(
-        options.openaiApiKey
-          ? 'Director LLM failed; used heuristic deck'
-          : 'No OpenAI key; used heuristic deck',
-      )
+    if (!usedLlm && built.fallbackReason) {
+      warnings.push(built.fallbackReason)
     }
   } else {
     deck = normalizeDeck({ ...deck, themeId: deck.themeId || themeId }, options.maxSlides)

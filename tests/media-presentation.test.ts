@@ -32,6 +32,12 @@ CREATE POLICY tenant_isolation ON orders
     expect(deck.slides.some((s) => s.layout === 'code')).toBe(true)
     expect(deck.slides.some((s) => s.layout === 'closing')).toBe(true)
     expect(deck.slides.length).toBeGreaterThan(2)
+    // Quality pass: heuristic should not be bullets-only
+    expect(
+      deck.slides.some((s) =>
+        ['quote', 'section', 'two_column', 'code'].includes(s.layout),
+      ),
+    ).toBe(true)
     expect(slugifyDeckTitle(deck.title)).toMatch(/rls|入門/i)
   })
 
