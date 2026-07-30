@@ -159,7 +159,7 @@ export class TerminalService {
     if (isPowerShell(session.shell)) {
       const psPath = dumpPath.replace(/'/g, "''")
       dumpCmd =
-        `Get-ChildItem Env: | ForEach-Object { \"$($_.Name)=$($_.Value)\" } | ` +
+        `Get-ChildItem Env: | ForEach-Object { "$($_.Name)=$($_.Value)" } | ` +
         `Set-Content -LiteralPath '${psPath}' -Encoding utf8; ` +
         `Add-Content -LiteralPath '${psPath}' -Value '__CODEX_ENV_DONE__=${stamp}'\r`
     } else if (isCmd(session.shell)) {
