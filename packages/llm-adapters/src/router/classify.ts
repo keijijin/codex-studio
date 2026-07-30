@@ -163,7 +163,7 @@ export function classifyTask(input: ClassifyInput): ClassifyResult {
       }
     }
 
-    // Default Agent coding: mid-tier (Sonnet / mini), not nano and not Opus
+    // Default Agent coding: mid-tier (Grok / mini / Sonnet cascade), not nano and not Opus
     return {
       taskKind: 'agent_code',
       tier: 'standard',

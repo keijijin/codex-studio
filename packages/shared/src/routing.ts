@@ -44,17 +44,17 @@ export function migrateModelId(modelId: string): string {
   return RETIRED_MODEL_IDS[modelId] ?? modelId
 }
 
-/** Cost-aware default cascade: mid coding models then premium then lite/local */
+/** Cost-aware default cascade: Grok first, then mid coding / premium / lite / local */
 export const DEFAULT_FALLBACK_CHAIN: ModelCandidate[] = [
-  { provider: 'anthropic', model: DEFAULT_ANTHROPIC_SONNET },
   { provider: 'xai', model: 'grok-4.3' },
   { provider: 'openai', model: 'gpt-5.4-mini' },
+  { provider: 'anthropic', model: DEFAULT_ANTHROPIC_SONNET },
   { provider: 'xai', model: 'grok-4.5' },
   { provider: 'openai', model: 'gpt-5.5' },
   { provider: 'anthropic', model: 'claude-opus-4-8' },
+  { provider: 'xai', model: 'grok-4-1-fast-non-reasoning' },
   { provider: 'openai', model: 'gpt-5.4-nano' },
   { provider: 'anthropic', model: DEFAULT_ANTHROPIC_HAIKU },
-  { provider: 'xai', model: 'grok-4-1-fast-non-reasoning' },
   { provider: 'ollama', model: 'qwen2.5-coder:7b' },
 ]
 
