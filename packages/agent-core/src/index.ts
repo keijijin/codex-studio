@@ -23,6 +23,14 @@ export {
   formatSkillPrompt,
   formatSkillUserMessage,
 } from './skills-loader'
+export {
+  collectPersonas,
+  findPersona,
+  parsePersonaInvocation,
+  formatPersonaPrompt,
+  formatPersonaUserMessage,
+  serializePersonaFile,
+} from './personas-loader'
 export { loadProjectContext, PROJECT_CONTEXT_FILES } from './project-context'
 export {
   detectReplyLanguage,
@@ -42,6 +50,12 @@ export {
   findTeam,
   parseTeamInvocation,
 } from './teams-loader'
+export {
+  BUILTIN_TEAMS,
+  BUILTIN_PERSONAS,
+  builtinTeamDefinitions,
+  materializeBuiltinTeams,
+} from './builtin-teams'
 export { runTeam, type RunTeamOptions } from './team-runner'
 export { loadHooksConfig } from './hooks-loader'
 export {

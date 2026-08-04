@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import tls from 'node:tls'
 import {
   enableSystemCaCertificates,
   getSystemCaFetch,
@@ -6,9 +7,12 @@ import {
 
 describe('system CA fetch', () => {
   it('enables system CA support when getCACertificates exists', () => {
+    const hasApi =
+      typeof (tls as unknown as { getCACertificates?: unknown }).getCACertificates ===
+      'function'
     const ok = enableSystemCaCertificates()
-    // On Node 22+ (including Electron) this should succeed on Windows/macOS/Linux.
-    expect(ok).toBe(true)
+    // Node 22+ / Electron: true. Node 20 (local vitest): false — API absent.
+    expect(ok).toBe(hasApi)
   })
 
   it('can fetch api.openai.com without UNABLE_TO_VERIFY_LEAF_SIGNATURE', async () => {

@@ -1,17 +1,67 @@
-import { collectTeams, findTeam, parseTeamInvocation, runTeam } from '@codex/agent-core'
-import type { TeamDefinition } from '@codex/shared'
+import { homedir } from 'os'
+import { join } from 'path'
+import {
+  collectTeams,
+  findTeam,
+  materializeBuiltinTeams,
+  parseTeamInvocation,
+  runTeam,
+} from '@codex/agent-core'
+import type {
+  ApprovalRequest,
+  CeoApprovalRequest,
+  CeoApprovalResponse,
+  TeamDefinition,
+  TeamPipelineStage,
+  TeamRunResult,
+} from '@codex/shared'
 import { getProviderInstance } from '@codex/llm-adapters'
-import { defaultToolRegistry } from '@codex/tools'
+import { defaultToolRegistry, resolveAgentShellEnv } from '@codex/tools'
 import { getLlmRuntimeConfig } from './llm-config'
 import { rulesService } from './rules-service'
 import { settingsService } from './settings'
 import { workspaceService } from './workspace'
+import { ceoApprovalService } from './ceo-approval'
+
+export function globalTeamsDir(): string {
+  return join(homedir(), '.codex-studio', 'teams')
+}
+
+export interface TeamRunUiContext {
+  sessionId: string
+  emit: (event: {
+    type: string
+    [key: string]: unknown
+  }) => void
+  requestToolApproval?: (request: ApprovalRequest) => Promise<boolean>
+  onFileChanged?: (absolutePath: string) => void
+}
 
 export class TeamsService {
+  private materializePromise: Promise<void> | null = null
+
+  private ensureBuiltins(): Promise<void> {
+    if (!this.materializePromise) {
+      this.materializePromise = materializeBuiltinTeams().catch((err) => {
+        console.warn('[teams] failed to materialize builtins:', err)
+      })
+    }
+    return this.materializePromise
+  }
+
   async list(): Promise<TeamDefinition[]> {
+    await this.ensureBuiltins()
     const root = workspaceService.getRoot()
-    if (!root) return []
-    return collectTeams(root)
+    const extra = [globalTeamsDir()]
+    if (!root) {
+      return collectTeams(homedir(), { extraTeamsDirs: extra })
+    }
+    return collectTeams(root, { extraTeamsDirs: extra })
+  }
+
+  async findById(id: string): Promise<TeamDefinition | undefined> {
+    const teams = await this.list()
+    return findTeam(teams, id)
   }
 
   async matchInvocation(content: string) {
@@ -20,12 +70,34 @@ export class TeamsService {
     return parseTeamInvocation(content, teams)
   }
 
-  async run(teamId: string, prompt: string, signal?: AbortSignal) {
+  /**
+   * `/virtual-company …` skill name that matches a team id → treat as team run.
+   */
+  async matchSkillAsTeam(skillName: string, args: string) {
+    const team = await this.findById(skillName)
+    if (!team) return null
+    return { team, args }
+  }
+
+  async run(
+    teamId: string,
+    prompt: string,
+    signal?: AbortSignal,
+    ui?: TeamRunUiContext,
+  ): Promise<TeamRunResult> {
     const root = workspaceService.getRoot()
     if (!root) throw new Error('Open a workspace first')
-    const teams = await collectTeams(root)
+    await this.ensureBuiltins()
+    const teams = await this.list()
     const team = findTeam(teams, teamId)
-    if (!team) throw new Error(`Unknown team: ${teamId}`)
+    if (!team) {
+      const available = teams.map((t) => t.id).join(', ') || '(none)'
+      throw new Error(
+        `Unknown team: ${teamId}. Available: ${available}. ` +
+          `Built-ins: virtual-company, review-squad. ` +
+          `Or add .codex/teams/<id>/team.json`,
+      )
+    }
 
     const settings = settingsService.get()
     const runtime = getLlmRuntimeConfig(settings, 'agent')
@@ -34,6 +106,7 @@ export class TeamsService {
     }
     const rulesPrompt = await rulesService.buildPrompt([])
     const llm = getProviderInstance(runtime.provider)
+    const sessionId = ui?.sessionId ?? `headless-team-${Date.now()}`
 
     return runTeam({
       workspaceRoot: root,
@@ -49,7 +122,31 @@ export class TeamsService {
       getRelativePath: (p) => workspaceService.getRelativePath(p),
       rulesPrompt,
       maxConcurrency: settings.agent.maxSubagents ?? 3,
+      sessionId,
+      globalPersonasDir: join(homedir(), '.codex-studio', 'personas'),
+      getShellEnv: () => resolveAgentShellEnv(root),
+      onFileChanged: ui?.onFileChanged,
+      onStage: (stage: TeamPipelineStage, detail?: string) => {
+        ui?.emit({ type: 'team_stage', stage, teamId: team.id, detail })
+      },
+      requestCeoApproval: ui
+        ? async (request: CeoApprovalRequest) => {
+            ui.emit({ type: 'ceo_approval_required', request })
+            return ceoApprovalService.wait(sessionId, request.approvalId)
+          }
+        : undefined,
+      requestApproval: ui?.requestToolApproval
+        ? ui.requestToolApproval
+        : async () => false,
     })
+  }
+
+  respondCeoApproval(
+    sessionId: string,
+    approvalId: string,
+    response: CeoApprovalResponse,
+  ): void {
+    ceoApprovalService.respond(sessionId, approvalId, response)
   }
 }
 

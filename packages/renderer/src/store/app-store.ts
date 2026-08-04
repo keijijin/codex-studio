@@ -62,6 +62,14 @@ interface AppState {
     latencyMs: number
     estimatedCostUsd: number
   } | null
+  lastTrace: {
+    personaId?: string
+    personaName?: string
+    provider?: string
+    model?: string
+    routeReason?: string
+    toolCount?: number
+  } | null
   chatError: string | null
   routingInfo: {
     provider: string
@@ -69,8 +77,11 @@ interface AppState {
     reason: string
     mode: RoutingMode
   } | null
+  activePersona: { personaId: string; personaName: string } | null
   sessionMode: SessionMode
   pendingApproval: (ApprovalRequest & { sessionId: string }) | null
+  pendingCeoApproval: (import('@codex/shared').CeoApprovalRequest & { sessionId: string }) | null
+  teamStage: { stage: string; teamId: string; detail?: string } | null
   listenersSetup: boolean
 
   initialize: () => Promise<void>
@@ -97,8 +108,13 @@ interface AppState {
   cancelChat: () => Promise<void>
   compactChat: () => Promise<void>
   setSessionMode: (mode: SessionMode) => Promise<void>
+  setSessionPersona: (personaName: string | null) => Promise<void>
   setRoutingMode: (mode: RoutingMode) => Promise<void>
   respondApproval: (approved: boolean) => Promise<void>
+  respondCeoApproval: (
+    decision: import('@codex/shared').CeoApprovalDecision,
+    note?: string,
+  ) => Promise<void>
   refreshIndexStatus: () => Promise<void>
   clearSessionToolLog: () => void
 }
@@ -122,10 +138,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   streamingToolCalls: [],
   sessionToolLog: [],
   lastUsage: null,
+  lastTrace: null,
   chatError: null,
   routingInfo: null,
+  activePersona: null,
   sessionMode: 'ask',
   pendingApproval: null,
+  pendingCeoApproval: null,
+  teamStage: null,
   listenersSetup: false,
 
   initialize: async () => {
@@ -202,6 +222,21 @@ export const useAppStore = create<AppState>((set, get) => ({
             action: event.action as ApprovalRequest['action'],
           },
         })
+      } else if (event.type === 'ceo_approval_required') {
+        set({
+          pendingCeoApproval: {
+            sessionId: event.sessionId,
+            ...event.request,
+          },
+        })
+      } else if (event.type === 'team_stage') {
+        set({
+          teamStage: {
+            stage: event.stage,
+            teamId: event.teamId,
+            detail: event.detail,
+          },
+        })
       } else if (event.type === 'routing') {
         set({
           routingInfo: {
@@ -211,6 +246,13 @@ export const useAppStore = create<AppState>((set, get) => ({
             mode: event.mode,
           },
           chatError: null,
+        })
+      } else if (event.type === 'persona_applied') {
+        set({
+          activePersona: {
+            personaId: event.personaId,
+            personaName: event.personaName,
+          },
         })
       } else if (event.type === 'retrying') {
         set({
@@ -228,6 +270,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         void (async () => {
           const messages = await window.codex.invoke(IPC_CHANNELS.SESSION_SELECT, event.sessionId)
           const sessions = await window.codex.invoke(IPC_CHANNELS.SESSION_LIST)
+          const session = sessions.find((s) => s.id === event.sessionId)
+          const sticky = session?.personaName
           set({
             messages,
             sessions,
@@ -236,7 +280,30 @@ export const useAppStore = create<AppState>((set, get) => ({
             streamingToolCalls: [],
             chatError: null,
             pendingApproval: null,
+            pendingCeoApproval: null,
+            teamStage: null,
+            activePersona: sticky
+              ? { personaId: sticky, personaName: sticky }
+              : null,
             lastUsage: event.usage ?? null,
+            lastTrace: event.trace
+              ? {
+                  personaId: event.trace.personaId,
+                  personaName: event.trace.personaName,
+                  provider: event.trace.provider,
+                  model: event.trace.model,
+                  routeReason: event.trace.routeReason,
+                  toolCount: event.trace.toolCount,
+                }
+              : sticky
+                ? {
+                    personaName: sticky,
+                    provider: get().routingInfo?.provider,
+                    model: get().routingInfo?.model,
+                    routeReason: get().routingInfo?.reason,
+                    toolCount: get().sessionToolLog.length,
+                  }
+                : get().lastTrace,
           })
         })()
       } else if (event.type === 'error') {
@@ -495,13 +562,33 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectSession: async (sessionId: string) => {
     const messages = await window.codex.invoke(IPC_CHANNELS.SESSION_SELECT, sessionId)
     const session = get().sessions.find((s) => s.id === sessionId)
+    const lastWithTrace = [...messages].reverse().find((m) => m.role === 'assistant' && m.trace)
+    const stickyName = session?.personaName
     set({
       activeSessionId: sessionId,
       messages,
       streamingContent: '',
       streamingToolCalls: [],
       sessionToolLog: toolLogFromMessages(messages),
-      lastUsage: null,
+      lastUsage: lastWithTrace?.trace?.usage ?? null,
+      lastTrace: lastWithTrace?.trace
+        ? {
+            personaId: lastWithTrace.trace.personaId,
+            personaName: lastWithTrace.trace.personaName,
+            provider: lastWithTrace.trace.provider,
+            model: lastWithTrace.trace.model,
+            routeReason: lastWithTrace.trace.routeReason,
+            toolCount: lastWithTrace.trace.toolCount,
+          }
+        : null,
+      activePersona: stickyName
+        ? { personaId: stickyName, personaName: stickyName }
+        : lastWithTrace?.trace?.personaName
+          ? {
+              personaId: lastWithTrace.trace.personaId ?? '',
+              personaName: lastWithTrace.trace.personaName,
+            }
+          : null,
       chatError: null,
       isStreaming: false,
       sessionMode: session?.mode ?? 'ask',
@@ -518,6 +605,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       streamingToolCalls: [],
       sessionToolLog: [],
       lastUsage: null,
+      lastTrace: null,
+      activePersona: null,
       chatError: null,
       sessionMode: session.mode,
     })
@@ -544,6 +633,35 @@ export const useAppStore = create<AppState>((set, get) => ({
       })
     } catch (err) {
       console.warn('[app] session mode persist failed (restart pnpm dev if needed):', err)
+    }
+  },
+
+  setSessionPersona: async (personaName: string | null) => {
+    const { activeSessionId, sessions } = get()
+    if (!activeSessionId) return
+
+    const next = personaName?.trim() || undefined
+    set({
+      activePersona: next ? { personaId: next, personaName: next } : null,
+      sessions: sessions.map((s) =>
+        s.id === activeSessionId ? { ...s, personaName: next } : s,
+      ),
+    })
+
+    try {
+      const updated = await window.codex.invoke(
+        IPC_CHANNELS.SESSION_SET_PERSONA,
+        activeSessionId,
+        next ?? null,
+      )
+      set({
+        sessions: get().sessions.map((s) => (s.id === updated.id ? updated : s)),
+        activePersona: updated.personaName
+          ? { personaId: updated.personaName, personaName: updated.personaName }
+          : null,
+      })
+    } catch (err) {
+      console.warn('[app] session persona persist failed:', err)
     }
   },
 
@@ -584,6 +702,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ pendingApproval: null })
   },
 
+  respondCeoApproval: async (decision, note) => {
+    const { pendingCeoApproval, activeSessionId } = get()
+    if (!pendingCeoApproval || !activeSessionId) return
+    await window.codex.invoke(IPC_CHANNELS.CEO_APPROVAL_RESPOND, activeSessionId, pendingCeoApproval.approvalId, {
+      decision,
+      note,
+    })
+    set({ pendingCeoApproval: null })
+  },
+
   sendMessage: async (content: string, attachments: Attachment[]) => {
     const { activeSessionId, sessionMode } = get()
     if (!activeSessionId) return
@@ -604,6 +732,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       streamingToolCalls: [],
       chatError: null,
       routingInfo: null,
+      activePersona: null,
+      pendingCeoApproval: null,
+      teamStage: null,
     })
 
     const contextPaths = get().tabs.map((t) => t.path)

@@ -1,4 +1,5 @@
-import { relative, resolve } from 'path'
+import { homedir } from 'os'
+import { join, relative, resolve } from 'path'
 import type { AgentMessage, LLMProvider } from '@codex/llm-adapters'
 import { getProviderInstance } from '@codex/llm-adapters'
 import {
@@ -15,6 +16,13 @@ import {
   formatSkillUserMessage,
   parseSkillInvocation,
 } from './skills-loader'
+import {
+  collectPersonas,
+  findPersona,
+  formatPersonaPrompt,
+  formatPersonaUserMessage,
+  parsePersonaInvocation,
+} from './personas-loader'
 import { loadProjectContext } from './project-context'
 import { loadRules } from './rules-loader'
 import { loadMemory, appendMemoryNote } from './memory'
@@ -67,6 +75,8 @@ export interface HeadlessAgentOptions {
   runwayApiKey?: string
   /** Presentation generation settings (GeneratePresentation) */
   presentation?: import('@codex/shared').PresentationSettings
+  /** Default persona when prompt has no `/persona` */
+  defaultPersona?: string
   signal?: AbortSignal
   onEvent?: (event: AgentOrchestratorEvent) => void
   /** Inject LLM for tests */
@@ -109,6 +119,20 @@ export async function runHeadlessAgent(
 
   let prompt = options.prompt
   let skillPrompt: string | undefined
+  let personaPrompt: string | undefined
+
+  const globalPersonas = join(homedir(), '.codex-studio', 'personas')
+  const personas = await collectPersonas(workspaceRoot, {
+    globalPersonasDir: globalPersonas,
+  })
+  const personaMatch = parsePersonaInvocation(prompt, personas)
+  if (personaMatch) {
+    personaPrompt = formatPersonaPrompt(personaMatch.persona)
+    prompt = personaMatch.args || formatPersonaUserMessage(personaMatch.persona, '')
+  } else if (options.defaultPersona) {
+    const persona = findPersona(personas, options.defaultPersona)
+    if (persona) personaPrompt = formatPersonaPrompt(persona)
+  }
 
   const skills = await collectSkills(workspaceRoot)
   const skillMatch = parseSkillInvocation(prompt, skills)
@@ -144,6 +168,7 @@ export async function runHeadlessAgent(
       relative(workspaceRoot, absolutePath).replace(/\\/g, '/'),
     rulesPrompt,
     skillPrompt,
+    personaPrompt,
     subagentDepth: 0,
     getShellEnv: () => resolveAgentShellEnv(workspaceRoot),
     getVideoConfig: () => ({
@@ -201,10 +226,19 @@ export async function runHeadlessAgent(
       }
     },
     runTeam: async ({ teamId, prompt: teamPrompt }) => {
-      const teams = await collectTeams(workspaceRoot)
+      const teams = await collectTeams(workspaceRoot, {
+        extraTeamsDirs: [
+          join(homedir(), '.codex-studio', 'teams'),
+          join(process.cwd(), '.codex', 'teams'),
+        ],
+      })
       const team = findTeam(teams, teamId)
       if (!team) {
-        return { success: false, output: `Error: unknown team "${teamId}"` }
+        const available = teams.map((t) => t.id).join(', ') || '(none)'
+        return {
+          success: false,
+          output: `Error: unknown team "${teamId}". Available: ${available}`,
+        }
       }
       const result = await runTeam({
         workspaceRoot,
@@ -221,6 +255,7 @@ export async function runHeadlessAgent(
           relative(workspaceRoot, absolutePath).replace(/\\/g, '/'),
         rulesPrompt,
         maxConcurrency: options.maxSubagents ?? 3,
+        globalPersonasDir: globalPersonas,
       })
       return {
         success: result.success,

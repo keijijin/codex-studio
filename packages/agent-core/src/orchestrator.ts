@@ -35,6 +35,8 @@ export interface AgentRunContext {
   rulesPrompt?: string
   /** Extra system instructions from an invoked Skill */
   skillPrompt?: string
+  /** Extra system instructions from an active Persona */
+  personaPrompt?: string
   /** Nested subagent depth (0 = top-level parent) */
   subagentDepth?: number
   /** Wired for Task tool */
@@ -72,7 +74,9 @@ const buildSystemPrompt = (
   skillPrompt?: string,
   languageBlock = '',
   isSubagent = false,
+  personaPrompt?: string,
 ) => {
+  const personaBlock = personaPrompt ? `\n\n${personaPrompt}` : ''
   const skillBlock = skillPrompt ? `\n\n${skillPrompt}` : ''
   if (isSubagent) {
     return `You are a read-only Codex Studio subagent.
@@ -81,7 +85,7 @@ Workspace root: ${workspaceRoot}
 
 You may only use Read, Grep, and Glob. Do not attempt to modify files or run shell commands.
 Return a concise factual report for the parent agent.
-Use markdown for formatting.${languageBlock}${rules}${skillBlock}`
+Use markdown for formatting.${languageBlock}${rules}${personaBlock}${skillBlock}`
   }
 
   return `You are Codex Studio, an AI coding assistant with access to tools for reading, searching, and modifying the codebase.
@@ -101,11 +105,12 @@ Tools available:
 
 For code questions, use Read/Grep/Glob first. For independent research threads, spawn Task subagents then synthesize.
 For multi-perspective reviews, prefer Team when a matching team exists.
+For department-style decisions (sales / marketing / legal / engineering → CEO → execute), prefer Team \`virtual-company\` or /virtual-company.
 To make changes, use Write or StrReplace.
 When the user asks for a tutorial / explainer video from docs or Markdown, use GenerateVideo (or the /video-tutorial skill).
 When the user asks for slides / presentation / PPTX / deck from docs or Markdown, use GeneratePresentation (or the /presentation skill).
 Use workspace-relative paths (e.g. README.md, packages/app/src/main/index.ts).
-Use markdown for formatting.${languageBlock}${rules}${skillBlock}`
+Use markdown for formatting.${languageBlock}${rules}${personaBlock}${skillBlock}`
 }
 
 function resolvePermission(
@@ -155,6 +160,7 @@ export class AgentOrchestrator {
           ctx.skillPrompt,
           languageBlock,
           depth > 0,
+          ctx.personaPrompt,
         ),
       },
       ...history,

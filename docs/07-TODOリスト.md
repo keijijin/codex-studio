@@ -410,10 +410,27 @@
 
 ---
 
+## Phase L: LINE × K8s（将来）
+
+詳細: [14-LINE-K8sエージェント将来プラン.md](./14-LINE-K8sエージェント将来プラン.md) / [15](./15-Personas-トレース-権限プリセット.md)
+
+- [x] L0: Personas V1 + ターン単位トレース + 権限プリセット（readonly / coding / yolo）
+- [x] Personas AI V1.1: セッション sticky / ピッカー / CRUD / clear — [16](./16-PersonasAIプラン.md)
+- [x] バーチャル会社: 多段パイプライン + 社長承認 UI + 実装実行 — [17](./17-バーチャル会社.md)
+- [ ] L1: LINE 通知（onAgentComplete → Push）
+- [ ] L2: K8s Headless
+- [ ] L3: LINE フル Agent（承認付き）
+- [ ] L4: 硬化（監査・キルスイッチ・コスト）
+
+---
+
 ## メモ・決定事項
 
 | 日付 | 内容 |
 |------|------|
+| **2026-08-03** | **バーチャル会社**: 営業・法務・技術→社長判断（プラン 17） |
+| **2026-08-03** | **Personas AI V1.1**: sticky・ピッカー・設定 CRUD（プラン 16） |
+| **2026-08-03** | **L0 完了**: Personas / ターン単位トレース / 権限プリセット（プラン 14・15） |
 | **2026-07-30** | **メディア品質改善**（resvg・日本語タイポ・Director・heuristic 多様化） |
 | **2026-07-29** | **プレゼン生成 V1 実装**（PPTX / GeneratePresentation / 4 テーマ） |
 | **2026-07-29** | **プレゼンは Agent-native Deck。Canva/Gamma API 外注は本線にしない**（プラン 13） |

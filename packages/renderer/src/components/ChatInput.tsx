@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Attachment, FileNode, SkillFile } from '@codex/shared'
+import type { Attachment, FileNode, PersonaFile, SkillFile } from '@codex/shared'
 import { IPC_CHANNELS } from '@codex/shared'
 import { useAppStore } from '@renderer/store/app-store'
 
@@ -24,7 +24,9 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [suggestions, setSuggestions] = useState<FileNode[]>([])
   const [skills, setSkills] = useState<SkillFile[]>([])
+  const [personas, setPersonas] = useState<PersonaFile[]>([])
   const [skillSuggestions, setSkillSuggestions] = useState<SkillFile[]>([])
+  const [personaSuggestions, setPersonaSuggestions] = useState<PersonaFile[]>([])
   const workspace = useAppStore((s) => s.workspace)
   const fileTree = useAppStore((s) => s.fileTree)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -35,25 +37,74 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
   useEffect(() => {
     if (!workspace) {
       setSkills([])
+      setPersonas([])
       return
     }
     void window.codex
       .invoke(IPC_CHANNELS.SKILLS_LIST)
       .then(setSkills)
       .catch(() => setSkills([]))
+    void window.codex
+      .invoke(IPC_CHANNELS.PERSONAS_LIST)
+      .then(setPersonas)
+      .catch(() => setPersonas([]))
   }, [workspace])
 
   const handleChange = (value: string) => {
     setText(value)
 
+    const personaArgMatch = value.match(/^\/persona(?:\s+([a-zA-Z0-9_-]*))?$/i)
+    if (personaArgMatch) {
+      const query = (personaArgMatch[1] ?? '').toLowerCase()
+      const clearHint: PersonaFile = {
+        id: '__clear__',
+        name: 'clear',
+        description: 'セッションの Persona を解除',
+        absolutePath: '',
+        relativePath: '',
+        body: '',
+        scope: 'workspace',
+        editable: false,
+      }
+      const hits = personas.filter(
+        (p) =>
+          !query ||
+          p.name.includes(query) ||
+          p.description.toLowerCase().includes(query),
+      )
+      const withClear =
+        !query || 'clear'.includes(query) || 'off'.includes(query)
+          ? [clearHint, ...hits]
+          : hits
+      setPersonaSuggestions(withClear.slice(0, 8))
+      setSkillSuggestions([])
+      setSuggestions([])
+      return
+    }
+    setPersonaSuggestions([])
+
     const skillMatch = value.match(/^\/([a-zA-Z0-9_-]*)$/)
     if (skillMatch) {
       const query = skillMatch[1].toLowerCase()
-      setSkillSuggestions(
-        skills
-          .filter((s) => s.name.includes(query) || s.description.toLowerCase().includes(query))
-          .slice(0, 8),
-      )
+      const skillHits = skills
+        .filter((s) => s.name.includes(query) || s.description.toLowerCase().includes(query))
+        .slice(0, 8)
+      // Surface /persona when the query matches
+      if (!query || 'persona'.includes(query)) {
+        setSkillSuggestions([
+          {
+            id: '__persona__',
+            name: 'persona',
+            description: 'Persona を適用（/persona <name>）',
+            absolutePath: '',
+            relativePath: '',
+            body: '',
+          },
+          ...skillHits,
+        ].slice(0, 8))
+      } else {
+        setSkillSuggestions(skillHits)
+      }
       setSuggestions([])
       return
     }
@@ -73,7 +124,19 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
   }
 
   const selectSkill = (skill: SkillFile) => {
-    setText(`/${skill.name} `)
+    if (skill.name === 'persona') {
+      setText('/persona ')
+    } else {
+      setText(`/${skill.name} `)
+    }
+    setSkillSuggestions([])
+    setPersonaSuggestions([])
+    textareaRef.current?.focus()
+  }
+
+  const selectPersona = (persona: PersonaFile) => {
+    setText(persona.name === 'clear' ? '/persona clear' : `/persona ${persona.name} `)
+    setPersonaSuggestions([])
     setSkillSuggestions([])
     textareaRef.current?.focus()
   }
@@ -101,6 +164,7 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
     setText('')
     setAttachments([])
     setSkillSuggestions([])
+    setPersonaSuggestions([])
     setSuggestions([])
   }
 
@@ -136,6 +200,24 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
                 ×
               </button>
             </span>
+          ))}
+        </div>
+      )}
+
+      {personaSuggestions.length > 0 && (
+        <div className="mb-2 max-h-40 overflow-auto rounded border border-surface-border bg-surface">
+          {personaSuggestions.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className="block w-full truncate px-3 py-1.5 text-left text-xs hover:bg-white/10"
+              onClick={() => selectPersona(p)}
+            >
+              <span className="text-accent">/persona {p.name}</span>
+              {p.description ? (
+                <span className="ml-2 text-text-muted">{p.description}</span>
+              ) : null}
+            </button>
           ))}
         </div>
       )}
@@ -186,7 +268,7 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
           isComposingRef.current = false
         }}
         onKeyDown={handleKeyDown}
-        placeholder="メッセージを入力... (/skill · @file · Enter で送信)"
+        placeholder="メッセージを入力... (/persona · /skill · @file · Enter で送信)"
         disabled={disabled}
       />
 
@@ -194,8 +276,8 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
         <span className="text-xs text-text-muted">
           {isStreaming
             ? '生成中... (Esc で中断)'
-            : skills.length > 0
-              ? `Shift+Enter で改行 · / で Skills（${skills.length}）`
+            : skills.length > 0 || personas.length > 0
+              ? `Shift+Enter で改行 · / で Skills・Personas（${skills.length + personas.length}）`
               : 'Shift+Enter で改行'}
         </span>
         {isStreaming ? (

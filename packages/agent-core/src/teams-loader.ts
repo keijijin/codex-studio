@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from 'fs/promises'
-import { basename, join, relative } from 'path'
-import type { TeamDefinition, TeamRole } from '@codex/shared'
+import { basename, join, relative, resolve } from 'path'
+import type { TeamDefinition, TeamPipelineConfig, TeamRole } from '@codex/shared'
+import { builtinTeamDefinitions, materializeBuiltinTeams } from './builtin-teams'
 
 function parseRole(raw: unknown): TeamRole | null {
   if (!raw || typeof raw !== 'object') return null
@@ -18,8 +19,23 @@ function parseRole(raw: unknown): TeamRole | null {
     goal,
     tools,
     skill: typeof obj.skill === 'string' ? obj.skill.trim().replace(/^\//, '') : undefined,
+    persona: typeof obj.persona === 'string' ? obj.persona.trim().replace(/^\//, '') : undefined,
     synthesize: obj.synthesize === true,
+    execute: obj.execute === true,
   }
+}
+
+function parsePipeline(raw: unknown): TeamPipelineConfig | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const obj = raw as Record<string, unknown>
+  const pipeline: TeamPipelineConfig = {}
+  if (typeof obj.requireCeoApproval === 'boolean') {
+    pipeline.requireCeoApproval = obj.requireCeoApproval
+  }
+  if (typeof obj.executeAfterApprove === 'boolean') {
+    pipeline.executeAfterApprove = obj.executeAfterApprove
+  }
+  return Object.keys(pipeline).length ? pipeline : undefined
 }
 
 async function loadTeamFile(
@@ -49,33 +65,46 @@ async function loadTeamFile(
       ? boardName
       : join(dir, boardName)
 
+    const normalizedId = id.toLowerCase().replace(/[^a-z0-9_-]/g, '-')
+    const wsRoot = resolve(workspaceRoot)
+    const absResolved = resolve(absolutePath)
+    const underWorkspace =
+      absResolved === wsRoot || absResolved.startsWith(wsRoot + '/') || absResolved.startsWith(wsRoot + '\\')
+
     return {
-      id: id.toLowerCase().replace(/[^a-z0-9_-]/g, '-'),
+      id: normalizedId,
       name,
       description,
       absolutePath,
-      relativePath: relative(workspaceRoot, absolutePath).replace(/\\/g, '/'),
+      relativePath: underWorkspace
+        ? relative(workspaceRoot, absolutePath).replace(/\\/g, '/')
+        : `~/.codex-studio/teams/${normalizedId}/team.json`,
       roles,
-      boardRelativePath: relative(workspaceRoot, boardAbs).replace(/\\/g, '/'),
+      // Always keep the board inside the open workspace so path sandbox / UX stay consistent.
+      boardRelativePath: underWorkspace
+        ? relative(workspaceRoot, boardAbs).replace(/\\/g, '/')
+        : `.codex/teams/${normalizedId}/BOARD.md`,
+      pipeline: parsePipeline(obj.pipeline),
     }
   } catch {
     return null
   }
 }
 
-/** Load teams from `.codex/teams/<id>/team.json` (or `*.json` files). */
-export async function collectTeams(workspaceRoot: string): Promise<TeamDefinition[]> {
-  const root = join(workspaceRoot, '.codex', 'teams')
-  const out: TeamDefinition[] = []
+async function collectFromTeamsRoot(
+  teamsRoot: string,
+  workspaceRoot: string,
+  out: TeamDefinition[],
+): Promise<void> {
   let entries: string[]
   try {
-    entries = await readdir(root)
+    entries = await readdir(teamsRoot)
   } catch {
-    return []
+    return
   }
 
   for (const entry of entries) {
-    const full = join(root, entry)
+    const full = join(teamsRoot, entry)
     let st
     try {
       st = await stat(full)
@@ -83,14 +112,38 @@ export async function collectTeams(workspaceRoot: string): Promise<TeamDefinitio
       continue
     }
     if (st.isDirectory()) {
-      const teamJson = join(full, 'team.json')
-      const team = await loadTeamFile(teamJson, workspaceRoot, entry)
+      const team = await loadTeamFile(join(full, 'team.json'), workspaceRoot, entry)
       if (team) out.push(team)
     } else if (st.isFile() && entry.endsWith('.json')) {
       const team = await loadTeamFile(full, workspaceRoot, basename(entry, '.json'))
       if (team) out.push(team)
     }
   }
+}
+
+export interface CollectTeamsOptions {
+  /**
+   * Extra team roots (e.g. ~/.codex-studio/teams).
+   * Precedence on id clash: workspace > in-memory builtins > extra/global dirs.
+   */
+  extraTeamsDirs?: string[]
+}
+
+/** Load teams from `.codex/teams` plus optional global/bundled dirs + in-code builtins. */
+export async function collectTeams(
+  workspaceRoot: string,
+  options?: CollectTeamsOptions,
+): Promise<TeamDefinition[]> {
+  // Always materialize built-ins to ~/.codex-studio (best-effort).
+  await materializeBuiltinTeams().catch(() => undefined)
+
+  const out: TeamDefinition[] = []
+  // Global/extra first; builtins override stale copies; workspace wins last.
+  for (const dir of options?.extraTeamsDirs ?? []) {
+    if (dir?.trim()) await collectFromTeamsRoot(dir, workspaceRoot, out)
+  }
+  out.push(...builtinTeamDefinitions(workspaceRoot))
+  await collectFromTeamsRoot(join(workspaceRoot, '.codex', 'teams'), workspaceRoot, out)
 
   const byId = new Map<string, TeamDefinition>()
   for (const team of out) byId.set(team.id, team)
@@ -98,7 +151,7 @@ export async function collectTeams(workspaceRoot: string): Promise<TeamDefinitio
 }
 
 export function findTeam(teams: TeamDefinition[], idOrName: string): TeamDefinition | undefined {
-  const key = idOrName.toLowerCase()
+  const key = idOrName.toLowerCase().replace(/^\//, '')
   return teams.find((t) => t.id === key || t.name.toLowerCase() === key)
 }
 

@@ -30,6 +30,21 @@ export type ChatStreamEvent =
       mode: 'fixed' | 'auto' | 'fallback-only'
     }
   | {
+      type: 'persona_applied'
+      personaId: string
+      personaName: string
+    }
+  | {
+      type: 'team_stage'
+      stage: import('./ceo-approval').TeamPipelineStage
+      teamId: string
+      detail?: string
+    }
+  | {
+      type: 'ceo_approval_required'
+      request: import('./ceo-approval').CeoApprovalRequest
+    }
+  | {
       type: 'retrying'
       provider: string
       model: string
@@ -46,5 +61,6 @@ export type ChatStreamEvent =
         latencyMs: number
         estimatedCostUsd: number
       }
+      trace?: import('./personas').TurnTrace
     }
   | { type: 'error'; message: string }

@@ -14,6 +14,7 @@ import {
   type ToolCallRecord,
 } from '@codex/shared'
 import { approvalService } from './approval'
+import { ceoApprovalService } from './ceo-approval'
 import { agentEnvService } from './agent-env-service'
 import { createE2eMockAgentProvider } from './e2e-mock-agent'
 import {
@@ -28,14 +29,12 @@ import { formatSkillPrompt, formatSkillUserMessage } from '@codex/agent-core'
 import {
   appendMemoryNote,
   createConcurrencyLimiter,
-  findTeam,
-  collectTeams,
   runSubagentTask,
-  runTeam,
   sanitizeToolMessagePairs,
 } from '@codex/agent-core'
-import { DEFAULT_AGENT_PERMISSIONS } from '@codex/shared'
+import { DEFAULT_AGENT_PERMISSIONS, type TurnTrace } from '@codex/shared'
 import { skillsService } from './skills-service'
+import { personasService } from './personas-service'
 import { teamsService } from './teams-service'
 import { rulesService } from './rules-service'
 import { hooksService } from './hooks-service'
@@ -67,10 +66,19 @@ export class AgentService {
     this.abortControllers.get(sessionId)?.abort()
     this.abortControllers.delete(sessionId)
     approvalService.cancelAll(sessionId)
+    ceoApprovalService.cancelAll(sessionId)
   }
 
   respondApproval(sessionId: string, toolCallId: string, approved: boolean): void {
     approvalService.respond(sessionId, toolCallId, approved)
+  }
+
+  respondCeoApproval(
+    sessionId: string,
+    approvalId: string,
+    response: import('@codex/shared').CeoApprovalResponse,
+  ): void {
+    teamsService.respondCeoApproval(sessionId, approvalId, response)
   }
 
   async run(params: ChatSendParams, webContents: WebContents): Promise<void> {
@@ -93,13 +101,61 @@ export class AgentService {
       return
     }
 
-    const skillMatch = await skillsService.matchInvocation(content)
+    let personaPrompt: string | undefined
+    let activePersona: { id: string; name: string } | undefined
+    const session = sessionService.getSession(sessionId)
+    const personaMatch = await personasService.matchInvocation(content)
+    if (personaMatch?.clear) {
+      sessionService.setPersona(sessionId, undefined)
+      if (!personaMatch.args) {
+        sessionService.addMessage(sessionId, {
+          sessionId,
+          role: 'user',
+          content: '/persona clear',
+        })
+        const saved = sessionService.addMessage(sessionId, {
+          sessionId,
+          role: 'assistant',
+          content: 'このセッションの Persona を解除しました。',
+        })
+        this.emit(webContents, sessionId, { type: 'done', messageId: saved.id })
+        return
+      }
+      content = personaMatch.args
+    } else if (personaMatch) {
+      personaPrompt = personasService.formatPrompt(personaMatch.persona)
+      activePersona = { id: personaMatch.persona.id, name: personaMatch.persona.name }
+      sessionService.setPersona(sessionId, personaMatch.persona.name)
+      content = personaMatch.args || personasService.formatUserMessage(personaMatch.persona, '')
+    } else {
+      const stickyOrDefault =
+        (await personasService.resolveDefault(session?.personaName)) ??
+        (await personasService.resolveDefault(settings.agent.defaultPersona))
+      if (stickyOrDefault) {
+        personaPrompt = personasService.formatPrompt(stickyOrDefault)
+        activePersona = { id: stickyOrDefault.id, name: stickyOrDefault.name }
+      }
+    }
+
+    // Prefer explicit /team, then skill names that alias a team (e.g. /virtual-company).
+    let teamMatch = await teamsService.matchInvocation(content)
     let skillPrompt: string | undefined
-    const teamMatch = skillMatch ? null : await teamsService.matchInvocation(content)
-    if (skillMatch) {
-      skillPrompt = formatSkillPrompt(skillMatch.skill, skillMatch.args)
-      content = formatSkillUserMessage(skillMatch.skill, skillMatch.args)
-    } else if (teamMatch) {
+    if (!teamMatch) {
+      const skillMatch = await skillsService.matchInvocation(content)
+      if (skillMatch) {
+        const asTeam = await teamsService.matchSkillAsTeam(
+          skillMatch.skill.name,
+          skillMatch.args,
+        )
+        if (asTeam) {
+          teamMatch = asTeam
+        } else {
+          skillPrompt = formatSkillPrompt(skillMatch.skill, skillMatch.args)
+          content = formatSkillUserMessage(skillMatch.skill, skillMatch.args)
+        }
+      }
+    }
+    if (teamMatch) {
       content = teamMatch.args
         ? `/team ${teamMatch.team.id} ${teamMatch.args}`
         : `/team ${teamMatch.team.id}`
@@ -145,10 +201,51 @@ export class AgentService {
           tool: 'Team',
           args: { team: teamMatch.team.id, prompt: teamMatch.args || content },
         })
+        const notifyFileChanged = (absolutePath: string) => {
+          for (const win of BrowserWindow.getAllWindows()) {
+            win.webContents.send(IPC_EVENTS.FILE_CHANGED, {
+              path: absolutePath,
+              relativePath: workspaceService.getRelativePath(absolutePath),
+            })
+          }
+        }
         const result = await teamsService.run(
           teamMatch.team.id,
           teamMatch.args || 'Review this workspace',
           abortController.signal,
+          {
+            sessionId,
+            emit: (event) => {
+              if (event.type === 'team_stage') {
+                this.emit(webContents, sessionId, {
+                  type: 'team_stage',
+                  stage: event.stage as import('@codex/shared').TeamPipelineStage,
+                  teamId: String(event.teamId),
+                  detail: typeof event.detail === 'string' ? event.detail : undefined,
+                })
+              } else if (event.type === 'ceo_approval_required') {
+                this.emit(webContents, sessionId, {
+                  type: 'ceo_approval_required',
+                  request: event.request as import('@codex/shared').CeoApprovalRequest,
+                })
+              }
+            },
+            onFileChanged: notifyFileChanged,
+            requestToolApproval: async (request) => {
+              this.emit(webContents, sessionId, {
+                type: 'approval_required',
+                toolCallId: request.toolCallId,
+                tool: request.tool,
+                path: request.path,
+                relativePath: request.relativePath,
+                oldContent: request.oldContent,
+                newContent: request.newContent,
+                summary: request.summary,
+                action: request.action,
+              })
+              return approvalService.waitForApproval(sessionId, request.toolCallId)
+            },
+          },
         )
         this.emit(webContents, sessionId, {
           type: 'tool_call_result',
@@ -189,6 +286,13 @@ export class AgentService {
       reason: decision.reason,
       mode: decision.mode,
     })
+    if (activePersona) {
+      this.emit(webContents, sessionId, {
+        type: 'persona_applied',
+        personaId: activePersona.id,
+        personaName: activePersona.name,
+      })
+    }
 
     const history = this.buildAgentHistory(sessionService.getMessages(sessionId), attachments)
 
@@ -258,6 +362,7 @@ export class AgentService {
           abortController,
           rulesPrompt,
           skillPrompt,
+          personaPrompt,
           permissions,
           runLimited,
           notifyFileChanged,
@@ -273,16 +378,27 @@ export class AgentService {
             latencyMs: outcome.latencyMs,
             usage: outcome.usage,
           })
+          const trace: TurnTrace = {
+            personaId: activePersona?.id,
+            personaName: activePersona?.name,
+            provider: runtime.provider,
+            model: runtime.model,
+            routeReason: decision.reason,
+            usage: usagePayload,
+            toolCount: outcome.toolCalls.length,
+          }
           const saved = sessionService.addMessage(sessionId, {
             sessionId,
             role: 'assistant',
             content: outcome.assistantContent,
             toolCalls: outcome.toolCalls.length > 0 ? outcome.toolCalls : undefined,
+            trace,
           })
           this.emit(webContents, sessionId, {
             type: 'done',
             messageId: saved.id,
             usage: usagePayload,
+            trace,
           })
           void hooksService.onAgentComplete(sessionId)
 
@@ -336,6 +452,7 @@ export class AgentService {
     abortController: AbortController
     rulesPrompt: string
     skillPrompt: string | undefined
+    personaPrompt: string | undefined
     permissions: typeof DEFAULT_AGENT_PERMISSIONS
     runLimited: ReturnType<typeof createConcurrencyLimiter>
     notifyFileChanged: (absolutePath: string) => void
@@ -360,6 +477,7 @@ export class AgentService {
       abortController,
       rulesPrompt,
       skillPrompt,
+      personaPrompt,
       permissions,
       runLimited,
       notifyFileChanged,
@@ -394,6 +512,7 @@ export class AgentService {
         onFileChanged: notifyFileChanged,
         rulesPrompt,
         skillPrompt,
+        personaPrompt,
         subagentDepth: 0,
         runSubagent: async ({ prompt, description }) => {
           const result = await runLimited(() =>
@@ -421,30 +540,48 @@ export class AgentService {
           }
         },
         runTeam: async ({ teamId, prompt }) => {
-          const teams = await collectTeams(root)
-          const team = findTeam(teams, teamId)
-          if (!team) {
-            return { success: false, output: `Error: unknown team "${teamId}"` }
-          }
-          const result = await runTeam({
-            workspaceRoot: root,
-            team,
-            task: prompt,
-            modelId: runtime.model,
-            apiKey: runtime.apiKey,
-            baseUrl: runtime.baseUrl,
-            signal: abortController.signal,
-            llm,
-            registry: defaultToolRegistry,
-            resolvePath: (p) => workspaceService.resolveWithinWorkspace(p),
-            getRelativePath: (p) => workspaceService.getRelativePath(p),
-            rulesPrompt,
-            maxConcurrency: settings.agent.maxSubagents ?? 3,
+          const result = await teamsService.run(teamId, prompt, abortController.signal, {
+            sessionId,
+            emit: (event) => {
+              if (event.type === 'team_stage') {
+                this.emit(webContents, sessionId, {
+                  type: 'team_stage',
+                  stage: event.stage as import('@codex/shared').TeamPipelineStage,
+                  teamId: String(event.teamId),
+                  detail: typeof event.detail === 'string' ? event.detail : undefined,
+                })
+              } else if (event.type === 'ceo_approval_required') {
+                this.emit(webContents, sessionId, {
+                  type: 'ceo_approval_required',
+                  request: event.request as import('@codex/shared').CeoApprovalRequest,
+                })
+              }
+            },
+            onFileChanged: notifyFileChanged,
+            requestToolApproval: async (request) => {
+              this.emit(webContents, sessionId, {
+                type: 'approval_required',
+                toolCallId: request.toolCallId,
+                tool: request.tool,
+                path: request.path,
+                relativePath: request.relativePath,
+                oldContent: request.oldContent,
+                newContent: request.newContent,
+                summary: request.summary,
+                action: request.action,
+              })
+              return approvalService.waitForApproval(sessionId, request.toolCallId)
+            },
           })
           return {
             success: result.success,
             output: `${result.synthesis}\n\n(Board: ${result.boardPath})`,
-            metadata: { teamId: result.teamId, boardPath: result.boardPath },
+            metadata: {
+              teamId: result.teamId,
+              boardPath: result.boardPath,
+              ceoDecision: result.ceoDecision,
+              stages: result.stagesCompleted,
+            },
           }
         },
         getShellEnv: () => agentEnvService.resolve(root),

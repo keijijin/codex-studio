@@ -1,5 +1,10 @@
 import { resolve } from 'node:path'
-import type { LLMProviderId, PermissionProfile, RoutingMode } from '@codex/shared'
+import {
+  normalizePermissionProfile,
+  type LLMProviderId,
+  type PermissionProfile,
+  type RoutingMode,
+} from '@codex/shared'
 
 export type CliCommand = 'agent' | 'team-list' | 'team-run' | 'help'
 
@@ -69,10 +74,11 @@ function parseSharedOptions(args: string[]): Omit<CliArgs, 'command' | 'prompt' 
       model = args.shift() ?? ''
     } else if (token === '--profile') {
       const name = args.shift() ?? 'readonly'
-      if (name !== 'readonly' && name !== 'ask' && name !== 'allow') {
-        throw new Error(`Unknown profile: ${name}`)
+      const normalized = normalizePermissionProfile(name)
+      if (!normalized) {
+        throw new Error(`Unknown profile: ${name}. Use readonly | coding | yolo`)
       }
-      profile = name
+      profile = normalized
     } else if (token === '--routing') {
       const mode = (args.shift() ?? 'fixed') as RoutingMode
       if (mode !== 'fixed' && mode !== 'auto' && mode !== 'fallback-only') {
@@ -98,7 +104,7 @@ function parseSharedOptions(args: string[]): Omit<CliArgs, 'command' | 'prompt' 
     workspace,
     provider,
     model: model || defaultModel(provider),
-    profile: yolo ? 'allow' : profile,
+    profile: yolo ? 'yolo' : profile,
     yolo,
     maxIterations,
     json,

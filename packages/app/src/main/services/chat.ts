@@ -14,6 +14,7 @@ import {
   type ChatStreamEvent,
   type LLMProviderId,
   type Message,
+  type TurnTrace,
 } from '@codex/shared'
 import { sessionService, settingsService } from './settings'
 import { agentService } from './agent'
@@ -30,6 +31,7 @@ import {
 import { formatSkillPrompt, formatSkillUserMessage, compactMessageContents, detectReplyLanguage, formatLanguageInstruction, estimateTokens } from '@codex/agent-core'
 import { rulesService } from './rules-service'
 import { skillsService } from './skills-service'
+import { personasService } from './personas-service'
 import { modelCatalogService } from './model-catalog-service'
 import { assertUnderDailyBudget, recordLlmTurn } from './usage-helpers'
 
@@ -106,6 +108,44 @@ export class ChatService {
     const { sessionId, attachments = [] } = params
     let content = params.content
 
+    const settings = settingsService.get()
+
+    let personaPrompt = ''
+    let activePersona: { id: string; name: string } | undefined
+    const sessionForPersona = sessionService.getSession(sessionId)
+    const personaMatch = await personasService.matchInvocation(content)
+    if (personaMatch?.clear) {
+      sessionService.setPersona(sessionId, undefined)
+      if (!personaMatch.args) {
+        sessionService.addMessage(sessionId, {
+          sessionId,
+          role: 'user',
+          content: '/persona clear',
+        })
+        const saved = sessionService.addMessage(sessionId, {
+          sessionId,
+          role: 'assistant',
+          content: 'このセッションの Persona を解除しました。',
+        })
+        this.emit(webContents, sessionId, { type: 'done', messageId: saved.id })
+        return
+      }
+      content = personaMatch.args
+    } else if (personaMatch) {
+      personaPrompt = `\n\n${personasService.formatPrompt(personaMatch.persona)}`
+      activePersona = { id: personaMatch.persona.id, name: personaMatch.persona.name }
+      sessionService.setPersona(sessionId, personaMatch.persona.name)
+      content = personaMatch.args || personasService.formatUserMessage(personaMatch.persona, '')
+    } else {
+      const stickyOrDefault =
+        (await personasService.resolveDefault(sessionForPersona?.personaName)) ??
+        (await personasService.resolveDefault(settings.agent.defaultPersona))
+      if (stickyOrDefault) {
+        personaPrompt = `\n\n${personasService.formatPrompt(stickyOrDefault)}`
+        activePersona = { id: stickyOrDefault.id, name: stickyOrDefault.name }
+      }
+    }
+
     const skillMatch = await skillsService.matchInvocation(content)
     let skillPrompt = ''
     if (skillMatch) {
@@ -113,7 +153,6 @@ export class ChatService {
       content = formatSkillUserMessage(skillMatch.skill, skillMatch.args)
     }
 
-    const settings = settingsService.get()
     const budgetError = await assertUnderDailyBudget(settings)
     if (budgetError) {
       this.emit(webContents, sessionId, { type: 'error', message: budgetError })
@@ -154,8 +193,17 @@ export class ChatService {
       ...(params.contextPaths ?? []),
       ...attachments.map((a) => a.path),
     ]
-    const rulesPrompt = (await rulesService.buildPrompt(contextPaths)) + skillPrompt
+    const rulesPrompt =
+      (await rulesService.buildPrompt(contextPaths)) + personaPrompt + skillPrompt
     let llmMessages = this.buildMessages(history, attachments, rulesPrompt)
+
+    if (activePersona) {
+      this.emit(webContents, sessionId, {
+        type: 'persona_applied',
+        personaId: activePersona.id,
+        personaName: activePersona.name,
+      })
+    }
 
     // Soft trim Ask context using the same compact threshold as Agent
     const askBudget = settings.agent.compactTokenThreshold
@@ -253,15 +301,26 @@ export class ChatService {
             latencyMs: Date.now() - startedAt,
             usage: turnUsage,
           })
+          const trace: TurnTrace = {
+            personaId: activePersona?.id,
+            personaName: activePersona?.name,
+            provider: runtime.provider,
+            model: runtime.model,
+            routeReason: decision.reason,
+            usage: usagePayload,
+            toolCount: 0,
+          }
           const saved = sessionService.addMessage(sessionId, {
             sessionId,
             role: 'assistant',
             content: assistantContent,
+            trace,
           })
           this.emit(webContents, sessionId, {
             type: 'done',
             messageId: saved.id,
             usage: usagePayload,
+            trace,
           })
           return
         }

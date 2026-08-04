@@ -12,6 +12,7 @@ import { agentEnvService } from '../services/agent-env-service'
 import { modelCatalogService } from '../services/model-catalog-service'
 import { rulesService } from '../services/rules-service'
 import { skillsService } from '../services/skills-service'
+import { personasService } from '../services/personas-service'
 import { hooksService } from '../services/hooks-service'
 import { assertFilePath, assertNonEmptyString, assertSessionId, assertTerminalId } from '../utils/validate-ipc'
 import { redactSettingsForRenderer } from '../services/settings-redact'
@@ -140,12 +141,32 @@ export function registerIpcHandlers(): void {
     return sessionService.setMode(assertSessionId(sessionId), mode)
   })
 
+  ipcMain.handle(
+    IPC_CHANNELS.SESSION_SET_PERSONA,
+    (_event, sessionId: string, personaName: string | null | undefined) => {
+      return sessionService.setPersona(
+        assertSessionId(sessionId),
+        personaName == null || personaName === '' ? undefined : String(personaName),
+      )
+    },
+  )
+
   ipcMain.handle(IPC_CHANNELS.AGENT_APPROVAL_RESPOND, (_event, sessionId: string, toolCallId: string, approved: boolean) => {
     const sid = assertSessionId(sessionId)
     const tid = assertNonEmptyString(toolCallId, 'toolCallId')
     agentService.respondApproval(sid, tid, approved)
     void auditLog('agent:approval', { sessionId: sid, toolCallId: tid, approved })
   })
+
+  ipcMain.handle(
+    IPC_CHANNELS.CEO_APPROVAL_RESPOND,
+    (_event, sessionId: string, approvalId: string, response) => {
+      const sid = assertSessionId(sessionId)
+      const aid = assertNonEmptyString(approvalId, 'approvalId')
+      agentService.respondCeoApproval(sid, aid, response)
+      void auditLog('ceo:approval', { sessionId: sid, approvalId: aid, response })
+    },
+  )
 
   ipcMain.handle(IPC_CHANNELS.TERMINAL_CREATE, (event, cwd?: string) => {
     if (cwd !== undefined && typeof cwd !== 'string') {
@@ -202,6 +223,18 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.SKILLS_LIST, async () => {
     return skillsService.list()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PERSONAS_LIST, async () => {
+    return personasService.list()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PERSONAS_SAVE, async (_event, params) => {
+    return personasService.save(params)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PERSONAS_DELETE, async (_event, absolutePath: string) => {
+    await personasService.remove(assertFilePath(absolutePath))
   })
 
   ipcMain.handle(IPC_CHANNELS.CHAT_COMPACT, async (_event, sessionId: string) => {

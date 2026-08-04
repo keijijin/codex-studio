@@ -22,11 +22,16 @@ describe('cli parseArgs', () => {
     expect(args).toMatchObject({
       command: 'agent',
       prompt: 'hello',
-      profile: 'allow',
+      profile: 'yolo',
       json: true,
       provider: 'anthropic',
       yolo: false,
     })
+  })
+
+  it('accepts coding profile and legacy ask alias', () => {
+    expect(parseArgs(['agent', 'hi', '--profile', 'coding']).profile).toBe('coding')
+    expect(parseArgs(['agent', 'hi', '--profile', 'ask']).profile).toBe('coding')
   })
 
   it('parses --routing mode', () => {

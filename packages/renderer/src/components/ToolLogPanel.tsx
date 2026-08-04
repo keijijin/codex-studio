@@ -5,9 +5,16 @@ import { ToolCallCard } from './ToolCallCard'
 interface ToolLogPanelProps {
   toolCalls: ToolCallRecord[]
   onClear?: () => void
+  turnMeta?: {
+    personaName?: string
+    model?: string
+    provider?: string
+    toolCount?: number
+    estimatedCostUsd?: number
+  }
 }
 
-export function ToolLogPanel({ toolCalls, onClear }: ToolLogPanelProps) {
+export function ToolLogPanel({ toolCalls, onClear, turnMeta }: ToolLogPanelProps) {
   const [filter, setFilter] = useState('')
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase()
@@ -22,6 +29,19 @@ export function ToolLogPanel({ toolCalls, onClear }: ToolLogPanelProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {turnMeta && (turnMeta.personaName || turnMeta.model) && (
+        <div className="border-b border-surface-border px-2 py-1.5 text-[10px] text-text-muted">
+          直近ターン
+          {turnMeta.personaName ? ` · Persona: ${turnMeta.personaName}` : ''}
+          {turnMeta.provider || turnMeta.model
+            ? ` · ${turnMeta.provider ?? '?'}/${turnMeta.model ?? '?'}`
+            : ''}
+          {typeof turnMeta.toolCount === 'number' ? ` · tools ${turnMeta.toolCount}` : ''}
+          {typeof turnMeta.estimatedCostUsd === 'number'
+            ? ` · $${turnMeta.estimatedCostUsd.toFixed(4)}`
+            : ''}
+        </div>
+      )}
       <div className="flex items-center gap-2 border-b border-surface-border px-2 py-1.5">
         <input
           type="search"

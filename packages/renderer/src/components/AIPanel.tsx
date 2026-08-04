@@ -1,11 +1,18 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useAppStore } from '@renderer/store/app-store'
 import { ChatInput } from './ChatInput'
 import { MessageList } from './MessageList'
 import { ToolLogPanel } from './ToolLogPanel'
 import { useSettingsDialog } from './SettingsDialog'
 import { ApprovalDialog } from './ApprovalDialog'
-import { isRedactedApiKey, type RoutingMode, type SessionMode } from '@codex/shared'
+import { CeoApprovalDialog } from './CeoApprovalDialog'
+import {
+  IPC_CHANNELS,
+  isRedactedApiKey,
+  type PersonaFile,
+  type RoutingMode,
+  type SessionMode,
+} from '@codex/shared'
 
 const ROUTING_QUICK: { id: RoutingMode; label: string; title: string }[] = [
   { id: 'fixed', label: 'Fixed', title: '既定モデルのみ（固定）' },
@@ -26,6 +33,8 @@ export function AIPanel() {
   const streamingToolCalls = useAppStore((s) => s.streamingToolCalls)
   const sessionToolLog = useAppStore((s) => s.sessionToolLog)
   const lastUsage = useAppStore((s) => s.lastUsage)
+  const lastTrace = useAppStore((s) => s.lastTrace)
+  const activePersona = useAppStore((s) => s.activePersona)
   const isStreaming = useAppStore((s) => s.isStreaming)
   const chatError = useAppStore((s) => s.chatError)
   const routingInfo = useAppStore((s) => s.routingInfo)
@@ -37,14 +46,30 @@ export function AIPanel() {
   const cancelChat = useAppStore((s) => s.cancelChat)
   const compactChat = useAppStore((s) => s.compactChat)
   const setSessionMode = useAppStore((s) => s.setSessionMode)
+  const setSessionPersona = useAppStore((s) => s.setSessionPersona)
   const setRoutingMode = useAppStore((s) => s.setRoutingMode)
   const pendingApproval = useAppStore((s) => s.pendingApproval)
+  const pendingCeoApproval = useAppStore((s) => s.pendingCeoApproval)
+  const teamStage = useAppStore((s) => s.teamStage)
   const respondApproval = useAppStore((s) => s.respondApproval)
+  const respondCeoApproval = useAppStore((s) => s.respondCeoApproval)
   const toggleAiPanel = useAppStore((s) => s.toggleAiPanel)
   const clearSessionToolLog = useAppStore((s) => s.clearSessionToolLog)
   const { openSettings, settingsDialog } = useSettingsDialog()
   const scrollRef = useRef<HTMLDivElement>(null)
   const [panelTab, setPanelTab] = useState<'chat' | 'tools'>('chat')
+  const [personas, setPersonas] = useState<PersonaFile[]>([])
+
+  useEffect(() => {
+    if (!workspace) {
+      setPersonas([])
+      return
+    }
+    void window.codex
+      .invoke(IPC_CHANNELS.PERSONAS_LIST)
+      .then(setPersonas)
+      .catch(() => setPersonas([]))
+  }, [workspace])
 
   const hasApiKey =
     settings?.models.defaultProvider === 'ollama'
@@ -107,6 +132,12 @@ export function AIPanel() {
         <ApprovalDialog
           request={pendingApproval}
           onRespond={(approved) => void respondApproval(approved)}
+        />
+      )}
+      {pendingCeoApproval && (
+        <CeoApprovalDialog
+          request={pendingCeoApproval}
+          onRespond={(decision, note) => void respondCeoApproval(decision, note)}
         />
       )}
 
@@ -209,6 +240,35 @@ export function AIPanel() {
           ))}
         </div>
 
+        {teamStage && (
+          <p className="mt-2 truncate text-[11px] text-accent" title={teamStage.detail}>
+            Team {teamStage.teamId}: {teamStage.stage}
+            {teamStage.detail ? ` · ${teamStage.detail}` : ''}
+          </p>
+        )}
+
+        <label className="mt-2 block text-[10px] text-text-muted" htmlFor="session-persona">
+          Persona（セッション固定）
+        </label>
+        <select
+          id="session-persona"
+          className="mt-0.5 w-full rounded border border-surface-border bg-surface px-2 py-1 text-xs"
+          disabled={isStreaming}
+          value={activePersona?.personaName ?? ''}
+          onChange={(e) => {
+            const v = e.target.value
+            void setSessionPersona(v || null)
+          }}
+        >
+          <option value="">なし（既定に従う）</option>
+          {personas.map((p) => (
+            <option key={p.id} value={p.name} title={p.description}>
+              {p.name}
+              {p.description ? ` — ${p.description.slice(0, 40)}` : ''}
+            </option>
+          ))}
+        </select>
+
         <div className="mt-2 flex gap-1" role="tablist" aria-label="パネル">
           <button
             type="button"
@@ -236,6 +296,12 @@ export function AIPanel() {
 
         <p className="mt-2 text-xs text-text-muted">
           {sessionMode === 'agent' ? 'Agent' : 'Ask'} · {providerLabel}: {modelLabel ?? 'gpt-4o'}
+          {(activePersona?.personaName || lastTrace?.personaName) && (
+            <>
+              {' · '}
+              Persona: {activePersona?.personaName ?? lastTrace?.personaName}
+            </>
+          )}
           {!hasApiKey && (
             <>
               {' · '}
@@ -264,6 +330,7 @@ export function AIPanel() {
             {lastUsage.cachedInputTokens > 0 ? ` (cache ${lastUsage.cachedInputTokens})` : ''}
             {' / '}out {lastUsage.outputTokens} · {lastUsage.latencyMs}ms · $
             {lastUsage.estimatedCostUsd.toFixed(4)}
+            {typeof lastTrace?.toolCount === 'number' ? ` · tools ${lastTrace.toolCount}` : ''}
           </p>
         )}
       </div>
@@ -285,7 +352,17 @@ export function AIPanel() {
         </div>
       ) : (
         <div className="min-h-0 flex-1">
-          <ToolLogPanel toolCalls={sessionToolLog} onClear={clearSessionToolLog} />
+          <ToolLogPanel
+            toolCalls={sessionToolLog}
+            onClear={clearSessionToolLog}
+            turnMeta={{
+              personaName: activePersona?.personaName ?? lastTrace?.personaName,
+              model: routingInfo?.model ?? lastTrace?.model ?? modelLabel,
+              provider: routingInfo?.provider ?? lastTrace?.provider,
+              toolCount: lastTrace?.toolCount ?? sessionToolLog.length,
+              estimatedCostUsd: lastUsage?.estimatedCostUsd,
+            }}
+          />
         </div>
       )}
 

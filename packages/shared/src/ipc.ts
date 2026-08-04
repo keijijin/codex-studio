@@ -12,6 +12,8 @@ import type { LLMProviderId, ModelInfo } from './types'
 import type { SessionMode } from './agent'
 import type { RuleFile, RuleSaveParams } from './rules'
 import type { SkillFile } from './skills'
+import type { PersonaFile, PersonaSaveParams } from './personas'
+import type { CeoApprovalResponse } from './ceo-approval'
 import type { LlmUsageRecord } from './usage'
 
 /** IPC channel names (invoke) */
@@ -39,7 +41,9 @@ export const IPC_CHANNELS = {
   MODEL_CATALOG_GET: 'models:catalogGet',
   MODEL_CATALOG_REFRESH: 'models:catalogRefresh',
   SESSION_SET_MODE: 'session:setMode',
+  SESSION_SET_PERSONA: 'session:setPersona',
   AGENT_APPROVAL_RESPOND: 'agent:approvalRespond',
+  CEO_APPROVAL_RESPOND: 'ceo:approvalRespond',
   TERMINAL_CREATE: 'terminal:create',
   TERMINAL_WRITE: 'terminal:write',
   TERMINAL_RESIZE: 'terminal:resize',
@@ -51,6 +55,9 @@ export const IPC_CHANNELS = {
   RULES_SAVE: 'rules:save',
   RULES_DELETE: 'rules:delete',
   SKILLS_LIST: 'skills:list',
+  PERSONAS_LIST: 'personas:list',
+  PERSONAS_SAVE: 'personas:save',
+  PERSONAS_DELETE: 'personas:delete',
   CHAT_COMPACT: 'chat:compact',
   USAGE_RECENT: 'usage:recent',
   USAGE_DAILY: 'usage:daily',
@@ -119,7 +126,15 @@ export interface IpcInvokeMap {
     }
   }
   [IPC_CHANNELS.SESSION_SET_MODE]: { args: [sessionId: string, mode: SessionMode]; result: Session }
+  [IPC_CHANNELS.SESSION_SET_PERSONA]: {
+    args: [sessionId: string, personaName: string | null | undefined]
+    result: Session
+  }
   [IPC_CHANNELS.AGENT_APPROVAL_RESPOND]: { args: [sessionId: string, toolCallId: string, approved: boolean]; result: void }
+  [IPC_CHANNELS.CEO_APPROVAL_RESPOND]: {
+    args: [sessionId: string, approvalId: string, response: CeoApprovalResponse]
+    result: void
+  }
   [IPC_CHANNELS.TERMINAL_CREATE]: { args: [cwd?: string]; result: { id: string } }
   [IPC_CHANNELS.TERMINAL_WRITE]: { args: [id: string, data: string]; result: void }
   [IPC_CHANNELS.TERMINAL_RESIZE]: { args: [id: string, cols: number, rows: number]; result: void }
@@ -142,6 +157,9 @@ export interface IpcInvokeMap {
   [IPC_CHANNELS.RULES_SAVE]: { args: [params: RuleSaveParams]; result: RuleFile }
   [IPC_CHANNELS.RULES_DELETE]: { args: [absolutePath: string]; result: void }
   [IPC_CHANNELS.SKILLS_LIST]: { args: []; result: SkillFile[] }
+  [IPC_CHANNELS.PERSONAS_LIST]: { args: []; result: PersonaFile[] }
+  [IPC_CHANNELS.PERSONAS_SAVE]: { args: [params: PersonaSaveParams]; result: PersonaFile }
+  [IPC_CHANNELS.PERSONAS_DELETE]: { args: [absolutePath: string]; result: void }
   [IPC_CHANNELS.CHAT_COMPACT]: { args: [sessionId: string]; result: Message[] }
   [IPC_CHANNELS.USAGE_RECENT]: { args: [limit?: number]; result: LlmUsageRecord[] }
   [IPC_CHANNELS.USAGE_DAILY]: { args: []; result: { date: string; estimatedCostUsd: number; calls: number } }

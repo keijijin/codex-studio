@@ -9,21 +9,24 @@
       "name": "Correctness reviewer",
       "goal": "Find bugs, edge cases, regressions, and missing error handling. Prefer concrete file paths.",
       "tools": ["Read", "Grep", "Glob"],
-      "skill": "review"
+      "skill": "review",
+      "persona": "strict-reviewer"
     },
     {
       "id": "security",
       "name": "Security reviewer",
       "goal": "Find security issues: secrets, path traversal, injection, unsafe IPC, XSS.",
       "tools": ["Read", "Grep", "Glob"],
-      "skill": "security"
+      "skill": "security",
+      "persona": "strict-reviewer"
     },
     {
       "id": "lead",
       "name": "Lead synthesizer",
       "goal": "Merge role reports into a prioritized list without duplicating findings.",
       "synthesize": true,
-      "tools": ["Read", "Grep", "Glob"]
+      "tools": ["Read", "Grep", "Glob"],
+      "persona": "minimal-coder"
     }
   ]
 }

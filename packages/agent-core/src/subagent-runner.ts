@@ -24,6 +24,7 @@ export interface SubagentTaskParams {
   getRelativePath: (absolutePath: string) => string
   rulesPrompt?: string
   skillPrompt?: string
+  personaPrompt?: string
   maxIterations?: number
   /** Override default read-only tool set */
   enabledTools?: string[]
@@ -79,6 +80,7 @@ export async function runSubagentTask(params: SubagentTaskParams): Promise<Subag
     getRelativePath: params.getRelativePath,
     rulesPrompt: params.rulesPrompt ?? '',
     skillPrompt: params.skillPrompt,
+    personaPrompt: params.personaPrompt,
     subagentDepth: depth,
     requestApproval: async () => false,
   }

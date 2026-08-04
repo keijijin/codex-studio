@@ -34,9 +34,9 @@ Options:
   -w, --workspace <path>   Workspace root (default: cwd)
   -p, --provider <id>      openai | anthropic | xai | ollama (default: openai)
   -m, --model <id>         Model id
-  --profile <name>         readonly | ask | allow (default: readonly)
+  --profile <name>         readonly | coding | yolo (default: readonly; ask→coding, allow→yolo)
   --routing <mode>         fixed | auto | fallback-only (default: fixed)
-  --yolo                   Allow all tools (same as --profile allow)
+  --yolo                   Allow all tools (same as --profile yolo)
   --max-iterations <n>     Tool loop limit (default: 50)
   --json                   Print final result as JSON
   -h, --help               Show help
@@ -130,7 +130,7 @@ async function runAgentOnce(
     baseUrl: creds.baseUrl,
     maxIterations: args.maxIterations,
     permissionProfile: args.profile,
-    yoloMode: args.yolo || args.profile === 'allow',
+    yoloMode: args.yolo || args.profile === 'yolo',
     onEvent: (event) => {
       if (args.json) return
       if (event.type === 'text_delta') {
@@ -219,8 +219,16 @@ async function runAgent(args: CliArgs): Promise<HeadlessAgentResult & {
   }
 }
 
+function extraTeamsDirs(): string[] {
+  return [
+    join(homedir(), '.codex-studio', 'teams'),
+    // When CLI cwd is the product repo, pick up built-in teams even if -w points elsewhere
+    join(process.cwd(), '.codex', 'teams'),
+  ]
+}
+
 async function listTeams(args: CliArgs): Promise<void> {
-  const teams = await collectTeams(args.workspace)
+  const teams = await collectTeams(args.workspace, { extraTeamsDirs: extraTeamsDirs() })
   const skills = await collectSkills(args.workspace, {
     globalSkillsDir: join(homedir(), '.codex-studio', 'skills'),
   })
@@ -229,7 +237,7 @@ async function listTeams(args: CliArgs): Promise<void> {
     return
   }
   if (teams.length === 0) {
-    console.log('No teams found. Add .codex/teams/<id>/team.json')
+    console.log('No teams found. Add .codex/teams/<id>/team.json or ~/.codex-studio/teams/')
   } else {
     console.log('Teams:')
     for (const t of teams) {
@@ -237,6 +245,7 @@ async function listTeams(args: CliArgs): Promise<void> {
     }
   }
   console.log(`\nSkills (workspace + ~/.codex-studio/skills): ${skills.map((s) => s.name).join(', ') || '(none)'}`)
+  console.log('Teams also load from ~/.codex-studio/teams and the CLI cwd .codex/teams')
 }
 
 async function runTeamCli(args: CliArgs): Promise<void> {
@@ -250,10 +259,11 @@ async function runTeamCli(args: CliArgs): Promise<void> {
   }
   const { apiKey, baseUrl } = creds
   const workspaceRoot = resolve(args.workspace)
-  const teams = await collectTeams(workspaceRoot)
+  const teams = await collectTeams(workspaceRoot, { extraTeamsDirs: extraTeamsDirs() })
   const team = findTeam(teams, args.teamId)
   if (!team) {
-    throw new Error(`Unknown team: ${args.teamId}`)
+    const available = teams.map((t) => t.id).join(', ') || '(none)'
+    throw new Error(`Unknown team: ${args.teamId}. Available: ${available}`)
   }
   const llm = getProviderInstance(args.provider)
   if (!args.json) {

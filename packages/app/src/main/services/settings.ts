@@ -164,6 +164,11 @@ export class SettingsService {
     } else {
       agent.maxSubagents = Math.min(8, Math.max(1, Math.floor(agent.maxSubagents)))
     }
+    if (typeof agent.defaultPersona !== 'string') {
+      agent.defaultPersona = DEFAULT_SETTINGS.agent.defaultPersona
+    } else {
+      agent.defaultPersona = agent.defaultPersona.trim() || undefined
+    }
     const cost = {
       ...DEFAULT_COST_SETTINGS,
       ...stored.cost,
@@ -421,6 +426,28 @@ export class SessionService {
       throw new Error('Session not found')
     }
     const updated = { ...session, mode, updatedAt: new Date().toISOString() }
+    store.set(
+      'sessions',
+      sessions.map((s) => (s.id === sessionId ? updated : s)),
+    )
+    return updated
+  }
+
+  setPersona(sessionId: string, personaName: string | undefined): Session {
+    const sessions = store.get('sessions')
+    const session = sessions.find((s) => s.id === sessionId)
+    if (!session) {
+      throw new Error('Session not found')
+    }
+    const nextName = personaName?.trim() || undefined
+    const updated: Session = {
+      ...session,
+      personaName: nextName,
+      updatedAt: new Date().toISOString(),
+    }
+    if (!nextName) {
+      delete updated.personaName
+    }
     store.set(
       'sessions',
       sessions.map((s) => (s.id === sessionId ? updated : s)),

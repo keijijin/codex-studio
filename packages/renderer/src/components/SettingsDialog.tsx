@@ -9,13 +9,16 @@ import {
   DEFAULT_FALLBACK_CHAIN,
   DEFAULT_PRESENTATION_SETTINGS,
   DEFAULT_VIDEO_SETTINGS,
+  PERMISSION_PROFILES,
   isRedactedApiKey,
+  matchPermissionProfile,
   type AgentPermissions,
   type CostSettings,
   type LLMProviderId,
   type ModelCandidate,
   type ModelInfo,
   type PermissionAction,
+  type PermissionProfile,
   type PresentationSettings,
   type PresentationThemeId,
   type RoutingMode,
@@ -25,6 +28,7 @@ import {
 import { useAppStore } from '@renderer/store/app-store'
 import { hasCodexApi } from './ErrorBoundary'
 import { RulesSettings } from './RulesSettings'
+import { PersonasSettings } from './PersonasSettings'
 
 const overlayStyle: CSSProperties = {
   position: 'fixed',
@@ -106,7 +110,8 @@ interface SettingsFormProps {
 }
 
 export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) {
-  const [tab, setTab] = useState<'models' | 'rules'>('models')
+  const [tab, setTab] = useState<'models' | 'rules' | 'personas'>('models')
+  const [personaOptions, setPersonaOptions] = useState<string[]>([])
   const [openaiKey, setOpenaiKey] = useState('')
   const [anthropicKey, setAnthropicKey] = useState('')
   const [xaiKey, setXaiKey] = useState('')
@@ -114,6 +119,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
   const [yoloMode, setYoloMode] = useState(false)
   const [maxIterations, setMaxIterations] = useState(100)
   const [permissions, setPermissions] = useState<AgentPermissions>({ ...DEFAULT_AGENT_PERMISSIONS })
+  const [defaultPersona, setDefaultPersona] = useState('')
   const [compactTokenThreshold, setCompactTokenThreshold] = useState(40_000)
   const [autoMemory, setAutoMemory] = useState(false)
   const [maxSubagents, setMaxSubagents] = useState(3)
@@ -209,6 +215,13 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
           ...DEFAULT_AGENT_PERMISSIONS,
           ...settings.agent.permissions,
         })
+        setDefaultPersona(settings.agent.defaultPersona ?? '')
+        try {
+          const list = await window.codex.invoke(IPC_CHANNELS.PERSONAS_LIST)
+          setPersonaOptions(list.map((p) => p.name))
+        } catch {
+          setPersonaOptions([])
+        }
         setCompactTokenThreshold(settings.agent.compactTokenThreshold ?? 40_000)
         setAutoMemory(Boolean(settings.agent.autoMemory))
         setMaxSubagents(settings.agent.maxSubagents ?? 3)
@@ -256,6 +269,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
           yoloMode,
           maxIterations: Math.min(500, Math.max(5, Math.floor(maxIterations) || 100)),
           permissions,
+          defaultPersona: defaultPersona.trim() || undefined,
           compactTokenThreshold: Math.max(0, Math.floor(compactTokenThreshold) || 0),
           autoMemory,
           maxSubagents: Math.min(8, Math.max(1, Math.floor(maxSubagents) || 3)),
@@ -292,7 +306,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
     ? { ...panelStyle, maxWidth: 560, margin: '0 auto', textAlign: 'left' }
     : panelStyle
 
-  const tabBtn = (id: 'models' | 'rules', _label: string): CSSProperties => ({
+  const tabBtn = (id: 'models' | 'rules' | 'personas', _label: string): CSSProperties => ({
     flex: 1,
     padding: '8px 12px',
     fontSize: 13,
@@ -307,18 +321,34 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
     <form style={wrapperStyle} onSubmit={(e) => void handleSubmit(e)}>
       <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: '#ffffff' }}>設定</h2>
 
-      <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+      <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
         <button type="button" style={tabBtn('models', 'モデル')} onClick={() => setTab('models')}>
           モデル
         </button>
         <button type="button" style={tabBtn('rules', 'Rules')} onClick={() => setTab('rules')}>
           Rules
         </button>
+        <button
+          type="button"
+          style={tabBtn('personas', 'Personas')}
+          onClick={() => setTab('personas')}
+        >
+          Personas
+        </button>
       </div>
 
       {tab === 'rules' ? (
         <div style={{ marginTop: 16 }}>
           <RulesSettings />
+          <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}>
+            {onCancel && (
+              <button type="button" style={btnSecondary} onClick={onCancel}>閉じる</button>
+            )}
+          </div>
+        </div>
+      ) : tab === 'personas' ? (
+        <div style={{ marginTop: 16 }}>
+          <PersonasSettings />
           <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}>
             {onCancel && (
               <button type="button" style={btnSecondary} onClick={onCancel}>閉じる</button>
@@ -641,11 +671,62 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                 1 回の Agent 実行で許可するツール呼び出しループの上限（5〜500）
               </p>
 
+              <p style={{ ...labelStyle, marginTop: 16, marginBottom: 8 }}>
+                権限プリセット
+                {(() => {
+                  const matched = matchPermissionProfile(permissions, yoloMode)
+                  return (
+                    <span style={{ marginLeft: 8, color: matched === 'custom' ? '#fbbf24' : '#858585' }}>
+                      （現在: {matched}）
+                    </span>
+                  )
+                })()}
+              </p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} role="group" aria-label="権限プリセット">
+                {(
+                  [
+                    ['readonly', '調査のみ'],
+                    ['coding', '通常開発'],
+                    ['yolo', '全自動'],
+                  ] as const
+                ).map(([id, label]) => {
+                  const active = matchPermissionProfile(permissions, yoloMode) === id
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      style={{
+                        ...btnSecondary,
+                        padding: '6px 12px',
+                        fontSize: 12,
+                        color: active ? '#fff' : '#cccccc',
+                        backgroundColor: active ? (id === 'yolo' ? '#b45309' : '#0078d4') : 'transparent',
+                        borderColor: active ? 'transparent' : '#3c3c3c',
+                      }}
+                      onClick={() => {
+                        const preset = id as PermissionProfile
+                        setPermissions({ ...PERMISSION_PROFILES[preset] })
+                        setYoloMode(preset === 'yolo')
+                      }}
+                    >
+                      {id} · {label}
+                    </button>
+                  )
+                })}
+              </div>
+              <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6e6e6e' }}>
+                readonly = 読取のみ / coding = 編集・Shell は承認 / yolo = すべて自動（自己責任）
+              </p>
+
               <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8, marginTop: 16 }}>
                 <input
                   type="checkbox"
                   checked={yoloMode}
-                  onChange={(e) => setYoloMode(e.target.checked)}
+                  onChange={(e) => {
+                    const on = e.target.checked
+                    setYoloMode(on)
+                    if (on) setPermissions({ ...PERMISSION_PROFILES.yolo })
+                  }}
                 />
                 YOLO モード（Agent の書込・Shell を承認なしで実行）
               </label>
@@ -653,7 +734,30 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                 有効にするとファイル変更やコマンド実行が自動適用されます。自己責任で使用してください。
               </p>
 
-              <p style={{ ...labelStyle, marginTop: 20, marginBottom: 0 }}>ツール権限（YOLO が OFF のとき）</p>
+              <label style={labelStyle} htmlFor="default-persona">
+                既定 Persona（任意・新セッション向け）
+              </label>
+              <select
+                id="default-persona"
+                style={selectStyle}
+                value={defaultPersona}
+                onChange={(e) => setDefaultPersona(e.target.value)}
+              >
+                <option value="">なし</option>
+                {personaOptions.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+                {defaultPersona && !personaOptions.includes(defaultPersona) ? (
+                  <option value={defaultPersona}>{defaultPersona}（未検出）</option>
+                ) : null}
+              </select>
+              <p style={{ margin: '4px 0 0', fontSize: 11, color: '#6e6e6e' }}>
+                セッション固定は AI パネルの Persona ピッカー、または `/persona` を使用
+              </p>
+
+              <p style={{ ...labelStyle, marginTop: 20, marginBottom: 0 }}>ツール権限（詳細・カスタム）</p>
               {([
                 ['read', '読取（Read / Grep / Glob / Task）'],
                 ['edit', '編集（Write / StrReplace / Delete / MemoryAppend）'],

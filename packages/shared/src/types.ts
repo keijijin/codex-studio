@@ -20,11 +20,14 @@ export interface Session {
   title: string
   mode: 'ask' | 'agent' | 'plan'
   modelId: string
+  /** Sticky persona name for this session (Personas AI) */
+  personaName?: string
   createdAt: string
   updatedAt: string
 }
 
 import type { ToolCallRecord } from './agent'
+import type { TurnTrace } from './personas'
 
 export interface Message {
   id: string
@@ -33,6 +36,8 @@ export interface Message {
   content: string
   attachments?: Attachment[]
   toolCalls?: ToolCallRecord[]
+  /** Turn-level metadata (persona / model / cost) */
+  trace?: TurnTrace
   createdAt: string
 }
 
@@ -155,6 +160,8 @@ export interface AppSettings {
     autoMemory: boolean
     /** Max concurrent Task subagents (1–8) */
     maxSubagents: number
+    /** Default persona name (without /persona) when invocation omits one */
+    defaultPersona?: string
   }
   /** Cost controls and usage logging */
   cost: CostSettings
