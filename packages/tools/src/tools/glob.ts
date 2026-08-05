@@ -3,7 +3,7 @@ import { join, relative } from 'path'
 import type { Tool, ToolContext, ToolResult } from '../types'
 
 const MAX_RESULTS = 200
-const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', 'out', 'release', '.codex-studio'])
+const IGNORED_DIRS = new Set(['node_modules', '.git', '.codex-studio'])
 
 function globToRegExp(pattern: string): RegExp {
   const normalized = pattern.replace(/\\/g, '/')

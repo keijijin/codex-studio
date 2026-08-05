@@ -30,6 +30,8 @@ export interface AgentRunContext {
   resolvePath: (path: string) => string
   getRelativePath: (absolutePath: string) => string
   onFileChanged?: (absolutePath: string) => void
+  /** Workspace may have changed without a specific path (e.g. Shell). */
+  onWorkspaceChanged?: () => void
   requestApproval?: (request: ApprovalRequest) => Promise<boolean>
   /** Prebuilt rules + project context + memory prompt. */
   rulesPrompt?: string
@@ -174,6 +176,7 @@ export class AgentOrchestrator {
       resolvePath: ctx.resolvePath,
       getRelativePath: ctx.getRelativePath,
       onFileChanged: ctx.onFileChanged,
+      onWorkspaceChanged: ctx.onWorkspaceChanged,
       subagentDepth: depth,
       runSubagent: ctx.runSubagent,
       runTeam: ctx.runTeam,

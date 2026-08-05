@@ -35,6 +35,7 @@ export interface TeamRunUiContext {
   }) => void
   requestToolApproval?: (request: ApprovalRequest) => Promise<boolean>
   onFileChanged?: (absolutePath: string) => void
+  onWorkspaceChanged?: () => void
 }
 
 export class TeamsService {
@@ -126,6 +127,7 @@ export class TeamsService {
       globalPersonasDir: join(homedir(), '.codex-studio', 'personas'),
       getShellEnv: () => resolveAgentShellEnv(root),
       onFileChanged: ui?.onFileChanged,
+      onWorkspaceChanged: ui?.onWorkspaceChanged,
       onStage: (stage: TeamPipelineStage, detail?: string) => {
         ui?.emit({ type: 'team_stage', stage, teamId: team.id, detail })
       },

@@ -61,6 +61,7 @@ export interface RunTeamOptions {
   /** Per-tool approval during execute stage */
   requestApproval?: (request: ApprovalRequest) => Promise<boolean>
   onFileChanged?: (absolutePath: string) => void
+  onWorkspaceChanged?: () => void
   getShellEnv?: () => NodeJS.ProcessEnv
   /** Also load personas from ~/.codex-studio/personas (and extras) */
   globalPersonasDir?: string
@@ -186,6 +187,7 @@ Reply in the user's language.`,
       resolvePath: options.resolvePath,
       getRelativePath: options.getRelativePath,
       onFileChanged: options.onFileChanged,
+      onWorkspaceChanged: options.onWorkspaceChanged,
       getShellEnv: options.getShellEnv,
       rulesPrompt: options.rulesPrompt ?? '',
       skillPrompt,
@@ -252,10 +254,12 @@ export async function runTeam(options: RunTeamOptions): Promise<TeamRunResult> {
     options.onStage?.(stage, detail)
   }
 
-  await appendBoard(
-    boardPath,
-    `## Run ${new Date().toISOString()}\n\n**Task:** ${task}\n`,
-  )
+  const pushBoard = async (section: string) => {
+    await appendBoard(boardPath, section)
+    options.onFileChanged?.(boardPath)
+  }
+
+  await pushBoard(`## Run ${new Date().toISOString()}\n\n**Task:** ${task}\n`)
 
   const roleReports: TeamRunResult['roleReports'] = []
 
@@ -296,7 +300,7 @@ export async function runTeam(options: RunTeamOptions): Promise<TeamRunResult> {
       })
 
       const section = `### Role: ${role.name} (\`${role.id}\`)\n\n${result.output}`
-      await appendBoard(boardPath, section)
+      await pushBoard(section)
       options.onRoleDone?.(role, result.output, result.success)
       return { role, success: result.success, output: result.output }
     }),
@@ -329,7 +333,7 @@ export async function runTeam(options: RunTeamOptions): Promise<TeamRunResult> {
       '',
       'よくある原因: API クォータ超過 (429)、API キー未設定、モデル名・プロバイダの不一致。',
     ].join('\n')
-    await appendBoard(boardPath, `### Synthesis (skipped)\n\n${synthesis}`)
+    await pushBoard(`### Synthesis (skipped)\n\n${synthesis}`)
     if (synthRole) {
       options.onRoleDone?.(synthRole, synthesis, false)
       roleReports.push({ roleId: synthRole.id, success: false, output: synthesis })
@@ -407,7 +411,7 @@ Reply in the user's language.`,
       synthesis = err instanceof Error ? err.message : 'Synthesizer failed'
     }
 
-    await appendBoard(boardPath, `### Synthesis (${synthRole.name})\n\n${synthesis}`)
+    await pushBoard(`### Synthesis (${synthRole.name})\n\n${synthesis}`)
     options.onRoleDone?.(synthRole, synthesis, !synthesis.startsWith('Synthesizer error'))
     roleReports.push({
       roleId: synthRole.id,
@@ -450,8 +454,7 @@ Reply in the user's language.`,
 
     ceoDecision = response.decision
     ceoNote = response.note
-    await appendBoard(
-      boardPath,
+    await pushBoard(
       `### Human CEO decision\n\n- **Decision:** ${response.decision}\n${
         response.note ? `- **Note:** ${response.note}\n` : ''
       }`,
@@ -517,7 +520,7 @@ Reply in the user's language.`,
       execution = execution
         ? `${execution}\n\n### ${role.name}\n\n${result.output}`
         : result.output
-      await appendBoard(boardPath, `### Execution (${role.name})\n\n${result.output}`)
+      await pushBoard(`### Execution (${role.name})\n\n${result.output}`)
       options.onRoleDone?.(role, result.output, result.success)
       roleReports.push({
         roleId: role.id,

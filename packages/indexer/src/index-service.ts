@@ -6,9 +6,7 @@ import { searchInFiles, searchWithRipgrep } from './ripgrep'
 const IGNORED_DIRS = new Set([
   'node_modules',
   '.git',
-  'dist',
-  'out',
-  'release',
+  // Build outputs remain searchable / listed (same as Explorer).
   '.codex-studio',
 ])
 

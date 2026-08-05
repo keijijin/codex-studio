@@ -87,6 +87,7 @@ export const shellTool: Tool = {
 
       proc.on('close', (code) => {
         clearTimeout(timer)
+        ctx.onWorkspaceChanged?.()
         const output = [stdout, stderr].filter(Boolean).join('\n') || '(no output)'
         resolve({
           success: code === 0 && !killed,

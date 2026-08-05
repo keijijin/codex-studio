@@ -10,9 +10,7 @@ import { workspaceService } from './workspace'
 const IGNORED_DIRS = new Set([
   'node_modules',
   '.git',
-  'dist',
-  'out',
-  'release',
+  // Build outputs (dist/out/release) stay visible / watched like source dirs.
   '.codex-studio',
 ])
 
@@ -40,7 +38,8 @@ function broadcastFileChanged(path: string, relativePath: string): void {
 
 export class FileWatcherService {
   private watcher: FSWatcher | null = null
-  private suppressUntil = new Map<string, number>()
+  /** Suppresses editor echo (FILE_CHANGED) only — tree refresh always runs. */
+  private suppressFileChangedUntil = new Map<string, number>()
   private treeRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
   start(rootPath: string): void {
@@ -76,18 +75,24 @@ export class FileWatcherService {
     }
     void this.watcher?.close()
     this.watcher = null
-    this.suppressUntil.clear()
+    this.suppressFileChangedUntil.clear()
   }
 
+  /** Skip reloading the open editor tab for our own write (1s). Tree still updates. */
   markInternalWrite(path: string): void {
-    this.suppressUntil.set(path, Date.now() + 1000)
+    this.suppressFileChangedUntil.set(path, Date.now() + 1000)
   }
 
-  private isSuppressed(path: string): boolean {
-    const until = this.suppressUntil.get(path)
+  /** Debounced push so Explorer re-fetches the full tree. */
+  notifyTreeChanged(): void {
+    this.scheduleTreeRefresh()
+  }
+
+  private isFileChangedSuppressed(path: string): boolean {
+    const until = this.suppressFileChangedUntil.get(path)
     if (!until) return false
     if (Date.now() > until) {
-      this.suppressUntil.delete(path)
+      this.suppressFileChangedUntil.delete(path)
       return false
     }
     return true
@@ -104,9 +109,11 @@ export class FileWatcherService {
   }
 
   private async handleFileUpsert(path: string, rootPath: string): Promise<void> {
-    if (this.isSuppressed(path) || shouldIgnorePath(path)) {
+    if (shouldIgnorePath(path)) {
       return
     }
+
+    const skipFileChanged = this.isFileChangedSuppressed(path)
 
     let fileStat
     try {
@@ -121,15 +128,13 @@ export class FileWatcherService {
     }
 
     await indexService.upsertFile(rootPath, path)
-    broadcastTreeChanged()
-    broadcastFileChanged(path, workspaceService.getRelativePath(path))
+    this.scheduleTreeRefresh()
+    if (!skipFileChanged) {
+      broadcastFileChanged(path, workspaceService.getRelativePath(path))
+    }
   }
 
   private async handleFileRemove(path: string, _rootPath: string): Promise<void> {
-    if (this.isSuppressed(path)) {
-      return
-    }
-
     indexService.removeFile(path)
     this.scheduleTreeRefresh()
   }

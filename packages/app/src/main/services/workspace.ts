@@ -21,9 +21,7 @@ export async function normalizeWorkspaceRoot(path: string): Promise<string> {
 const IGNORED_DIRS = new Set([
   'node_modules',
   '.git',
-  'dist',
-  'out',
-  'release',
+  // Build outputs (dist/out/release) stay visible so users can inspect them.
   '.codex-studio',
 ])
 

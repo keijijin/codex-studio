@@ -17,6 +17,10 @@ import { hasCodexApi } from '@renderer/components/ErrorBoundary'
 import { defaultMdViewMode, type MdViewMode } from '@renderer/utils/files'
 
 const openingPaths = new Set<string>()
+/** Ignore out-of-order WORKSPACE_GET_TREE responses. */
+let fileTreeRefreshGeneration = 0
+let fileTreeRefreshTimer: ReturnType<typeof setTimeout> | null = null
+let fileTreeRefreshWaiters: Array<() => void> = []
 
 interface EditorTab {
   path: string
@@ -36,9 +40,32 @@ function toolLogFromMessages(messages: Message[]): ToolCallRecord[] {
   return log
 }
 
+/** Expand ancestor dirs of `filePath` under the workspace root (for Explorer reveal). */
+function explorerDirsToReveal(filePath: string, workspaceRoot: string | undefined): string[] {
+  if (!workspaceRoot) return []
+  const root = workspaceRoot.replace(/[/\\]+$/, '')
+  const normalized = filePath.replace(/[/\\]+$/, '')
+  const sep = root.includes('\\') ? '\\' : '/'
+  if (!normalized.startsWith(root + sep) && normalized !== root) {
+    return []
+  }
+  const rel = normalized.slice(root.length).replace(/^[/\\]+/, '')
+  const parts = rel.split(/[/\\]/).filter(Boolean)
+  if (parts.length <= 1) return []
+  const dirs: string[] = []
+  let cur = root
+  for (let i = 0; i < parts.length - 1; i++) {
+    cur = `${cur}${sep}${parts[i]}`
+    dirs.push(cur)
+  }
+  return dirs
+}
+
 interface AppState {
   workspace: Workspace | null
   fileTree: FileNode[]
+  /** Absolute dir paths the user has expanded in Explorer (default: all collapsed). */
+  explorerExpanded: Record<string, true>
   tabs: EditorTab[]
   activeTabPath: string | null
   sessions: Session[]
@@ -90,6 +117,9 @@ interface AppState {
   openWorkspace: (path?: string) => Promise<void>
   closeWorkspace: () => Promise<void>
   refreshFileTree: () => Promise<void>
+  toggleExplorerDir: (path: string) => void
+  collapseExplorer: () => void
+  revealInExplorer: (filePath: string) => void
   openFile: (path: string, name: string) => Promise<void>
   openChangedFile: (path: string) => Promise<void>
   closeTab: (path: string) => void
@@ -122,6 +152,7 @@ interface AppState {
 export const useAppStore = create<AppState>((set, get) => ({
   workspace: null,
   fileTree: [],
+  explorerExpanded: {},
   tabs: [],
   activeTabPath: null,
   sessions: [],
@@ -323,6 +354,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       void get().refreshFileTree()
     })
 
+    // External edits (Finder, other apps) may miss FS events — refresh on focus.
+    window.addEventListener('focus', () => {
+      if (get().workspace) void get().refreshFileTree()
+    })
+
     window.codex.on(IPC_EVENTS.MENU_OPEN_FOLDER, () => {
       void get().openWorkspace()
     })
@@ -376,6 +412,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({
         workspace,
         fileTree,
+        explorerExpanded: {},
         tabs: [],
         activeTabPath: null,
         sessions,
@@ -410,6 +447,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       workspace: null,
       fileTree: [],
+      explorerExpanded: {},
       tabs: [],
       activeTabPath: null,
       sessions: [],
@@ -419,14 +457,63 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
   },
 
+  toggleExplorerDir: (path: string) => {
+    const expanded = { ...get().explorerExpanded }
+    if (expanded[path]) {
+      delete expanded[path]
+    } else {
+      expanded[path] = true
+    }
+    set({ explorerExpanded: expanded })
+  },
+
+  collapseExplorer: () => {
+    set({ explorerExpanded: {} })
+  },
+
+  revealInExplorer: (filePath: string) => {
+    const root = get().workspace?.rootPaths[0]
+    const dirs = explorerDirsToReveal(filePath, root)
+    if (dirs.length === 0) return
+    const expanded = { ...get().explorerExpanded }
+    for (const dir of dirs) expanded[dir] = true
+    set({ explorerExpanded: expanded })
+  },
+
   refreshFileTree: async () => {
-    const fileTree = await window.codex.invoke(IPC_CHANNELS.WORKSPACE_GET_TREE)
-    set({ fileTree })
+    // Coalesce bursty watcher/agent events; apply only the latest fetch.
+    await new Promise<void>((resolve) => {
+      fileTreeRefreshWaiters.push(resolve)
+      if (fileTreeRefreshTimer) clearTimeout(fileTreeRefreshTimer)
+      fileTreeRefreshTimer = setTimeout(() => {
+        fileTreeRefreshTimer = null
+        const waiters = fileTreeRefreshWaiters
+        fileTreeRefreshWaiters = []
+        void (async () => {
+          const generation = ++fileTreeRefreshGeneration
+          try {
+            if (!get().workspace) {
+              set({ fileTree: [] })
+            } else {
+              const fileTree = await window.codex.invoke(IPC_CHANNELS.WORKSPACE_GET_TREE)
+              if (generation === fileTreeRefreshGeneration) {
+                set({ fileTree })
+              }
+            }
+          } catch (err) {
+            console.error('[app] refreshFileTree failed:', err)
+          } finally {
+            for (const done of waiters) done()
+          }
+        })()
+      }, 80)
+    })
   },
 
   openFile: async (path: string, name: string) => {
     const { tabs } = get()
     const existing = tabs.find((t) => t.path === path)
+    get().revealInExplorer(path)
     if (existing) {
       set({ activeTabPath: path })
       return
@@ -440,6 +527,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   openChangedFile: async (path: string) => {
+    // Always keep Explorer in sync even if tab reload is deduped/fails.
+    void get().refreshFileTree()
+
     if (openingPaths.has(path)) return
     openingPaths.add(path)
 
@@ -456,7 +546,6 @@ export const useAppStore = create<AppState>((set, get) => ({
           ),
         })
       }
-      await get().refreshFileTree()
     } catch (err) {
       console.error('[app] openChangedFile failed:', path, err)
     } finally {
@@ -488,6 +577,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setActiveTab: (path: string) => {
+    get().revealInExplorer(path)
     set({ activeTabPath: path })
   },
 
@@ -515,6 +605,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       tabs: tabs.map((t) => (t.path === activeTabPath ? { ...t, isDirty: false } : t)),
     })
+    void get().refreshFileTree()
   },
 
   toggleAiPanel: () => {
@@ -527,6 +618,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setSidebarView: (view: SidebarView) => {
     set({ sidebarView: view })
+    if (view === 'explorer' && get().workspace) {
+      void get().refreshFileTree()
+    }
   },
 
   loadSessions: async () => {

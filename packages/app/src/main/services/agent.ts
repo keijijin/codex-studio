@@ -38,6 +38,7 @@ import { personasService } from './personas-service'
 import { teamsService } from './teams-service'
 import { rulesService } from './rules-service'
 import { hooksService } from './hooks-service'
+import { fileWatcherService } from './file-watcher'
 import { sessionService, settingsService } from './settings'
 import { workspaceService } from './workspace'
 import { assertUnderDailyBudget, recordLlmTurn } from './usage-helpers'
@@ -202,12 +203,16 @@ export class AgentService {
           args: { team: teamMatch.team.id, prompt: teamMatch.args || content },
         })
         const notifyFileChanged = (absolutePath: string) => {
+          fileWatcherService.notifyTreeChanged()
           for (const win of BrowserWindow.getAllWindows()) {
             win.webContents.send(IPC_EVENTS.FILE_CHANGED, {
               path: absolutePath,
               relativePath: workspaceService.getRelativePath(absolutePath),
             })
           }
+        }
+        const notifyWorkspaceChanged = () => {
+          fileWatcherService.notifyTreeChanged()
         }
         const result = await teamsService.run(
           teamMatch.team.id,
@@ -231,6 +236,7 @@ export class AgentService {
               }
             },
             onFileChanged: notifyFileChanged,
+            onWorkspaceChanged: notifyWorkspaceChanged,
             requestToolApproval: async (request) => {
               this.emit(webContents, sessionId, {
                 type: 'approval_required',
@@ -297,12 +303,16 @@ export class AgentService {
     const history = this.buildAgentHistory(sessionService.getMessages(sessionId), attachments)
 
     const notifyFileChanged = (absolutePath: string) => {
+      fileWatcherService.notifyTreeChanged()
       for (const win of BrowserWindow.getAllWindows()) {
         win.webContents.send(IPC_EVENTS.FILE_CHANGED, {
           path: absolutePath,
           relativePath: workspaceService.getRelativePath(absolutePath),
         })
       }
+    }
+    const notifyWorkspaceChanged = () => {
+      fileWatcherService.notifyTreeChanged()
     }
 
     const contextPaths = [
@@ -366,6 +376,7 @@ export class AgentService {
           permissions,
           runLimited,
           notifyFileChanged,
+          notifyWorkspaceChanged,
         })
 
         if (outcome.status === 'ok') {
@@ -456,6 +467,7 @@ export class AgentService {
     permissions: typeof DEFAULT_AGENT_PERMISSIONS
     runLimited: ReturnType<typeof createConcurrencyLimiter>
     notifyFileChanged: (absolutePath: string) => void
+    notifyWorkspaceChanged: () => void
   }): Promise<
     | {
         status: 'ok'
@@ -481,6 +493,7 @@ export class AgentService {
       permissions,
       runLimited,
       notifyFileChanged,
+      notifyWorkspaceChanged,
     } = opts
 
     const llm = isE2eMock ? createE2eMockAgentProvider() : getProviderInstance(runtime.provider)
@@ -510,6 +523,7 @@ export class AgentService {
         resolvePath: (p) => workspaceService.resolveWithinWorkspace(p),
         getRelativePath: (p) => workspaceService.getRelativePath(p),
         onFileChanged: notifyFileChanged,
+        onWorkspaceChanged: notifyWorkspaceChanged,
         rulesPrompt,
         skillPrompt,
         personaPrompt,
@@ -558,6 +572,7 @@ export class AgentService {
               }
             },
             onFileChanged: notifyFileChanged,
+            onWorkspaceChanged: notifyWorkspaceChanged,
             requestToolApproval: async (request) => {
               this.emit(webContents, sessionId, {
                 type: 'approval_required',

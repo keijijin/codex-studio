@@ -15,6 +15,8 @@ export interface ToolContext {
   resolvePath: (path: string) => string
   getRelativePath: (absolutePath: string) => string
   onFileChanged?: (absolutePath: string) => void
+  /** Hint that workspace files may have changed (e.g. after Shell). */
+  onWorkspaceChanged?: () => void
   /** Nested subagent depth (0 = parent). Task tool refuses depth >= 1. */
   subagentDepth?: number
   /** Spawn a read-only investigation subagent (wired by agent-core / app). */

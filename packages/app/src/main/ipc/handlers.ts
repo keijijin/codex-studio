@@ -73,7 +73,9 @@ export function registerIpcHandlers(): void {
       throw new Error('Invalid file content')
     }
     await workspaceService.writeFile(target, content)
+    // Avoid editor echo-reload; still push Explorer tree refresh.
     fileWatcherService.markInternalWrite(target)
+    fileWatcherService.notifyTreeChanged()
     void auditLog('file:write', { path: target, bytes: content.length })
     void hooksService.onFileSave(target)
   })
