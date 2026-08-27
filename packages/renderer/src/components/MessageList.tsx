@@ -61,14 +61,15 @@ export function MessageList({
         </div>
       ))}
 
-      {isStreaming && (streamingToolCalls.length > 0 || streamingContent) && (
+          {isStreaming && (streamingToolCalls.length > 0 || streamingContent) && (
         <div className="text-sm">
           <div className="mb-1 text-xs font-medium text-text-secondary">Assistant</div>
           {streamingToolCalls.length > 0 && <ToolCallList toolCalls={streamingToolCalls} />}
           {streamingContent && (
-            <div className="prose prose-invert prose-sm max-w-none">
-              <MarkdownRenderer content={streamingContent} />
-            </div>
+            // Plain text while streaming — full Markdown/Mermaid on every token freezes the UI.
+            <pre className="m-0 whitespace-pre-wrap break-words font-sans text-sm text-text-primary">
+              {streamingContent}
+            </pre>
           )}
           <span className="inline-block h-4 w-1 animate-pulse bg-accent" />
         </div>

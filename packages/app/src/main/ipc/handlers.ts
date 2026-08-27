@@ -17,6 +17,21 @@ import { hooksService } from '../services/hooks-service'
 import { assertFilePath, assertNonEmptyString, assertSessionId, assertTerminalId } from '../utils/validate-ipc'
 import { redactSettingsForRenderer } from '../services/settings-redact'
 import { getDailyUsageSummary, listRecentUsage } from '../services/usage-log'
+import { pathIgnoreService } from '../services/path-ignore-service'
+import { gitService } from '../services/git-service'
+import { replaceInWorkspace } from '../services/workspace-replace'
+import { checkForUpdates, getUpdaterStatus } from '../services/updater'
+import { mcpService } from '../services/mcp-service'
+import { completeInline } from '../services/tab-completion'
+import { exportAuditLog } from '../services/audit-log'
+import { reindexSemanticWorkspace, semanticIndexStats } from '../services/semantic-index'
+
+async function applyIgnoreRules(root: string): Promise<void> {
+  await pathIgnoreService.reload(root)
+  const indexRules = await pathIgnoreService.reloadForIndexing(root)
+  indexService.setIgnoreRules(indexRules)
+  await fileWatcherService.reloadIgnoreRules()
+}
 
 export function registerIpcHandlers(): void {
   indexService.setProgressCallback((status: IndexStatus) => {
@@ -32,6 +47,7 @@ export function registerIpcHandlers(): void {
     settingsService.addRecentWorkspace(root)
     sessionService.rememberWorkspaceId(root, workspace.id)
     agentEnvService.hydrateFromWorkspace(root)
+    await applyIgnoreRules(root)
     fileWatcherService.start(root)
     void indexService.scan(root)
     return workspace
@@ -84,8 +100,24 @@ export function registerIpcHandlers(): void {
     return redactSettingsForRenderer(settingsService.get())
   })
 
-  ipcMain.handle(IPC_CHANNELS.SETTINGS_SET, (_event, partial) => {
-    return redactSettingsForRenderer(settingsService.set(partial))
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_SET, async (_event, partial) => {
+    const before = settingsService.get().general.showBuildOutputs
+    const updated = settingsService.set(partial)
+    const after = updated.general.showBuildOutputs
+    if (before !== after) {
+      const root = workspaceService.getRoot()
+      if (root) {
+        await applyIgnoreRules(root)
+        void indexService.scan(root)
+        fileWatcherService.notifyTreeChanged()
+      }
+    }
+    if (partial && typeof partial === 'object' && 'mcpServers' in partial) {
+      void mcpService.syncFromSettings(updated.mcpServers).catch((err) => {
+        console.warn('[mcp] sync after settings failed', err)
+      })
+    }
+    return redactSettingsForRenderer(updated)
   })
 
   ipcMain.handle(IPC_CHANNELS.SESSION_LIST, () => {
@@ -116,6 +148,25 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.INDEX_SEARCH, async (_event, query: string) => {
     return indexService.search(query)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.INDEX_REPLACE, async (_event, params) => {
+    if (!params || typeof params !== 'object') {
+      throw new Error('Invalid replace params')
+    }
+    const query = assertNonEmptyString(String((params as { query?: string }).query ?? ''), 'query')
+    const replacement = String((params as { replacement?: string }).replacement ?? '')
+    const rawPaths = (params as { paths?: unknown }).paths
+    const paths = Array.isArray(rawPaths)
+      ? rawPaths.filter((p): p is string => typeof p === 'string').map((p) => assertFilePath(p))
+      : undefined
+    const result = await replaceInWorkspace({ query, replacement, paths })
+    void auditLog('index:replace', {
+      query,
+      filesChanged: result.filesChanged,
+      occurrences: result.occurrences,
+    })
+    return result
   })
 
   ipcMain.handle(IPC_CHANNELS.CHAT_SEND, async (event, params) => {
@@ -249,5 +300,81 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.USAGE_DAILY, async () => {
     return getDailyUsageSummary()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.GIT_STATUS, async () => {
+    return gitService.status()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.GIT_STAGE, async (_event, paths: string[]) => {
+    if (!Array.isArray(paths) || paths.some((p) => typeof p !== 'string')) {
+      throw new Error('Invalid paths')
+    }
+    await gitService.stage(paths.map((p) => assertFilePath(p)))
+  })
+
+  ipcMain.handle(IPC_CHANNELS.GIT_UNSTAGE, async (_event, paths: string[]) => {
+    if (!Array.isArray(paths) || paths.some((p) => typeof p !== 'string')) {
+      throw new Error('Invalid paths')
+    }
+    await gitService.unstage(paths.map((p) => assertFilePath(p)))
+  })
+
+  ipcMain.handle(IPC_CHANNELS.GIT_COMMIT, async (_event, message: string) => {
+    return gitService.commit(assertNonEmptyString(message, 'message'))
+  })
+
+  ipcMain.handle(IPC_CHANNELS.GIT_BRANCHES, async () => {
+    return gitService.listBranches()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.GIT_CHECKOUT, async (_event, branch: string) => {
+    return gitService.checkout(assertNonEmptyString(branch, 'branch'))
+  })
+
+  ipcMain.handle(IPC_CHANNELS.UPDATER_CHECK, async () => {
+    return checkForUpdates({ manual: true })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.UPDATER_STATUS_GET, () => {
+    return getUpdaterStatus()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.MCP_STATUS, () => mcpService.getStatus())
+
+  ipcMain.handle(IPC_CHANNELS.MCP_SYNC, async () => {
+    return mcpService.syncFromSettings()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.COMPLETION_REQUEST, async (_event, req) => {
+    return completeInline({
+      prefix: String(req?.prefix ?? ''),
+      suffix: req?.suffix != null ? String(req.suffix) : undefined,
+      language: req?.language != null ? String(req.language) : undefined,
+      path: req?.path != null ? String(req.path) : undefined,
+    })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.WORKSPACE_ADD_ROOT, async (_event, path: string) => {
+    const target = assertFilePath(path)
+    const workspace = await workspaceService.addRoot(target)
+    fileWatcherService.addRoot(target)
+    fileWatcherService.notifyTreeChanged()
+    void auditLog('workspace:addRoot', { path: target })
+    return workspace
+  })
+
+  ipcMain.handle(IPC_CHANNELS.AUDIT_EXPORT, async (_event, opts) => {
+    const limit = typeof opts?.limit === 'number' ? opts.limit : 5000
+    const result = await exportAuditLog(limit)
+    void auditLog('audit:export', { path: result.path, lines: result.lines })
+    return result
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SEMANTIC_STATS, () => semanticIndexStats())
+
+  ipcMain.handle(IPC_CHANNELS.SEMANTIC_REINDEX, async (_event, opts) => {
+    const limit = typeof opts?.limit === 'number' ? opts.limit : 80
+    return reindexSemanticWorkspace(limit)
   })
 }

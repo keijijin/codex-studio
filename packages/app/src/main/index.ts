@@ -1,7 +1,11 @@
 import './bootstrap-app'
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, session, shell } from 'electron'
-import { join } from 'path'
+import { dirname, join } from 'path'
+import { fileURLToPath } from 'url'
 import { APP_NAME, IPC_CHANNELS } from '@codex/shared'
+
+/** electron-vite may emit ESM main (`import.meta.url`); `__dirname` is unavailable then. */
+const mainDirname = dirname(fileURLToPath(import.meta.url))
 import { indexService } from '@codex/indexer'
 import { registerIpcHandlers } from './ipc/handlers'
 import { settingsService } from './services/settings'
@@ -10,6 +14,7 @@ import { probeOllamaAvailable } from './services/ollama-availability'
 import { workspaceService } from './services/workspace'
 import { terminalService } from './services/terminal-service'
 import { fileWatcherService } from './services/file-watcher'
+import { langfuseService } from './services/langfuse-service'
 import { setupApplicationMenu } from './menu'
 import { resolveAppIconPath, resolvePreloadPath } from './utils/paths'
 
@@ -29,7 +34,7 @@ function createWindow(): void {
     ...(icon && !icon.isEmpty() ? { icon } : {}),
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
-      preload: resolvePreloadPath(__dirname),
+      preload: resolvePreloadPath(mainDirname),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
@@ -81,7 +86,7 @@ function createWindow(): void {
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    mainWindow.loadFile(join(mainDirname, '../renderer/index.html'))
   }
 }
 
@@ -108,12 +113,21 @@ app.whenReady().then(async () => {
   registerIpcHandlers()
   setupApplicationMenu()
 
+  // Migrate API keys into OS secret store on first settings read (safeStorage).
+  void settingsService.get()
+
+  const { initAutoUpdater } = await import('./services/updater')
+  initAutoUpdater()
+
   // Warm Ollama reachability cache so auto-routing can skip a dead local server.
   void probeOllamaAvailable(modelsOllamaBaseUrl(settingsService.get().models)).catch(() => undefined)
 
   const e2eWorkspace = process.env.CODEX_E2E_WORKSPACE
   if (e2eWorkspace) {
     await workspaceService.open(e2eWorkspace)
+    const { pathIgnoreService } = await import('./services/path-ignore-service')
+    await pathIgnoreService.reload(e2eWorkspace)
+    indexService.setIgnoreRules(await pathIgnoreService.reloadForIndexing(e2eWorkspace))
     fileWatcherService.start(e2eWorkspace)
     void indexService.scan(e2eWorkspace)
   }
@@ -150,4 +164,5 @@ app.on('before-quit', () => {
   fileWatcherService.stop()
   terminalService.destroyAll()
   settingsService.save()
+  void langfuseService.shutdown()
 })

@@ -6,7 +6,7 @@
 | 版 | 0.1 |
 | 作成日 | 2026-08-03 |
 | ステータス | Planned（将来） |
-| 関連 | [Phase D ゲート](./09-PhaseD-設計ゲート.md) / [エージェント拡張](./08-エージェント拡張プラン.md) / [近接実装](./15-Personas-トレース-権限プリセット.md) |
+| 関連 | [Phase D ゲート](./09-PhaseD-設計ゲート.md) / [エージェント拡張](./08-エージェント拡張プラン.md) / [近接実装](./15-Personas-トレース-権限プリセット.md) / [L1 設計](./18-L1-LINE通知設計.md) / [L2 設計](./19-L2-K8s-Headless設計.md) |
 
 ---
 
@@ -69,6 +69,8 @@ Desktop Codex Studio は同じ `agent-core` を共有し、編集・Diff・Perso
 
 ### L1 — LINE 通知（読み取り寄り）
 
+詳細: [18-L1-LINE通知設計.md](./18-L1-LINE通知設計.md)
+
 | 成果 | 完了条件 |
 |------|----------|
 | LINE Official Account + Channel | Push で Agent 完了通知が届く |
@@ -78,6 +80,8 @@ Desktop Codex Studio は同じ `agent-core` を共有し、編集・Diff・Perso
 **受け入れ**: デスクトップで Agent 完了 → LINE に要約が届く。
 
 ### L2 — K8s 上 Headless
+
+詳細: [19-L2-K8s-Headless設計.md](./19-L2-K8s-Headless設計.md)
 
 | 成果 | 完了条件 |
 |------|----------|

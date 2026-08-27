@@ -5,7 +5,7 @@ import type { Tool, ToolContext, ToolResult } from '../types'
 export const generateVideoTool: Tool = {
   name: 'GenerateVideo',
   description:
-    'Generate a tutorial MP4 from a markdown file (Director shotlist → TTS/slides → optional Runway B-roll → FFmpeg). Output under .codex/video/<slug>/out.mp4. Requires ffmpeg on PATH. Runway key optional (falls back to slides).',
+    'Generate a NotebookLM-style explainer MP4 from markdown (intent → Director shotlist → TTS/sparse slides → optional Runway B-roll → FFmpeg). Output under videos/<slug>/<slug>.mp4. Requires ffmpeg. OpenAI key recommended for Director/TTS; Runway optional (slides fallback).',
   parameters: {
     type: 'object',
     properties: {
@@ -19,7 +19,7 @@ export const generateVideoTool: Tool = {
       },
       slug: {
         type: 'string',
-        description: 'Optional output folder name under .codex/video/',
+        description: 'Optional output folder / file basename under videos/',
       },
     },
     required: ['path'],
@@ -75,6 +75,7 @@ export const generateVideoTool: Tool = {
       markdown,
       mode,
       slug: typeof args.slug === 'string' ? args.slug : undefined,
+      outputDir: video?.outputDir,
       runwayApiKey: runwayKey,
       runwayModel: video?.runwayModel || 'gen4.5',
       openaiApiKey: openaiKey,

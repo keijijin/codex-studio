@@ -37,7 +37,10 @@ export class XaiProvider implements LLMProvider {
     try {
       const stream = await client.chat.completions.create({
         model: options.model,
-        messages: messages.map((m) => ({ role: m.role, content: m.content })),
+        messages: messages.map((m) => ({
+          role: m.role,
+          content: typeof m.content === 'string' ? m.content : m.content.map((p) => (p.type === 'text' ? p.text : '[image]')).join('\n'),
+        })),
         stream: true,
         stream_options: { include_usage: true },
         ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),

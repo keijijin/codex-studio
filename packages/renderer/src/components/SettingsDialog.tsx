@@ -29,6 +29,7 @@ import { useAppStore } from '@renderer/store/app-store'
 import { hasCodexApi } from './ErrorBoundary'
 import { RulesSettings } from './RulesSettings'
 import { PersonasSettings } from './PersonasSettings'
+import { FeaturesSettings } from './FeaturesSettings'
 
 const overlayStyle: CSSProperties = {
   position: 'fixed',
@@ -110,12 +111,13 @@ interface SettingsFormProps {
 }
 
 export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) {
-  const [tab, setTab] = useState<'models' | 'rules' | 'personas'>('models')
+  const [tab, setTab] = useState<'models' | 'rules' | 'personas' | 'features'>('models')
   const [personaOptions, setPersonaOptions] = useState<string[]>([])
   const [openaiKey, setOpenaiKey] = useState('')
   const [anthropicKey, setAnthropicKey] = useState('')
   const [xaiKey, setXaiKey] = useState('')
   const [ollamaBaseUrl, setOllamaBaseUrl] = useState(DEFAULT_OLLAMA_BASE_URL)
+  const [showBuildOutputs, setShowBuildOutputs] = useState(true)
   const [yoloMode, setYoloMode] = useState(false)
   const [maxIterations, setMaxIterations] = useState(100)
   const [permissions, setPermissions] = useState<AgentPermissions>({ ...DEFAULT_AGENT_PERMISSIONS })
@@ -209,6 +211,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
         setAnthropicKey(aKey)
         setXaiKey(xKey)
         setOllamaBaseUrl(ollamaUrl)
+        setShowBuildOutputs(Boolean(settings.general?.showBuildOutputs))
         setYoloMode(settings.agent.yoloMode)
         setMaxIterations(settings.agent.maxIterations)
         setPermissions({
@@ -249,6 +252,10 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
     try {
       const current = await window.codex.invoke(IPC_CHANNELS.SETTINGS_GET)
       await window.codex.invoke(IPC_CHANNELS.SETTINGS_SET, {
+        general: {
+          ...current.general,
+          showBuildOutputs,
+        },
         models: {
           defaultProvider: provider,
           openaiApiKey: openaiKey,
@@ -306,8 +313,12 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
     ? { ...panelStyle, maxWidth: 560, margin: '0 auto', textAlign: 'left' }
     : panelStyle
 
-  const tabBtn = (id: 'models' | 'rules' | 'personas', _label: string): CSSProperties => ({
+  const tabBtn = (
+    id: 'models' | 'rules' | 'personas' | 'features',
+    _label: string,
+  ): CSSProperties => ({
     flex: 1,
+    minWidth: 72,
     padding: '8px 12px',
     fontSize: 13,
     cursor: 'pointer',
@@ -335,6 +346,13 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
         >
           Personas
         </button>
+        <button
+          type="button"
+          style={tabBtn('features', '機能')}
+          onClick={() => setTab('features')}
+        >
+          機能
+        </button>
       </div>
 
       {tab === 'rules' ? (
@@ -355,10 +373,19 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
             )}
           </div>
         </div>
+      ) : tab === 'features' ? (
+        <div style={{ marginTop: 16 }}>
+          <FeaturesSettings />
+          <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}>
+            {onCancel && (
+              <button type="button" style={btnSecondary} onClick={onCancel}>閉じる</button>
+            )}
+          </div>
+        </div>
       ) : (
         <>
           <p style={{ margin: '12px 0 0', fontSize: 13, color: '#858585' }}>
-            API キーとチャットモデルを設定します
+            API キーとチャットモデルを設定します（キーは OS の秘密ストアに保存）
           </p>
 
           {error && (
@@ -656,6 +683,38 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                 </div>
               )}
 
+              <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8, marginTop: 16 }}>
+                <input
+                  type="checkbox"
+                  checked={showBuildOutputs}
+                  onChange={(e) => setShowBuildOutputs(e.target.checked)}
+                />
+                ビルド成果物を Explorer に表示（dist / out / release 等・浅い一覧）
+              </label>
+              <p style={{ margin: '4px 0 0', fontSize: 11, color: '#6e6e6e' }}>
+                オン（既定）で dist などを Explorer に表示します。オフにすると索引・監視・Explorer から除外します
+              </p>
+
+              <div style={{ marginTop: 16 }}>
+                <button
+                  type="button"
+                  style={{
+                    ...inputStyle,
+                    width: 'auto',
+                    cursor: 'pointer',
+                    padding: '6px 12px',
+                  }}
+                  onClick={() => {
+                    void window.codex.invoke(IPC_CHANNELS.UPDATER_CHECK)
+                  }}
+                >
+                  更新を確認…
+                </button>
+                <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6e6e6e' }}>
+                  GitHub Releases から新しいバージョンを確認します（パッケージ版のみ）
+                </p>
+              </div>
+
               <label style={labelStyle} htmlFor="max-iterations">最大イテレーション（Agent）</label>
               <input
                 id="max-iterations"
@@ -764,6 +823,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                 ['shell', 'Shell'],
                 ['network', 'ネットワーク（WebSearch）'],
                 ['media', 'メディア（GenerateVideo / GeneratePresentation）'],
+                ['mcp', 'MCP（外部ツール mcp__*）'],
               ] as const).map(([key, label]) => (
                 <label key={key} style={labelStyle} htmlFor={`perm-${key}`}>
                   {label}

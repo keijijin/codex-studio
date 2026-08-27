@@ -46,9 +46,12 @@ export function TerminalPanel() {
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 13,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      fontFamily:
+        'Menlo, Monaco, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Courier New", monospace',
       theme: TERMINAL_THEME,
       scrollback: 5000,
+      allowProposedApi: false,
+      convertEol: true,
     })
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)

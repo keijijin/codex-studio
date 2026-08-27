@@ -19,7 +19,10 @@ import {
   type LLMProviderId,
 } from '@codex/shared'
 import { parseArgs, type CliArgs } from './parse-args.js'
-import { loadDesktopModelsSettings } from './desktop-settings.js'
+import {
+  desktopApiKeysInSafeStorage,
+  loadDesktopModelsSettings,
+} from './desktop-settings.js'
 
 function printHelp(): void {
   console.log(`codex-studio — headless Codex Studio agent / teams
@@ -43,7 +46,7 @@ Options:
 
 Environment:
   OPENAI_API_KEY / ANTHROPIC_API_KEY / XAI_API_KEY / OLLAMA_BASE_URL / XAI_BASE_URL
-  (unset keys fall back to Codex Studio Settings: Application Support/codex-studio)
+  (Desktop Settings の平文キーへフォールバック可。OS 秘密ストア移行後は環境変数必須)
 
 Examples:
   pnpm cli -- agent "README を要約して" -w .
@@ -98,6 +101,12 @@ function missingKeyHint(provider: LLMProviderId): string {
       : provider === 'xai'
         ? 'XAI_API_KEY'
         : 'OPENAI_API_KEY'
+  if (desktopApiKeysInSafeStorage()) {
+    return (
+      `${provider} の API キーがありません。` +
+      `デスクトップのキーは OS 秘密ストアへ移行済みのため、CLI では環境変数 ${envName} を設定してください。`
+    )
+  }
   return (
     `${provider} の API キーがありません。` +
     `環境変数 ${envName} を設定するか、Codex Studio の設定画面にキーを保存してください。`
@@ -254,7 +263,7 @@ async function runTeamCli(args: CliArgs): Promise<void> {
     throw new Error(
       args.provider === 'ollama'
         ? 'Ollama is not configured'
-        : `${args.provider.toUpperCase()} API key is not set`,
+        : missingKeyHint(args.provider),
     )
   }
   const { apiKey, baseUrl } = creds

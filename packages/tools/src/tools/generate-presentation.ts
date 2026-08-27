@@ -10,7 +10,7 @@ const THEMES = new Set(['midnight', 'paper', 'forest', 'coral'])
 export const generatePresentationTool: Tool = {
   name: 'GeneratePresentation',
   description:
-    'Generate a polished PPTX deck from a markdown file (Director deck → theme → PPTX + SVG previews). Output under .codex/presentation/<slug>/out.pptx. OpenAI key optional (heuristic fallback).',
+    'Generate a polished PPTX deck from a markdown file (Director deck → theme → Mermaid diagrams → PPTX). Output under presentations/<slug>/<slug>.pptx (configurable). Mermaid fences become real diagram images. OpenAI key optional (heuristic fallback).',
   parameters: {
     type: 'object',
     properties: {
@@ -24,7 +24,7 @@ export const generatePresentationTool: Tool = {
       },
       slug: {
         type: 'string',
-        description: 'Optional output folder name under .codex/presentation/',
+        description: 'Optional output folder / file basename under presentations/',
       },
     },
     required: ['path'],
@@ -75,6 +75,7 @@ export const generatePresentationTool: Tool = {
       markdown,
       themeId,
       slug: typeof args.slug === 'string' ? args.slug : undefined,
+      outputDir: presentation?.outputDir,
       openaiApiKey: openaiKey,
       maxSlides: presentation?.maxSlides ?? 16,
       includeNotes: presentation?.includeNotes !== false,

@@ -64,11 +64,12 @@ export function Explorer() {
   const activeTabPath = useAppStore((s) => s.activeTabPath)
   const refreshFileTree = useAppStore((s) => s.refreshFileTree)
   const collapseExplorer = useAppStore((s) => s.collapseExplorer)
+  const addWorkspaceRoot = useAppStore((s) => s.addWorkspaceRoot)
 
   useEffect(() => {
     if (!workspace) return
     void refreshFileTree()
-  }, [workspace?.id, refreshFileTree])
+  }, [workspace?.id, workspace?.rootPaths?.length, refreshFileTree])
 
   if (fileTree.length === 0) {
     return (
@@ -83,6 +84,14 @@ export function Explorer() {
       <div className="flex items-center justify-between gap-2 px-3 py-1">
         <div className="truncate text-xs font-medium text-text-secondary">{workspace?.name}</div>
         <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={() => void addWorkspaceRoot()}
+            className="rounded px-1.5 py-0.5 text-[11px] text-text-secondary hover:bg-white/5 hover:text-text-primary"
+            title="フォルダを追加（マルチルート）"
+          >
+            +
+          </button>
           <button
             type="button"
             onClick={() => collapseExplorer()}

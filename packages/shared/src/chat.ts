@@ -8,11 +8,25 @@ export interface SearchResult {
   text: string
 }
 
+export interface WorkspaceReplaceParams {
+  query: string
+  replacement: string
+  /** Absolute paths to modify. Omit or empty = all matches for query. */
+  paths?: string[]
+}
+
+export interface WorkspaceReplaceResult {
+  filesChanged: number
+  occurrences: number
+  files: string[]
+  errors: string[]
+}
+
 export interface ChatSendParams {
   sessionId: string
   content: string
   attachments?: Attachment[]
-  mode?: 'ask' | 'agent'
+  mode?: 'ask' | 'agent' | 'plan'
   /** Open editor paths for Rules glob matching */
   contextPaths?: string[]
 }

@@ -1,5 +1,6 @@
 import { Menu, BrowserWindow, type MenuItemConstructorOptions } from 'electron'
 import { APP_NAME, IPC_EVENTS } from '@codex/shared'
+import { checkForUpdates } from './services/updater'
 
 function sendToFocusedWindow(event: string): void {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
@@ -76,6 +77,24 @@ export function createApplicationMenu(): Menu {
     ],
   }
 
+  const helpMenu: MenuItemConstructorOptions = {
+    label: 'ヘルプ',
+    submenu: [
+      {
+        label: '更新を確認…',
+        click: () => {
+          void checkForUpdates({ manual: true })
+        },
+      },
+      ...(!isMac
+        ? ([
+            { type: 'separator' as const },
+            { role: 'about' as const, label: `${APP_NAME} について` },
+          ] as MenuItemConstructorOptions[])
+        : []),
+    ],
+  }
+
   const template: MenuItemConstructorOptions[] = [
     ...(isMac
       ? ([
@@ -83,6 +102,13 @@ export function createApplicationMenu(): Menu {
             label: APP_NAME,
             submenu: [
               { role: 'about', label: `${APP_NAME} について` },
+              { type: 'separator' },
+              {
+                label: '更新を確認…',
+                click: () => {
+                  void checkForUpdates({ manual: true })
+                },
+              },
               { type: 'separator' },
               { role: 'services', label: 'サービス' },
               { type: 'separator' },
@@ -99,6 +125,7 @@ export function createApplicationMenu(): Menu {
     editMenu,
     viewMenu,
     windowMenu,
+    helpMenu,
   ]
 
   return Menu.buildFromTemplate(template)

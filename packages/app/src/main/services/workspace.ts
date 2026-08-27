@@ -1,8 +1,9 @@
 import { createHash } from 'crypto'
 import { realpath, readdir, readFile, stat, writeFile } from 'fs/promises'
-import { dirname, join, relative, resolve } from 'path'
-import type { FileNode, Workspace } from '@codex/shared'
-import { isPathInsideRoot } from '@codex/shared'
+import { basename, dirname, join, relative, resolve } from 'path'
+import type { FileNode, PathIgnore, Workspace } from '@codex/shared'
+import { createDefaultPathIgnore, isPathInsideRoot } from '@codex/shared'
+import { pathIgnoreService } from './path-ignore-service'
 
 export function workspaceIdFromPath(resolvedPath: string): string {
   return createHash('sha256').update(resolvedPath).digest('hex').slice(0, 24)
@@ -18,15 +19,6 @@ export async function normalizeWorkspaceRoot(path: string): Promise<string> {
   }
 }
 
-const IGNORED_DIRS = new Set([
-  'node_modules',
-  '.git',
-  // Build outputs (dist/out/release) stay visible so users can inspect them.
-  '.codex-studio',
-])
-
-const IGNORED_FILES = new Set(['.DS_Store'])
-
 export class WorkspaceService {
   private workspace: Workspace | null = null
 
@@ -36,6 +28,10 @@ export class WorkspaceService {
 
   getRoot(): string | null {
     return this.workspace?.rootPaths[0] ?? null
+  }
+
+  getRoots(): string[] {
+    return this.workspace?.rootPaths ?? []
   }
 
   async open(path: string): Promise<Workspace> {
@@ -48,10 +44,36 @@ export class WorkspaceService {
     this.workspace = {
       id: workspaceIdFromPath(resolved),
       rootPaths: [resolved],
-      name: resolved.split(/[/\\]/).pop() ?? resolved,
+      name: resolved.split(/[/\\]/).filter(Boolean).pop() ?? resolved,
       openedAt: new Date().toISOString(),
     }
 
+    await pathIgnoreService.reload(resolved)
+    return this.workspace
+  }
+
+  /** Add another folder root to the current workspace (N4-3). */
+  async addRoot(path: string): Promise<Workspace> {
+    if (!this.workspace) {
+      return this.open(path)
+    }
+    const resolved = await normalizeWorkspaceRoot(path)
+    const stats = await stat(resolved)
+    if (!stats.isDirectory()) {
+      throw new Error('Path is not a directory')
+    }
+    if (this.workspace.rootPaths.some((r) => r === resolved)) {
+      return this.workspace
+    }
+    const name = resolved.split(/[/\\]/).filter(Boolean).pop() ?? resolved
+    this.workspace = {
+      ...this.workspace,
+      rootPaths: [...this.workspace.rootPaths, resolved],
+      name:
+        this.workspace.rootPaths.length === 1
+          ? `${this.workspace.name} + ${name}`
+          : `${this.workspace.name.split(' + ')[0]} +${this.workspace.rootPaths.length}`,
+    }
     return this.workspace
   }
 
@@ -60,23 +82,29 @@ export class WorkspaceService {
   }
 
   resolveWithinWorkspace(targetPath: string): string {
-    const root = this.getRoot()
-    if (!root) {
+    const roots = this.getRoots()
+    if (!roots.length) {
       throw new Error('No workspace open')
     }
 
-    const normalizedRoot = resolve(root)
     const resolved = resolve(targetPath)
-
-    if (isPathInsideRoot(normalizedRoot, resolved)) {
-      return resolved
+    for (const root of roots) {
+      const normalizedRoot = resolve(root)
+      if (isPathInsideRoot(normalizedRoot, resolved)) {
+        return resolved
+      }
     }
 
-    const relativeResolved = resolve(normalizedRoot, targetPath)
-    if (!isPathInsideRoot(normalizedRoot, relativeResolved)) {
-      throw new Error('Path is outside workspace')
+    // Relative path: try each root
+    for (const root of roots) {
+      const normalizedRoot = resolve(root)
+      const relativeResolved = resolve(normalizedRoot, targetPath)
+      if (isPathInsideRoot(normalizedRoot, relativeResolved)) {
+        return relativeResolved
+      }
     }
-    return relativeResolved
+
+    throw new Error('Path is outside workspace')
   }
 
   /** Resolve a markdown href to an absolute path inside the workspace. */
@@ -121,11 +149,21 @@ export class WorkspaceService {
   }
 
   async getFileTree(): Promise<FileNode[]> {
-    const root = this.getRoot()
-    if (!root) {
+    const roots = this.getRoots()
+    if (!roots.length) {
       return []
     }
-    return this.buildTree(root, root, 0, new Set())
+    const rules = pathIgnoreService.getRules()
+    if (roots.length === 1) {
+      return this.buildTree(roots[0]!, roots[0]!, 0, new Set(), rules)
+    }
+    const nodes: FileNode[] = []
+    for (const root of roots) {
+      const name = root.split(/[/\\]/).filter(Boolean).pop() ?? root
+      const children = await this.buildTree(root, root, 0, new Set(), rules)
+      nodes.push({ name, path: root, type: 'directory', children })
+    }
+    return nodes
   }
 
   private async buildTree(
@@ -133,10 +171,8 @@ export class WorkspaceService {
     dirPath: string,
     depth: number,
     visited: Set<string>,
+    rules: PathIgnore,
   ): Promise<FileNode[]> {
-    // Safety cap only (symlink loops / pathological trees). Do not treat
-    // normal project depth as a hard UX limit — previously depth > 6 hid
-    // everything past ~7 nested folders.
     if (depth > 256) {
       return []
     }
@@ -164,9 +200,10 @@ export class WorkspaceService {
     const nodes: FileNode[] = []
 
     for (const entry of entries) {
-      if (IGNORED_FILES.has(entry)) continue
-
       const fullPath = join(dirPath, entry)
+      const rel = relative(root, fullPath)
+      if (rules.ignores(rel)) continue
+
       let entryStat
       try {
         entryStat = await stat(fullPath)
@@ -175,8 +212,16 @@ export class WorkspaceService {
       }
 
       if (entryStat.isDirectory()) {
-        if (IGNORED_DIRS.has(entry)) continue
-        const children = await this.buildTree(root, fullPath, depth + 1, visited)
+        if (rules.isShallowDirectory(entry, rel)) {
+          nodes.push({
+            name: entry,
+            path: fullPath,
+            type: 'directory',
+            children: await this.buildShallowListing(root, fullPath, rules),
+          })
+          continue
+        }
+        const children = await this.buildTree(root, fullPath, depth + 1, visited, rules)
         nodes.push({
           name: entry,
           path: fullPath,
@@ -192,11 +237,46 @@ export class WorkspaceService {
       }
     }
 
-    // Directories first, then files
     return nodes.sort((a, b) => {
       if (a.type !== b.type) {
         return a.type === 'directory' ? -1 : 1
       }
+      return a.name.localeCompare(b.name)
+    })
+  }
+
+  /** One level only: files + empty directory stubs (no nested walk). */
+  private async buildShallowListing(
+    root: string,
+    dirPath: string,
+    rules: PathIgnore,
+  ): Promise<FileNode[]> {
+    let entries: string[]
+    try {
+      entries = await readdir(dirPath)
+    } catch {
+      return []
+    }
+    entries.sort((a, b) => a.localeCompare(b))
+    const nodes: FileNode[] = []
+    for (const entry of entries) {
+      const fullPath = join(dirPath, entry)
+      const rel = relative(root, fullPath)
+      if (rules.ignores(rel)) continue
+      let entryStat
+      try {
+        entryStat = await stat(fullPath)
+      } catch {
+        continue
+      }
+      if (entryStat.isDirectory()) {
+        nodes.push({ name: entry, path: fullPath, type: 'directory', children: [] })
+      } else if (entryStat.isFile()) {
+        nodes.push({ name: entry, path: fullPath, type: 'file' })
+      }
+    }
+    return nodes.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
       return a.name.localeCompare(b.name)
     })
   }
@@ -212,10 +292,29 @@ export class WorkspaceService {
   }
 
   getRelativePath(absolutePath: string): string {
-    const root = this.getRoot()
-    if (!root) return absolutePath
-    return relative(root, absolutePath)
+    const roots = this.getRoots()
+    if (!roots.length) return absolutePath
+    for (const root of roots) {
+      const rel = relative(root, absolutePath)
+      if (rel && !rel.startsWith('..') && !rel.startsWith('/')) {
+        return roots.length > 1
+          ? `${basename(root)}/${rel}`.replace(/\\/g, '/')
+          : rel.replace(/\\/g, '/')
+      }
+      if (absolutePath === root) {
+        return roots.length > 1 ? basename(root) : '.'
+      }
+    }
+    return relative(roots[0]!, absolutePath)
   }
 }
 
 export const workspaceService = new WorkspaceService()
+
+/** Test helper — build ignore without opening a workspace. */
+export function pathIgnoreForTests(
+  gitignoreContent: string,
+  showBuildOutputs = false,
+): PathIgnore {
+  return createDefaultPathIgnore({ gitignoreContent, showBuildOutputs })
+}

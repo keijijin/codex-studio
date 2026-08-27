@@ -1,4 +1,5 @@
 import {
+  flattenChatContent,
   getProviderInstance,
   isConnectionError,
   isRetryableError,
@@ -34,6 +35,8 @@ import { skillsService } from './skills-service'
 import { personasService } from './personas-service'
 import { modelCatalogService } from './model-catalog-service'
 import { assertUnderDailyBudget, recordLlmTurn } from './usage-helpers'
+import { langfuseService } from './langfuse-service'
+import { formatAttachments, materializeAttachments } from './attachment-context'
 
 const SYSTEM_PROMPT = `You are Codex Studio, an AI coding assistant integrated into a developer IDE.
 Help the user with code understanding, debugging, refactoring, and general programming questions.
@@ -75,12 +78,12 @@ export class ChatService {
       return this.sendAskMock(params, webContents)
     }
 
-    if (mode === 'agent' && session && session.mode !== 'agent') {
-      sessionService.setMode(params.sessionId, 'agent')
+    if ((mode === 'agent' || mode === 'plan') && session && session.mode !== mode) {
+      sessionService.setMode(params.sessionId, mode)
     }
 
-    if (mode === 'agent') {
-      return agentService.run({ ...params, mode: 'agent' }, webContents)
+    if (mode === 'agent' || mode === 'plan') {
+      return agentService.run({ ...params, mode }, webContents)
     }
 
     return this.sendAsk(params, webContents)
@@ -105,8 +108,9 @@ export class ChatService {
   }
 
   private async sendAsk(params: ChatSendParams, webContents: WebContents): Promise<void> {
-    const { sessionId, attachments = [] } = params
+    const { sessionId } = params
     let content = params.content
+    const attachments = await materializeAttachments(params.attachments ?? [], content)
 
     const settings = settingsService.get()
 
@@ -208,12 +212,15 @@ export class ChatService {
     // Soft trim Ask context using the same compact threshold as Agent
     const askBudget = settings.agent.compactTokenThreshold
     if (askBudget && askBudget > 0) {
-      const estimated = llmMessages.reduce((sum, m) => sum + estimateTokens(m.content), 0)
+      const estimated = llmMessages.reduce(
+        (sum, m) => sum + estimateTokens(flattenChatContent(m.content)),
+        0,
+      )
       if (estimated > askBudget) {
         const compacted = compactMessageContents(
           llmMessages.filter((m) => m.role !== 'system').map((m) => ({
             role: m.role,
-            content: m.content,
+            content: flattenChatContent(m.content),
           })),
           8,
         )
@@ -267,6 +274,13 @@ export class ChatService {
         let rawStreamError: string | null = null
         let turnUsage: { inputTokens: number; outputTokens: number; cachedInputTokens: number } | undefined
         const startedAt = Date.now()
+        const askTrace = langfuseService.startAskTrace({
+          sessionId,
+          input: content,
+          provider: runtime.provider,
+          model: runtime.model,
+          settings,
+        })
 
         try {
           for await (const chunk of llm.chat(llmMessages, {
@@ -300,6 +314,13 @@ export class ChatService {
             mode: 'ask',
             latencyMs: Date.now() - startedAt,
             usage: turnUsage,
+          })
+          askTrace?.end({
+            output: assistantContent,
+            model: runtime.model,
+            provider: runtime.provider,
+            usage: turnUsage,
+            latencyMs: Date.now() - startedAt,
           })
           const trace: TurnTrace = {
             personaId: activePersona?.id,
@@ -338,6 +359,14 @@ export class ChatService {
             isRetryableError(streamError)) &&
           !abortController.signal.aborted
 
+        askTrace?.end({
+          output: assistantContent,
+          model: runtime.model,
+          provider: runtime.provider,
+          usage: turnUsage,
+          error: streamError,
+          latencyMs: Date.now() - startedAt,
+        })
         if (!canRetry) {
           this.emit(webContents, sessionId, { type: 'error', message: streamError })
           return
@@ -382,10 +411,7 @@ export class ChatService {
       if (msg.role === 'user' || msg.role === 'assistant') {
         let content = msg.content
         if (msg.role === 'user' && msg.attachments?.length) {
-          const attachmentText = msg.attachments
-            .filter((a) => a.content)
-            .map((a) => `\n\n--- Attached file: ${a.name} (${a.path}) ---\n${a.content}\n--- End ---`)
-            .join('')
+          const attachmentText = formatAttachments(msg.attachments.filter((a) => a.type !== 'image'))
           if (attachmentText) content = content + attachmentText
         }
         messages.push({ role: msg.role, content })
@@ -395,12 +421,22 @@ export class ChatService {
     if (latestAttachments.length > 0) {
       const last = messages[messages.length - 1]
       if (last?.role === 'user') {
-        const extra = latestAttachments
-          .filter((a) => a.content)
-          .map((a) => `\n\n--- Attached file: ${a.name} (${a.path}) ---\n${a.content}\n--- End ---`)
-          .join('')
-        if (extra && !last.content.includes(extra)) {
+        const nonImages = latestAttachments.filter((a) => a.type !== 'image')
+        const images = latestAttachments.filter(
+          (a) => a.type === 'image' && a.content?.startsWith('data:'),
+        )
+        const extra = formatAttachments(nonImages)
+        if (extra && typeof last.content === 'string' && !last.content.includes(extra)) {
           last.content += extra
+        }
+        if (images.length > 0 && typeof last.content === 'string') {
+          last.content = [
+            { type: 'text', text: last.content },
+            ...images.map((img) => ({
+              type: 'image_url' as const,
+              image_url: { url: img.content! },
+            })),
+          ]
         }
       }
     }
@@ -413,7 +449,7 @@ export class ChatService {
     sessionService.updateTitle(sessionId, title)
   }
 
-  /** Compact persisted chat history for a session (manual Compact). */
+  /** Compact persisted chat history for a session (manual 「履歴を圧縮」). */
   compactSession(sessionId: string): Message[] {
     const existing = sessionService.getMessages(sessionId)
     if (existing.length <= 4) return existing
@@ -422,7 +458,10 @@ export class ChatService {
     const compacted = compactMessageContents(
       existing.map((m) => ({
         role: m.role === 'tool' ? 'assistant' : m.role,
-        content: m.content,
+        content:
+          m.content.length > 4_000
+            ? `${m.content.slice(0, 4_000)}\n...(truncated for compact)`
+            : m.content,
       })),
       6,
     )

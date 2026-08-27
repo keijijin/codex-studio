@@ -1,3 +1,4 @@
+import { isMermaidLanguage } from './mermaid-render'
 import { extractTitle, slugifyTitle } from './shotlist'
 import type {
   Deck,
@@ -13,6 +14,7 @@ const LAYOUTS: SlideLayout[] = [
   'bullets',
   'two_column',
   'code',
+  'diagram',
   'quote',
   'closing',
 ]
@@ -62,6 +64,7 @@ export function parseDeckJson(raw: string, themeId: PresentationThemeId): Deck {
       rightBullets: trimLines(s.rightBullets, 6),
       code: s.code ? String(s.code).slice(0, 2500) : undefined,
       codeLanguage: s.codeLanguage ? String(s.codeLanguage).slice(0, 32) : undefined,
+      imagePath: s.imagePath ? String(s.imagePath) : undefined,
       quote: s.quote ? String(s.quote).trim().slice(0, 280) : undefined,
       notes: s.notes ? String(s.notes).trim().slice(0, 500) : undefined,
     }
@@ -92,12 +95,26 @@ export function normalizeDeck(deck: Deck, maxSlides: number): Deck {
       slide.rightBullets =
         slide.rightBullets?.slice(0, 6) ?? slide.bullets?.slice(3, 6) ?? [slide.subtitle || '—']
     }
+    if (
+      (slide.layout === 'code' || slide.layout === 'diagram') &&
+      slide.code &&
+      isMermaidLanguage(slide.codeLanguage)
+    ) {
+      slide.layout = 'diagram'
+      slide.codeLanguage = 'mermaid'
+    }
     if (slide.layout === 'code' && !slide.code) {
       slide.code = slide.bullets?.join('\n') || '// (no code)'
       slide.layout = slide.code.startsWith('//') ? 'bullets' : 'code'
       if (slide.layout === 'bullets' && !slide.bullets?.length) {
         slide.bullets = [slide.subtitle || 'コード例を追加してください']
       }
+    }
+    if (slide.layout === 'diagram' && !slide.code && !slide.imagePath) {
+      slide.layout = 'bullets'
+      slide.bullets = slide.bullets?.length
+        ? slide.bullets
+        : [slide.subtitle || '図を追加してください']
     }
     if (slide.layout === 'quote' && !slide.quote) {
       slide.quote = slide.subtitle || slide.bullets?.[0] || slide.title
@@ -217,13 +234,16 @@ export function buildHeuristicDeck(
     if (hasCode && codeBlocks[codeIdx]) {
       const block = codeBlocks[codeIdx]!
       codeIdx++
+      const mermaid = isMermaidLanguage(block.lang)
       slides.push({
         id: String(slides.length + 1).padStart(2, '0'),
-        layout: 'code',
+        layout: mermaid ? 'diagram' : 'code',
         title: heading,
         code: block.code,
-        codeLanguage: block.lang,
-        notes: `${heading}のコードを画面で示す。`,
+        codeLanguage: mermaid ? 'mermaid' : block.lang,
+        notes: mermaid
+          ? `${heading}の図を説明する。`
+          : `${heading}のコードを画面で示す。`,
       })
     } else if (bullets.length >= 4 && slides.length < options.maxSlides - 1) {
       const mid = Math.ceil(bullets.length / 2)
@@ -252,13 +272,14 @@ export function buildHeuristicDeck(
   while (codeIdx < codeBlocks.length && slides.length < options.maxSlides - 1) {
     const block = codeBlocks[codeIdx]!
     codeIdx++
+    const mermaid = isMermaidLanguage(block.lang)
     slides.push({
       id: String(slides.length + 1).padStart(2, '0'),
-      layout: 'code',
-      title: `コード ${codeIdx}`,
+      layout: mermaid ? 'diagram' : 'code',
+      title: mermaid ? `図 ${codeIdx}` : `コード ${codeIdx}`,
       code: block.code,
-      codeLanguage: block.lang,
-      notes: 'ソースから抽出したコード例。',
+      codeLanguage: mermaid ? 'mermaid' : block.lang,
+      notes: mermaid ? 'ソースから抽出した図。' : 'ソースから抽出したコード例。',
     })
   }
 

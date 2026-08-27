@@ -14,6 +14,8 @@ export interface ToolContext {
   executeMode: ToolExecuteMode
   resolvePath: (path: string) => string
   getRelativePath: (absolutePath: string) => string
+  /** When set, Glob (and similar) skip paths matching .gitignore / build outputs. */
+  isIgnoredPath?: (relativePath: string) => boolean
   onFileChanged?: (absolutePath: string) => void
   /** Hint that workspace files may have changed (e.g. after Shell). */
   onWorkspaceChanged?: () => void

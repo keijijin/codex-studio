@@ -52,6 +52,7 @@ export const PERMISSION_PROFILES = {
     shell: 'deny',
     network: 'allow',
     media: 'deny',
+    mcp: 'deny',
   },
   coding: {
     read: 'allow',
@@ -59,6 +60,7 @@ export const PERMISSION_PROFILES = {
     shell: 'ask',
     network: 'allow',
     media: 'ask',
+    mcp: 'ask',
   },
   yolo: {
     read: 'allow',
@@ -66,6 +68,7 @@ export const PERMISSION_PROFILES = {
     shell: 'allow',
     network: 'allow',
     media: 'allow',
+    mcp: 'allow',
   },
 } as const satisfies Record<PermissionProfile, AgentPermissions>
 
@@ -91,7 +94,8 @@ export function matchPermissionProfile(
       permissions.edit === preset.edit &&
       permissions.shell === preset.shell &&
       permissions.network === preset.network &&
-      permissions.media === preset.media
+      permissions.media === preset.media &&
+      (permissions.mcp ?? 'ask') === preset.mcp
     ) {
       return id
     }

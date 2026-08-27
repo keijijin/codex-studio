@@ -11,6 +11,6 @@ Generate a polished presentation deck from documentation in this workspace.
    - `path`: workspace-relative markdown path
    - `themeId`: `midnight` (default), `paper`, `forest`, or `coral` if the user specified one
 3. Do not invent slide content in Shell or hand-write a PPTX unless GeneratePresentation failed and the user asks for a workaround.
-4. After success, report the output path under `.codex/presentation/<slug>/out.pptx`, plus `deck.json` / SVG previews, and any warnings (no OpenAI key → heuristic deck).
-5. Quality: one message per slide; never invent code that is not in the source; prefer speaker notes.
+4. After success, report the output path under `presentations/<slug>/<slug>.pptx`, plus `deck.json` / SVG previews / `diagrams/`, and any warnings (no OpenAI key → heuristic deck).
+5. Quality: one message per slide; never invent code that is not in the source; Mermaid fences must become diagram slides (not pasted source); prefer speaker notes.
 6. Prerequisites: optional OpenAI key for Director (heuristic works without it).

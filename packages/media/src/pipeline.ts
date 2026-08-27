@@ -7,12 +7,16 @@ import {
   imageAndAudioToClip,
   muxVideoAndAudio,
   normalizeVideoClip,
+  probeMediaDurationSec,
   svgToPng,
-  videoWorkDir,
 } from './ffmpeg'
 import { generateRunwayClip } from './runway'
 import { writeSlideSvg } from './slides'
-import { slugifyTitle } from './shotlist'
+import {
+  DEFAULT_VIDEO_OUTPUT_DIR,
+  resolveMediaOutput,
+  resolveOutputSlug,
+} from './output-paths'
 import { synthesizeSpeech } from './tts'
 import type { VideoPipelineOptions, VideoPipelineResult } from './types'
 
@@ -50,8 +54,18 @@ export async function runVideoPipeline(
     }
   }
 
-  const slug = options.slug || slugifyTitle(shotlist.title)
-  const outputDir = videoWorkDir(options.workspaceRoot, slug)
+  const slug = resolveOutputSlug({
+    slug: options.slug,
+    title: shotlist.title,
+    sourcePath: options.sourcePath,
+    fallbackPrefix: 'video',
+  })
+  const { workDir: outputDir, artifactPath: outputMp4 } = resolveMediaOutput({
+    workspaceRoot: options.workspaceRoot,
+    outputDirRel: options.outputDir || DEFAULT_VIDEO_OUTPUT_DIR,
+    slug,
+    artifactFileName: `${slug}.mp4`,
+  })
   const slidesDir = join(outputDir, 'slides')
   const audioDir = join(outputDir, 'audio')
   const clipsDir = join(outputDir, 'clips')
@@ -89,6 +103,11 @@ export async function runVideoPipeline(
     })
     if (speech.silent) {
       warnings.push(`Shot ${shot.id}: TTS unavailable — silent segment`)
+    } else {
+      const audioDur = await probeMediaDurationSec(ffmpeg, audioPath, options.signal)
+      if (audioDur != null) {
+        shot.durationSec = Math.min(16, Math.max(3, Math.ceil(audioDur + 0.35)))
+      }
     }
 
     const outClip = join(clipsDir, `${shot.id}.mp4`)
@@ -190,7 +209,6 @@ export async function runVideoPipeline(
 
   progress('Concatenating…')
   const listPath = join(clipsDir, 'concat.txt')
-  const outputMp4 = join(outputDir, 'out.mp4')
   await concatClips({
     ffmpeg,
     clipPaths,
@@ -198,6 +216,9 @@ export async function runVideoPipeline(
     outPath: outputMp4,
     signal: options.signal,
   })
+
+  // Persist final durations (synced to TTS) and intent for debugging / re-edit
+  await writeFile(shotlistPath, JSON.stringify(shotlist, null, 2), 'utf-8')
 
   return {
     success: true,

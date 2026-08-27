@@ -30,7 +30,7 @@ interface EditorTab {
   mdViewMode: MdViewMode
 }
 
-type SidebarView = 'explorer' | 'search'
+type SidebarView = 'explorer' | 'search' | 'git'
 
 function toolLogFromMessages(messages: Message[]): ToolCallRecord[] {
   const log: ToolCallRecord[] = []
@@ -67,7 +67,14 @@ interface AppState {
   /** Absolute dir paths the user has expanded in Explorer (default: all collapsed). */
   explorerExpanded: Record<string, true>
   tabs: EditorTab[]
+  /** Focused tab (also used for save / md toggle) */
   activeTabPath: string | null
+  /** Left pane path when split */
+  primaryTabPath: string | null
+  /** Right pane path when split */
+  secondaryTabPath: string | null
+  editorSplit: boolean
+  activePane: 'primary' | 'secondary'
   sessions: Session[]
   activeSessionId: string | null
   messages: Message[]
@@ -115,6 +122,7 @@ interface AppState {
   setupListeners: () => void
   loadSettings: () => Promise<void>
   openWorkspace: (path?: string) => Promise<void>
+  addWorkspaceRoot: (path?: string) => Promise<void>
   closeWorkspace: () => Promise<void>
   refreshFileTree: () => Promise<void>
   toggleExplorerDir: (path: string) => void
@@ -128,6 +136,8 @@ interface AppState {
   setTabMdViewMode: (path: string, mode: MdViewMode) => void
   updateTabContent: (path: string, content: string) => void
   saveActiveFile: () => Promise<void>
+  toggleEditorSplit: () => void
+  setActivePane: (pane: 'primary' | 'secondary') => void
   toggleAiPanel: () => void
   toggleTerminalPanel: () => void
   setSidebarView: (view: SidebarView) => void
@@ -155,6 +165,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   explorerExpanded: {},
   tabs: [],
   activeTabPath: null,
+  primaryTabPath: null,
+  secondaryTabPath: null,
+  editorSplit: false,
+  activePane: 'primary',
   sessions: [],
   activeSessionId: null,
   messages: [],
@@ -173,7 +187,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatError: null,
   routingInfo: null,
   activePersona: null,
-  sessionMode: 'ask',
+  sessionMode: 'agent',
   pendingApproval: null,
   pendingCeoApproval: null,
   teamStage: null,
@@ -202,6 +216,36 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (get().listenersSetup) return
 
     window.codex.on(IPC_EVENTS.CHAT_STREAM, (event) => {
+      // Approvals must not depend on the AI panel or the active session —
+      // otherwise Write waits forever and times out as "user rejected".
+      if (event.type === 'approval_required') {
+        set({
+          pendingApproval: {
+            sessionId: event.sessionId,
+            toolCallId: event.toolCallId,
+            tool: event.tool,
+            path: event.path,
+            relativePath: event.relativePath,
+            oldContent: event.oldContent,
+            newContent: event.newContent,
+            summary: event.summary,
+            action: event.action as ApprovalRequest['action'],
+          },
+          aiPanelOpen: true,
+        })
+        return
+      }
+      if (event.type === 'ceo_approval_required') {
+        set({
+          pendingCeoApproval: {
+            sessionId: event.sessionId,
+            ...event.request,
+          },
+          aiPanelOpen: true,
+        })
+        return
+      }
+
       const { activeSessionId } = get()
       if (event.sessionId !== activeSessionId) return
 
@@ -239,27 +283,6 @@ export const useAppStore = create<AppState>((set, get) => ({
           }
         })
         // Do not auto-open files from Agent tools — user opens via Explorer / Search / tool card.
-      } else if (event.type === 'approval_required') {
-        set({
-          pendingApproval: {
-            sessionId: event.sessionId,
-            toolCallId: event.toolCallId,
-            tool: event.tool,
-            path: event.path,
-            relativePath: event.relativePath,
-            oldContent: event.oldContent,
-            newContent: event.newContent,
-            summary: event.summary,
-            action: event.action as ApprovalRequest['action'],
-          },
-        })
-      } else if (event.type === 'ceo_approval_required') {
-        set({
-          pendingCeoApproval: {
-            sessionId: event.sessionId,
-            ...event.request,
-          },
-        })
       } else if (event.type === 'team_stage') {
         set({
           teamStage: {
@@ -303,6 +326,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           const sessions = await window.codex.invoke(IPC_CHANNELS.SESSION_LIST)
           const session = sessions.find((s) => s.id === event.sessionId)
           const sticky = session?.personaName
+          const { pendingApproval, pendingCeoApproval } = get()
           set({
             messages,
             sessions,
@@ -310,8 +334,10 @@ export const useAppStore = create<AppState>((set, get) => ({
             streamingContent: '',
             streamingToolCalls: [],
             chatError: null,
-            pendingApproval: null,
-            pendingCeoApproval: null,
+            pendingApproval:
+              pendingApproval?.sessionId === event.sessionId ? null : pendingApproval,
+            pendingCeoApproval:
+              pendingCeoApproval?.sessionId === event.sessionId ? null : pendingCeoApproval,
             teamStage: null,
             activePersona: sticky
               ? { personaId: sticky, personaName: sticky }
@@ -338,7 +364,17 @@ export const useAppStore = create<AppState>((set, get) => ({
           })
         })()
       } else if (event.type === 'error') {
-        set({ isStreaming: false, streamingContent: '', streamingToolCalls: [], chatError: event.message })
+        const { pendingApproval, pendingCeoApproval } = get()
+        set({
+          isStreaming: false,
+          streamingContent: '',
+          streamingToolCalls: [],
+          chatError: event.message,
+          pendingApproval:
+            pendingApproval?.sessionId === event.sessionId ? null : pendingApproval,
+          pendingCeoApproval:
+            pendingCeoApproval?.sessionId === event.sessionId ? null : pendingCeoApproval,
+        })
       }
     })
 
@@ -355,8 +391,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
 
     // External edits (Finder, other apps) may miss FS events — refresh on focus.
+    // Debounce: window focus can fire in bursts with dialogs / approvals.
+    let focusRefreshTimer: ReturnType<typeof setTimeout> | null = null
     window.addEventListener('focus', () => {
-      if (get().workspace) void get().refreshFileTree()
+      if (!get().workspace) return
+      if (focusRefreshTimer) clearTimeout(focusRefreshTimer)
+      focusRefreshTimer = setTimeout(() => {
+        focusRefreshTimer = null
+        void get().refreshFileTree()
+      }, 400)
     })
 
     window.codex.on(IPC_EVENTS.MENU_OPEN_FOLDER, () => {
@@ -415,6 +458,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         explorerExpanded: {},
         tabs: [],
         activeTabPath: null,
+        primaryTabPath: null,
+        secondaryTabPath: null,
+        editorSplit: false,
+        activePane: 'primary',
         sessions,
         activeSessionId: null,
         messages: [],
@@ -423,7 +470,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         isStreaming: false,
         chatError: null,
         pendingApproval: null,
-        sessionMode: 'ask',
+        sessionMode: 'agent',
         indexStatus: { state: 'indexing', totalFiles: 0, indexedFiles: 0 },
       })
 
@@ -450,11 +497,26 @@ export const useAppStore = create<AppState>((set, get) => ({
       explorerExpanded: {},
       tabs: [],
       activeTabPath: null,
+      primaryTabPath: null,
+      secondaryTabPath: null,
+      editorSplit: false,
+      activePane: 'primary',
       sessions: [],
       activeSessionId: null,
       messages: [],
       indexStatus: { state: 'idle', totalFiles: 0, indexedFiles: 0 },
     })
+  },
+
+  addWorkspaceRoot: async (path?: string) => {
+    let targetPath = path
+    if (!targetPath) {
+      targetPath = (await window.codex.invoke(IPC_CHANNELS.DIALOG_OPEN_DIRECTORY)) ?? undefined
+    }
+    if (!targetPath) return
+    const workspace = await window.codex.invoke(IPC_CHANNELS.WORKSPACE_ADD_ROOT, targetPath)
+    const fileTree = await window.codex.invoke(IPC_CHANNELS.WORKSPACE_GET_TREE)
+    set({ workspace, fileTree })
   },
 
   toggleExplorerDir: (path: string) => {
@@ -511,18 +573,26 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   openFile: async (path: string, name: string) => {
-    const { tabs } = get()
+    const { tabs, editorSplit, activePane } = get()
     const existing = tabs.find((t) => t.path === path)
     get().revealInExplorer(path)
+    const panePatch =
+      editorSplit && activePane === 'secondary'
+        ? { secondaryTabPath: path, activeTabPath: path, activePane: 'secondary' as const }
+        : {
+            primaryTabPath: path,
+            activeTabPath: path,
+            activePane: 'primary' as const,
+          }
     if (existing) {
-      set({ activeTabPath: path })
+      set(panePatch)
       return
     }
 
     const content = await window.codex.invoke(IPC_CHANNELS.FILE_READ, path)
     set({
       tabs: [...tabs, { path, name, content, isDirty: false, mdViewMode: defaultMdViewMode(name) }],
-      activeTabPath: path,
+      ...panePatch,
     })
   },
 
@@ -554,13 +624,31 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   closeTab: (path: string) => {
-    const { tabs, activeTabPath } = get()
+    const { tabs, activeTabPath, primaryTabPath, secondaryTabPath } = get()
     const next = tabs.filter((t) => t.path !== path)
-    let nextActive = activeTabPath
-    if (activeTabPath === path) {
-      nextActive = next.length > 0 ? next[next.length - 1].path : null
-    }
-    set({ tabs: next, activeTabPath: nextActive })
+    const fallback = next.length > 0 ? next[next.length - 1].path : null
+    const nextPrimary =
+      primaryTabPath === path
+        ? fallback
+        : primaryTabPath && next.some((t) => t.path === primaryTabPath)
+          ? primaryTabPath
+          : fallback
+    const nextSecondary =
+      secondaryTabPath === path
+        ? next.find((t) => t.path !== nextPrimary)?.path ?? nextPrimary
+        : secondaryTabPath && next.some((t) => t.path === secondaryTabPath)
+          ? secondaryTabPath
+          : null
+    const nextActive =
+      activeTabPath === path ? nextPrimary : activeTabPath && next.some((t) => t.path === activeTabPath)
+        ? activeTabPath
+        : nextPrimary
+    set({
+      tabs: next,
+      activeTabPath: nextActive,
+      primaryTabPath: nextPrimary,
+      secondaryTabPath: nextSecondary,
+    })
   },
 
   closeAllTabs: () => {
@@ -573,12 +661,57 @@ export const useAppStore = create<AppState>((set, get) => ({
       )
       if (!ok) return
     }
-    set({ tabs: [], activeTabPath: null })
+    set({
+      tabs: [],
+      activeTabPath: null,
+      primaryTabPath: null,
+      secondaryTabPath: null,
+      editorSplit: false,
+      activePane: 'primary',
+    })
   },
 
   setActiveTab: (path: string) => {
     get().revealInExplorer(path)
-    set({ activeTabPath: path })
+    const { editorSplit, activePane } = get()
+    if (editorSplit && activePane === 'secondary') {
+      set({ activeTabPath: path, secondaryTabPath: path })
+    } else {
+      set({ activeTabPath: path, primaryTabPath: path })
+    }
+  },
+
+  toggleEditorSplit: () => {
+    const { editorSplit, activeTabPath, tabs, primaryTabPath } = get()
+    if (editorSplit) {
+      set({
+        editorSplit: false,
+        secondaryTabPath: null,
+        activePane: 'primary',
+        activeTabPath: primaryTabPath ?? activeTabPath,
+      })
+      return
+    }
+    const primary = primaryTabPath ?? activeTabPath
+    const other = tabs.find((t) => t.path !== primary)?.path ?? primary
+    set({
+      editorSplit: true,
+      primaryTabPath: primary,
+      secondaryTabPath: other,
+      activePane: 'primary',
+      activeTabPath: primary,
+    })
+  },
+
+  setActivePane: (pane) => {
+    const { primaryTabPath, secondaryTabPath, activeTabPath } = get()
+    set({
+      activePane: pane,
+      activeTabPath:
+        pane === 'secondary'
+          ? (secondaryTabPath ?? activeTabPath)
+          : (primaryTabPath ?? activeTabPath),
+    })
   },
 
   setTabMdViewMode: (path: string, mode: MdViewMode) => {
@@ -639,7 +772,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             isStreaming: false,
             chatError: null,
             pendingApproval: null,
-            sessionMode: 'ask' as const,
+            sessionMode: 'agent' as const,
           }),
     })
 
@@ -785,11 +918,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   respondApproval: async (approved: boolean) => {
-    const { pendingApproval, activeSessionId } = get()
-    if (!pendingApproval || !activeSessionId) return
+    const { pendingApproval } = get()
+    if (!pendingApproval) return
     await window.codex.invoke(
       IPC_CHANNELS.AGENT_APPROVAL_RESPOND,
-      activeSessionId,
+      pendingApproval.sessionId,
       pendingApproval.toolCallId,
       approved,
     )
@@ -797,12 +930,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   respondCeoApproval: async (decision, note) => {
-    const { pendingCeoApproval, activeSessionId } = get()
-    if (!pendingCeoApproval || !activeSessionId) return
-    await window.codex.invoke(IPC_CHANNELS.CEO_APPROVAL_RESPOND, activeSessionId, pendingCeoApproval.approvalId, {
-      decision,
-      note,
-    })
+    const { pendingCeoApproval } = get()
+    if (!pendingCeoApproval) return
+    await window.codex.invoke(
+      IPC_CHANNELS.CEO_APPROVAL_RESPOND,
+      pendingCeoApproval.sessionId,
+      pendingCeoApproval.approvalId,
+      {
+        decision,
+        note,
+      },
+    )
     set({ pendingCeoApproval: null })
   },
 
@@ -837,7 +975,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       sessionId: activeSessionId,
       content,
       attachments,
-      mode: sessionMode === 'agent' ? 'agent' : 'ask',
+      mode: sessionMode === 'agent' ? 'agent' : sessionMode === 'plan' ? 'plan' : 'ask',
       contextPaths,
     })
   },

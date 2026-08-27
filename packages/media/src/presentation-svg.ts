@@ -63,6 +63,19 @@ export async function writePresentationSlideSvg(
           : ''
       }
     `
+  } else if (layout === 'diagram') {
+    body = `
+      <text x="80" y="100" fill="${theme.accent}" font-size="30" font-family="${FONT_SANS}" font-weight="700">${escapeXml(clampLine(slide.title, 28))}</text>
+      <rect x="64" y="130" width="1152" height="480" rx="12" fill="${theme.codeBg}" stroke="${theme.muted}" stroke-opacity="0.35"/>
+      <text x="640" y="360" fill="${theme.muted}" font-size="22" font-family="${FONT_SANS}" text-anchor="middle">${
+        slide.imagePath
+          ? 'Mermaid diagram (embedded in PPTX)'
+          : 'Mermaid diagram preview'
+      }</text>
+      <text x="640" y="400" fill="${theme.muted}" font-size="14" font-family="${FONT_MONO}" text-anchor="middle">${escapeXml(
+        clampLine((slide.code || '').split('\n')[0] || '', 60),
+      )}</text>
+    `
   } else if (layout === 'code') {
     const code = (slide.code || '').split('\n').slice(0, 14)
     const lang = slide.codeLanguage || 'code'

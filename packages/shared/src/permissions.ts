@@ -1,7 +1,7 @@
 export type PermissionAction = 'allow' | 'ask' | 'deny'
 
 /** Coarse tool categories for permission policy. */
-export type ToolPermissionCategory = 'read' | 'edit' | 'shell' | 'network' | 'media'
+export type ToolPermissionCategory = 'read' | 'edit' | 'shell' | 'network' | 'media' | 'mcp'
 
 export interface AgentPermissions {
   read: PermissionAction
@@ -11,6 +11,8 @@ export interface AgentPermissions {
   network: PermissionAction
   /** GenerateVideo / GeneratePresentation and other media synthesis tools */
   media: PermissionAction
+  /** External MCP tools */
+  mcp: PermissionAction
 }
 
 export const DEFAULT_AGENT_PERMISSIONS: AgentPermissions = {
@@ -19,12 +21,14 @@ export const DEFAULT_AGENT_PERMISSIONS: AgentPermissions = {
   shell: 'ask',
   network: 'allow',
   media: 'ask',
+  mcp: 'ask',
 }
 
 export const TOOL_PERMISSION_CATEGORY: Record<string, ToolPermissionCategory> = {
   Read: 'read',
   Grep: 'read',
   Glob: 'read',
+  GitStatus: 'read',
   Write: 'edit',
   StrReplace: 'edit',
   Delete: 'edit',
@@ -37,10 +41,18 @@ export const TOOL_PERMISSION_CATEGORY: Record<string, ToolPermissionCategory> = 
   GeneratePresentation: 'media',
 }
 
+/** MCP tools are registered as `mcp__<serverId>__<toolName>`. */
+export function isMcpToolName(toolName: string): boolean {
+  return toolName.startsWith('mcp__')
+}
+
 export function permissionForTool(
   toolName: string,
   permissions: AgentPermissions,
 ): PermissionAction {
+  if (isMcpToolName(toolName)) {
+    return permissions.mcp ?? 'ask'
+  }
   const category = TOOL_PERMISSION_CATEGORY[toolName] ?? 'edit'
   return permissions[category] ?? 'ask'
 }

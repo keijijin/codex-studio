@@ -4,8 +4,6 @@ import { ChatInput } from './ChatInput'
 import { MessageList } from './MessageList'
 import { ToolLogPanel } from './ToolLogPanel'
 import { useSettingsDialog } from './SettingsDialog'
-import { ApprovalDialog } from './ApprovalDialog'
-import { CeoApprovalDialog } from './CeoApprovalDialog'
 import {
   IPC_CHANNELS,
   isRedactedApiKey,
@@ -48,11 +46,7 @@ export function AIPanel() {
   const setSessionMode = useAppStore((s) => s.setSessionMode)
   const setSessionPersona = useAppStore((s) => s.setSessionPersona)
   const setRoutingMode = useAppStore((s) => s.setRoutingMode)
-  const pendingApproval = useAppStore((s) => s.pendingApproval)
-  const pendingCeoApproval = useAppStore((s) => s.pendingCeoApproval)
   const teamStage = useAppStore((s) => s.teamStage)
-  const respondApproval = useAppStore((s) => s.respondApproval)
-  const respondCeoApproval = useAppStore((s) => s.respondCeoApproval)
   const toggleAiPanel = useAppStore((s) => s.toggleAiPanel)
   const clearSessionToolLog = useAppStore((s) => s.clearSessionToolLog)
   const { openSettings, settingsDialog } = useSettingsDialog()
@@ -98,7 +92,7 @@ export function AIPanel() {
                   : 'OpenAI'
   const modelLabel =
     routingInfo?.model ??
-    (sessionMode === 'agent'
+    (sessionMode === 'agent' || sessionMode === 'plan'
       ? settings?.models.defaultAgentModel ?? settings?.models.defaultChatModel
       : settings?.models.defaultChatModel)
   const routingMode = settings?.routing?.mode ?? 'fixed'
@@ -115,8 +109,20 @@ export function AIPanel() {
   )
 
   const handleModeChange = (mode: SessionMode) => {
-    if (mode === 'plan') return
     void setSessionMode(mode)
+  }
+
+  const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant' && m.content.trim())
+
+  const promotePlanToAgent = () => {
+    if (!lastAssistant || isStreaming) return
+    void (async () => {
+      await setSessionMode('agent')
+      await sendMessage(
+        `以下のプランを承認しました。実装を進めてください。\n\n${lastAssistant.content}`,
+        [],
+      )
+    })()
   }
 
   useLayoutEffect(() => {
@@ -128,18 +134,6 @@ export function AIPanel() {
   return (
     <aside className="flex w-96 min-w-80 flex-col border-l border-surface-border bg-surface-raised">
       {settingsDialog}
-      {pendingApproval && (
-        <ApprovalDialog
-          request={pendingApproval}
-          onRespond={(approved) => void respondApproval(approved)}
-        />
-      )}
-      {pendingCeoApproval && (
-        <CeoApprovalDialog
-          request={pendingCeoApproval}
-          onRespond={(decision, note) => void respondCeoApproval(decision, note)}
-        />
-      )}
 
       <div className="flex h-9 items-center justify-between border-b border-surface-border px-3">
         <span className="text-sm font-medium">AI Chat</span>
@@ -166,12 +160,12 @@ export function AIPanel() {
           </button>
           <button
             type="button"
-            title="履歴を Compact"
+            title="履歴を圧縮（中間ターン要約・巨大 tool result を削減）"
             className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-white/10 disabled:opacity-40"
             disabled={!activeSessionId || isStreaming || messages.length <= 4}
             onClick={() => void compactChat()}
           >
-            Compact
+            履歴を圧縮
           </button>
           <button
             type="button"
@@ -204,7 +198,7 @@ export function AIPanel() {
         </select>
 
         <div className="mt-2 flex gap-1">
-          {(['ask', 'agent'] as const).map((mode) => (
+          {(['ask', 'plan', 'agent'] as const).map((mode) => (
             <button
               key={mode}
               type="button"
@@ -216,7 +210,7 @@ export function AIPanel() {
                   : 'bg-surface text-text-secondary hover:bg-white/10'
               } disabled:opacity-50`}
             >
-              {mode === 'ask' ? 'Ask' : 'Agent'}
+              {mode === 'ask' ? 'Ask' : mode === 'plan' ? 'Plan' : 'Agent'}
             </button>
           ))}
         </div>
@@ -295,7 +289,8 @@ export function AIPanel() {
         </div>
 
         <p className="mt-2 text-xs text-text-muted">
-          {sessionMode === 'agent' ? 'Agent' : 'Ask'} · {providerLabel}: {modelLabel ?? 'gpt-4o'}
+          {sessionMode === 'agent' ? 'Agent' : sessionMode === 'plan' ? 'Plan' : 'Ask'} ·{' '}
+          {providerLabel}: {modelLabel ?? 'gpt-4o'}
           {(activePersona?.personaName || lastTrace?.personaName) && (
             <>
               {' · '}
@@ -348,6 +343,20 @@ export function AIPanel() {
             <p className="mt-4 text-xs text-text-muted">
               Workspace: <span className="text-accent">{workspace.name}</span>
             </p>
+          )}
+          {sessionMode === 'plan' && lastAssistant && !isStreaming && (
+            <div className="mt-3 rounded border border-accent/40 bg-accent/10 p-2">
+              <p className="mb-2 text-[11px] text-text-secondary">
+                Plan の手順を確認したら Agent で実行できます。
+              </p>
+              <button
+                type="button"
+                className="w-full rounded bg-accent px-2 py-1.5 text-xs text-white hover:bg-accent-hover"
+                onClick={promotePlanToAgent}
+              >
+                このプランを Agent で実行
+              </button>
+            </div>
           )}
         </div>
       ) : (

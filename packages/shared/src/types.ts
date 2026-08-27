@@ -42,10 +42,12 @@ export interface Message {
 }
 
 export interface Attachment {
-  type: 'file' | 'folder' | 'selection'
+  type: 'file' | 'folder' | 'codebase' | 'selection' | 'image'
   path: string
   name: string
   content?: string
+  /** MIME type for image attachments */
+  mimeType?: string
 }
 
 export type LLMProviderId = 'openai' | 'anthropic' | 'ollama' | 'xai'
@@ -63,6 +65,17 @@ export interface ModelInfo {
 import type { AgentPermissions } from './permissions'
 import { DEFAULT_AGENT_PERMISSIONS } from './permissions'
 import { DEFAULT_ROUTING, type RoutingSettings } from './routing'
+import {
+  DEFAULT_KEYBINDINGS,
+  DEFAULT_SEMANTIC_SEARCH,
+  DEFAULT_TAB_COMPLETION,
+  DEFAULT_LANGFUSE,
+  type KeybindingMap,
+  type McpServerConfig,
+  type SemanticSearchSettings,
+  type TabCompletionSettings,
+  type LangfuseSettings,
+} from './features'
 
 export interface CostSettings {
   /** Append LLM usage lines to logs/usage.jsonl (default true) */
@@ -109,7 +122,7 @@ export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
   ttsVoice: 'alloy',
   maxShots: 12,
   maxGenerativeShots: 4,
-  outputDir: '.codex/video',
+  outputDir: 'videos',
 }
 
 export type PresentationThemeId = 'midnight' | 'paper' | 'forest' | 'coral'
@@ -128,13 +141,18 @@ export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
   themeId: 'midnight',
   maxSlides: 16,
   includeNotes: true,
-  outputDir: '.codex/presentation',
+  outputDir: 'presentations',
 }
 
 export interface AppSettings {
   general: {
     theme: 'dark' | 'light' | 'system'
     language: 'ja' | 'en'
+    /**
+     * When false, dist/out/release 等を Explorer・索引・監視から除外。
+     * When true (default), Explorer に浅い一覧で表示（深い走査・監視はしない）。
+     */
+    showBuildOutputs: boolean
   }
   models: {
     defaultProvider: LLMProviderId
@@ -169,12 +187,23 @@ export interface AppSettings {
   video: VideoSettings
   /** Presentation (PPTX) generation */
   presentation: PresentationSettings
+  /** External MCP servers (stdio) */
+  mcpServers: McpServerConfig[]
+  /** Inline Tab completion */
+  tabCompletion: TabCompletionSettings
+  /** Embedding-based @codebase */
+  semanticSearch: SemanticSearchSettings
+  /** Customizable keybindings (Mod = Cmd on mac / Ctrl elsewhere) */
+  keybindings: KeybindingMap
+  /** Langfuse tracing (self-host localhost:3000 or Cloud) */
+  langfuse: LangfuseSettings
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
   general: {
     theme: 'dark',
     language: 'ja',
+    showBuildOutputs: true,
   },
   models: {
     defaultProvider: 'openai',
@@ -194,6 +223,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   cost: { ...DEFAULT_COST_SETTINGS },
   video: { ...DEFAULT_VIDEO_SETTINGS },
   presentation: { ...DEFAULT_PRESENTATION_SETTINGS },
+  mcpServers: [],
+  tabCompletion: { ...DEFAULT_TAB_COMPLETION },
+  semanticSearch: { ...DEFAULT_SEMANTIC_SEARCH },
+  keybindings: { ...DEFAULT_KEYBINDINGS },
+  langfuse: { ...DEFAULT_LANGFUSE },
 }
 
 export type AgentEvent =

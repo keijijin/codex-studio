@@ -6,6 +6,7 @@ export type SlideLayout =
   | 'bullets'
   | 'two_column'
   | 'code'
+  | 'diagram'
   | 'quote'
   | 'closing'
 
@@ -21,6 +22,8 @@ export interface DeckSlide {
   rightBullets?: string[]
   code?: string
   codeLanguage?: string
+  /** Absolute path to a rendered diagram image (PNG) for layout=diagram */
+  imagePath?: string
   quote?: string
   notes?: string
 }
@@ -55,6 +58,8 @@ export interface PresentationPipelineOptions {
   markdown: string
   themeId?: PresentationThemeId
   slug?: string
+  /** Relative to workspace root (default: presentations) */
+  outputDir?: string
   openaiApiKey?: string
   directorModel?: string
   maxSlides: number

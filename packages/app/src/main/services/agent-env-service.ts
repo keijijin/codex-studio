@@ -8,6 +8,7 @@ import {
   mergeShellEnv,
   parseEnvFile,
 } from '@codex/tools'
+import { ensureUtf8LocaleEnv } from '@codex/shared'
 import { workspaceService } from './workspace'
 
 export interface AgentEnvStatus {
@@ -73,10 +74,11 @@ class AgentEnvService {
 
   resolve(workspaceRoot?: string | null): NodeJS.ProcessEnv {
     const root = workspaceRoot ?? workspaceService.getRoot()
+    const base = ensureUtf8LocaleEnv(process.env)
     if (!root) {
-      return mergeShellEnv(process.env, this.overlay)
+      return mergeShellEnv(base, this.overlay)
     }
-    return mergeShellEnv(process.env, loadWorkspaceAgentEnv(root), this.overlay)
+    return mergeShellEnv(base, loadWorkspaceAgentEnv(root), this.overlay)
   }
 
   status(workspaceRoot?: string | null): AgentEnvStatus {

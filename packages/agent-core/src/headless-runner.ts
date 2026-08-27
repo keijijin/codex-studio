@@ -1,3 +1,4 @@
+import { readFileSync } from 'fs'
 import { homedir } from 'os'
 import { join, relative, resolve } from 'path'
 import type { AgentMessage, LLMProvider } from '@codex/llm-adapters'
@@ -5,6 +6,7 @@ import { getProviderInstance } from '@codex/llm-adapters'
 import {
   DEFAULT_AGENT_PERMISSIONS,
   PERMISSION_PROFILES,
+  createDefaultPathIgnore,
   type AgentPermissions,
   type LLMProviderId,
   type PermissionProfile,
@@ -42,6 +44,7 @@ const ALL_TOOLS = [
   'Read',
   'Grep',
   'Glob',
+  'GitStatus',
   'Write',
   'StrReplace',
   'Delete',
@@ -152,6 +155,17 @@ export async function runHeadlessAgent(
   const events: AgentOrchestratorEvent[] = []
   let text = ''
 
+  let gitignoreContent = ''
+  try {
+    gitignoreContent = readFileSync(join(workspaceRoot, '.gitignore'), 'utf-8')
+  } catch {
+    gitignoreContent = ''
+  }
+  const pathIgnore = createDefaultPathIgnore({
+    gitignoreContent,
+    showBuildOutputs: false,
+  })
+
   const ctx: AgentRunContext = {
     workspaceRoot,
     sessionId: `headless-${Date.now()}`,
@@ -166,6 +180,7 @@ export async function runHeadlessAgent(
     resolvePath: (p) => resolveWithinWorkspace(workspaceRoot, p),
     getRelativePath: (absolutePath) =>
       relative(workspaceRoot, absolutePath).replace(/\\/g, '/'),
+    isIgnoredPath: (rel) => pathIgnore.ignores(rel),
     rulesPrompt,
     skillPrompt,
     personaPrompt,
@@ -180,7 +195,7 @@ export async function runHeadlessAgent(
         ttsVoice: 'alloy',
         maxShots: 12,
         maxGenerativeShots: 4,
-        outputDir: '.codex/video',
+        outputDir: 'videos',
         runwayApiKey: options.runwayApiKey,
       },
       openaiApiKey: options.apiKey || process.env.OPENAI_API_KEY,
@@ -195,7 +210,7 @@ export async function runHeadlessAgent(
         themeId: 'midnight' as const,
         maxSlides: 16,
         includeNotes: true,
-        outputDir: '.codex/presentation',
+        outputDir: 'presentations',
       },
       openaiApiKey: options.apiKey || process.env.OPENAI_API_KEY,
     }),

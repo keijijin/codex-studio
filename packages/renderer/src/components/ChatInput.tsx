@@ -10,11 +10,16 @@ interface ChatInputProps {
   disabled?: boolean
 }
 
-function flattenFiles(nodes: FileNode[]): FileNode[] {
+type MentionSuggestion =
+  | { kind: 'file'; node: FileNode }
+  | { kind: 'folder'; node: FileNode }
+  | { kind: 'codebase' }
+
+function flattenNodes(nodes: FileNode[]): FileNode[] {
   const result: FileNode[] = []
   for (const node of nodes) {
-    if (node.type === 'file') result.push(node)
-    if (node.children) result.push(...flattenFiles(node.children))
+    result.push(node)
+    if (node.children) result.push(...flattenNodes(node.children))
   }
   return result
 }
@@ -22,7 +27,7 @@ function flattenFiles(nodes: FileNode[]): FileNode[] {
 export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInputProps) {
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
-  const [suggestions, setSuggestions] = useState<FileNode[]>([])
+  const [suggestions, setSuggestions] = useState<MentionSuggestion[]>([])
   const [skills, setSkills] = useState<SkillFile[]>([])
   const [personas, setPersonas] = useState<PersonaFile[]>([])
   const [skillSuggestions, setSkillSuggestions] = useState<SkillFile[]>([])
@@ -32,7 +37,7 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const isComposingRef = useRef(false)
 
-  const allFiles = flattenFiles(fileTree)
+  const allNodes = flattenNodes(fileTree)
 
   useEffect(() => {
     if (!workspace) {
@@ -89,7 +94,6 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
       const skillHits = skills
         .filter((s) => s.name.includes(query) || s.description.toLowerCase().includes(query))
         .slice(0, 8)
-      // Surface /persona when the query matches
       if (!query || 'persona'.includes(query)) {
         setSkillSuggestions([
           {
@@ -113,11 +117,17 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
     const match = value.match(/@(\S*)$/)
     if (match) {
       const query = match[1].toLowerCase()
-      setSuggestions(
-        allFiles
-          .filter((f) => f.name.toLowerCase().includes(query))
-          .slice(0, 8),
-      )
+      const items: MentionSuggestion[] = []
+      if (!query || 'codebase'.startsWith(query) || 'codebase'.includes(query)) {
+        items.push({ kind: 'codebase' })
+      }
+      for (const node of allNodes) {
+        if (!node.name.toLowerCase().includes(query)) continue
+        if (node.type === 'directory') items.push({ kind: 'folder', node })
+        else items.push({ kind: 'file', node })
+        if (items.length >= 10) break
+      }
+      setSuggestions(items.slice(0, 10))
     } else {
       setSuggestions([])
     }
@@ -141,18 +151,45 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
     textareaRef.current?.focus()
   }
 
-  const selectFile = async (file: FileNode) => {
-    const content = await window.codex.invoke(IPC_CHANNELS.FILE_READ, file.path)
+  const selectMention = async (item: MentionSuggestion) => {
+    if (item.kind === 'codebase') {
+      const attachment: Attachment = {
+        type: 'codebase',
+        path: 'codebase',
+        name: 'codebase',
+      }
+      setAttachments((prev) => [
+        ...prev.filter((a) => !(a.type === 'codebase' && a.path === 'codebase')),
+        attachment,
+      ])
+      setText(text.replace(/@\S*$/, '@codebase '))
+      setSuggestions([])
+      textareaRef.current?.focus()
+      return
+    }
+
+    if (item.kind === 'folder') {
+      const attachment: Attachment = {
+        type: 'folder',
+        path: item.node.path,
+        name: item.node.name,
+      }
+      setAttachments((prev) => [...prev.filter((a) => a.path !== item.node.path), attachment])
+      setText(text.replace(/@\S*$/, `@${item.node.name}/ `))
+      setSuggestions([])
+      textareaRef.current?.focus()
+      return
+    }
+
+    const content = await window.codex.invoke(IPC_CHANNELS.FILE_READ, item.node.path)
     const attachment: Attachment = {
       type: 'file',
-      path: file.path,
-      name: file.name,
+      path: item.node.path,
+      name: item.node.name,
       content,
     }
-    setAttachments((prev) => [...prev.filter((a) => a.path !== file.path), attachment])
-
-    const newText = text.replace(/@\S*$/, `@${file.name} `)
-    setText(newText)
+    setAttachments((prev) => [...prev.filter((a) => a.path !== item.node.path), attachment])
+    setText(text.replace(/@\S*$/, `@${item.node.name} `))
     setSuggestions([])
     textareaRef.current?.focus()
   }
@@ -170,7 +207,6 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
-      // IME 変換確定の Enter では送信しない
       if (e.nativeEvent.isComposing || isComposingRef.current || e.keyCode === 229) {
         return
       }
@@ -182,20 +218,65 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
     }
   }
 
+  const imageInputRef = useRef<HTMLInputElement>(null)
+
+  const chipLabel = (a: Attachment) => {
+    if (a.type === 'codebase') return '@codebase'
+    if (a.type === 'folder') return `📁 ${a.name}/`
+    if (a.type === 'image') return `🖼 ${a.name}`
+    return `📎 ${a.name}`
+  }
+
+  const addImages = (files: FileList | null) => {
+    if (!files?.length) return
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith('image/')) continue
+      const reader = new FileReader()
+      reader.onload = () => {
+        const content = typeof reader.result === 'string' ? reader.result : ''
+        if (!content.startsWith('data:')) return
+        const attachment: Attachment = {
+          type: 'image',
+          path: `image:${file.name}:${Date.now()}`,
+          name: file.name,
+          mimeType: file.type || 'image/png',
+          content,
+        }
+        setAttachments((prev) => [...prev, attachment])
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+
   return (
     <div className="border-t border-surface-border p-3">
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          addImages(e.target.files)
+          e.target.value = ''
+        }}
+      />
       {attachments.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-1">
           {attachments.map((a) => (
             <span
-              key={a.path}
+              key={`${a.type}:${a.path}`}
               className="flex items-center gap-1 rounded bg-accent-muted px-2 py-0.5 text-xs text-accent"
             >
-              📎 {a.name}
+              {chipLabel(a)}
               <button
                 type="button"
                 className="hover:text-white"
-                onClick={() => setAttachments((prev) => prev.filter((x) => x.path !== a.path))}
+                onClick={() =>
+                  setAttachments((prev) =>
+                    prev.filter((x) => !(x.path === a.path && x.type === a.type)),
+                  )
+                }
               >
                 ×
               </button>
@@ -241,17 +322,34 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
       )}
 
       {suggestions.length > 0 && (
-        <div className="mb-2 max-h-32 overflow-auto rounded border border-surface-border bg-surface">
-          {suggestions.map((f) => (
-            <button
-              key={f.path}
-              type="button"
-              className="block w-full truncate px-3 py-1 text-left text-xs hover:bg-white/10"
-              onClick={() => void selectFile(f)}
-            >
-              📄 {f.name}
-            </button>
-          ))}
+        <div className="mb-2 max-h-40 overflow-auto rounded border border-surface-border bg-surface">
+          {suggestions.map((item) => {
+            if (item.kind === 'codebase') {
+              return (
+                <button
+                  key="codebase"
+                  type="button"
+                  className="block w-full truncate px-3 py-1 text-left text-xs hover:bg-white/10"
+                  onClick={() => void selectMention(item)}
+                >
+                  🔎 @codebase — キーワードで関連箇所を拾う
+                </button>
+              )
+            }
+            const icon = item.kind === 'folder' ? '📁' : '📄'
+            const suffix = item.kind === 'folder' ? '/' : ''
+            return (
+              <button
+                key={`${item.kind}:${item.node.path}`}
+                type="button"
+                className="block w-full truncate px-3 py-1 text-left text-xs hover:bg-white/10"
+                onClick={() => void selectMention(item)}
+              >
+                {icon} {item.node.name}
+                {suffix}
+              </button>
+            )
+          })}
         </div>
       )}
 
@@ -268,18 +366,29 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
           isComposingRef.current = false
         }}
         onKeyDown={handleKeyDown}
-        placeholder="メッセージを入力... (/persona · /skill · @file · Enter で送信)"
+        placeholder="メッセージ… (/skill · @file · @folder · @codebase · 画像 · Enter 送信)"
         disabled={disabled}
       />
 
-      <div className="mt-2 flex items-center justify-between">
-        <span className="text-xs text-text-muted">
-          {isStreaming
-            ? '生成中... (Esc で中断)'
-            : skills.length > 0 || personas.length > 0
-              ? `Shift+Enter で改行 · / で Skills・Personas（${skills.length + personas.length}）`
-              : 'Shift+Enter で改行'}
-        </span>
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <button
+            type="button"
+            disabled={disabled || isStreaming}
+            onClick={() => imageInputRef.current?.click()}
+            className="shrink-0 rounded border border-surface-border px-2 py-1 text-xs text-text-secondary hover:bg-white/5 disabled:opacity-50"
+            title="画像を添付（ビジョン対応モデル向け）"
+          >
+            画像
+          </button>
+          <span className="truncate text-xs text-text-muted">
+            {isStreaming
+              ? '生成中... (Esc で中断)'
+              : skills.length > 0 || personas.length > 0
+                ? `Shift+Enter で改行 · / で Skills・Personas（${skills.length + personas.length}）`
+                : 'Shift+Enter で改行'}
+          </span>
+        </div>
         {isStreaming ? (
           <button
             type="button"

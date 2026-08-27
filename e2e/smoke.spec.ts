@@ -67,7 +67,7 @@ test('sends chat message with E2E mock provider', async () => {
     await page.getByRole('button', { name: 'Ask', exact: true }).click()
     await expect(page.getByText(/^Ask · /)).toBeVisible()
 
-    const textarea = page.getByPlaceholder(/メッセージを入力/)
+    const textarea = page.getByPlaceholder(/メッセージ/)
     await textarea.fill('hello from e2e')
     await page.getByRole('button', { name: '送信' }).click()
 
@@ -112,7 +112,7 @@ test('completes agent write task with approval', async () => {
     await page.getByRole('button', { name: 'Agent', exact: true }).click()
     await expect(page.getByText(/^Agent · /)).toBeVisible()
 
-    const textarea = page.getByPlaceholder(/メッセージを入力/)
+    const textarea = page.getByPlaceholder(/メッセージ/)
     await textarea.fill('write e2e test file')
     await page.getByRole('button', { name: '送信' }).click()
 

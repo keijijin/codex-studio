@@ -12,6 +12,7 @@ export function ActivityBar() {
   const items = [
     { id: 'explorer' as const, icon: '📁', label: 'Explorer' },
     { id: 'search' as const, icon: '🔍', label: 'Search' },
+    { id: 'git' as const, icon: '⎇', label: 'Source Control' },
     { id: 'terminal' as const, icon: '⌨️', label: 'Terminal' },
     { id: 'chat' as const, icon: '💬', label: 'AI Chat' },
   ]

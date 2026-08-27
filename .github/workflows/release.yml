@@ -16,13 +16,10 @@ jobs:
         include:
           - os: macos-latest
             platform: mac
-            artifact_glob: release/*.dmg
           - os: ubuntu-latest
             platform: linux
-            artifact_glob: release/*.AppImage
           - os: windows-latest
             platform: win
-            artifact_glob: release/*.exe
 
     runs-on: ${{ matrix.os }}
 
@@ -52,9 +49,25 @@ jobs:
         run: pnpm build
 
       - name: Package (${{ matrix.platform }})
-        run: pnpm exec electron-builder --${{ matrix.platform }} --publish never
+        shell: bash
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Disable auto identity discovery unless a cert secret is present
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' && 'true' || 'false' }}
+        run: |
+          EXTRA=()
+          if [[ "${{ matrix.platform }}" == "mac" && -n "${APPLE_ID}" && -n "${APPLE_TEAM_ID}" && -n "${APPLE_APP_SPECIFIC_PASSWORD}" ]]; then
+            EXTRA+=(-c.mac.notarize=true)
+            echo "Notarization enabled"
+          else
+            echo "Notarization skipped (secrets missing or non-mac)"
+          fi
+          pnpm exec electron-builder --${{ matrix.platform }} --publish never "${EXTRA[@]}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -62,8 +75,13 @@ jobs:
         with:
           name: codex-studio-${{ matrix.platform }}
           path: |
-            ${{ matrix.artifact_glob }}
+            release/*.dmg
+            release/*.zip
+            release/*.exe
+            release/*.AppImage
             release/*.deb
+            release/*.yml
+            release/*.blockmap
           if-no-files-found: error
 
   release:
@@ -87,6 +105,10 @@ jobs:
           if [ "$count" -eq 0 ]; then
             echo "No release artifacts downloaded — aborting"
             exit 1
+          fi
+          # electron-updater needs latest-*.yml on the Release
+          if ! find artifacts -name 'latest*.yml' | grep -q .; then
+            echo "WARNING: no latest*.yml found — in-app auto-update may not work until yml is published"
           fi
 
       - name: Create GitHub Release

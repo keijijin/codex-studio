@@ -1,11 +1,17 @@
 import { Explorer } from './Explorer'
 import { SearchPanel } from './SearchPanel'
+import { SourceControl } from './SourceControl'
 import { useAppStore } from '@renderer/store/app-store'
 
 export function Sidebar() {
   const sidebarView = useAppStore((s) => s.sidebarView)
 
-  const title = sidebarView === 'search' ? 'Search' : 'Explorer'
+  const title =
+    sidebarView === 'search'
+      ? 'Search'
+      : sidebarView === 'git'
+        ? 'Source Control'
+        : 'Explorer'
 
   return (
     <aside className="flex w-64 min-w-64 flex-col border-r border-surface-border bg-surface-raised">
@@ -13,7 +19,13 @@ export function Sidebar() {
         {title}
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        {sidebarView === 'search' ? <SearchPanel /> : <Explorer />}
+        {sidebarView === 'search' ? (
+          <SearchPanel />
+        ) : sidebarView === 'git' ? (
+          <SourceControl />
+        ) : (
+          <Explorer />
+        )}
       </div>
     </aside>
   )

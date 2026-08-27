@@ -29,6 +29,8 @@ export interface AgentRunContext {
   signal: AbortSignal
   resolvePath: (path: string) => string
   getRelativePath: (absolutePath: string) => string
+  /** Skip gitignored / build-output paths in Glob etc. */
+  isIgnoredPath?: (relativePath: string) => boolean
   onFileChanged?: (absolutePath: string) => void
   /** Workspace may have changed without a specific path (e.g. Shell). */
   onWorkspaceChanged?: () => void
@@ -39,6 +41,8 @@ export interface AgentRunContext {
   skillPrompt?: string
   /** Extra system instructions from an active Persona */
   personaPrompt?: string
+  /** Plan mode: read-only tools, produce an actionable plan (no edits) */
+  planMode?: boolean
   /** Nested subagent depth (0 = top-level parent) */
   subagentDepth?: number
   /** Wired for Task tool */
@@ -57,6 +61,28 @@ export interface AgentRunContext {
   getVideoConfig?: ToolContext['getVideoConfig']
   /** Keys/settings for GeneratePresentation. */
   getPresentationConfig?: ToolContext['getPresentationConfig']
+  /** Optional Langfuse / observability hooks (parent agent turn). */
+  observability?: {
+    onLlmStart: (info: {
+      iteration: number
+      model: string
+      messageCount: number
+    }) => {
+      end: (info: {
+        outputText: string
+        toolCalls?: unknown
+        usage?: LlmUsage
+        error?: string
+      }) => void
+    }
+    onToolStart: (info: {
+      toolCallId: string
+      tool: string
+      args: unknown
+    }) => {
+      end: (info: { output: string; success: boolean }) => void
+    }
+  }
 }
 
 export type AgentOrchestratorEvent =
@@ -77,6 +103,7 @@ const buildSystemPrompt = (
   languageBlock = '',
   isSubagent = false,
   personaPrompt?: string,
+  planMode = false,
 ) => {
   const personaBlock = personaPrompt ? `\n\n${personaPrompt}` : ''
   const skillBlock = skillPrompt ? `\n\n${skillPrompt}` : ''
@@ -90,20 +117,36 @@ Return a concise factual report for the parent agent.
 Use markdown for formatting.${languageBlock}${rules}${personaBlock}${skillBlock}`
   }
 
+  if (planMode) {
+    return `You are Codex Studio in Plan mode.
+
+Workspace root: ${workspaceRoot}
+
+You may use Read, Grep, Glob, and GitStatus only. Do not modify files, run Shell, or call write tools.
+Investigate enough to produce a concrete implementation plan the user can approve.
+Structure the final answer as:
+1. Goal
+2. Findings (key files / constraints)
+3. Step-by-step plan (ordered, actionable)
+4. Risks / open questions
+
+Use markdown. After the user approves, they will switch to Agent mode to execute.${languageBlock}${rules}${personaBlock}${skillBlock}`
+  }
+
   return `You are Codex Studio, an AI coding assistant with access to tools for reading, searching, and modifying the codebase.
 
 Workspace root: ${workspaceRoot}
 
 Tools available:
-- Read, Grep, Glob — inspect and search the codebase
+- Read, Grep, Glob, GitStatus — inspect and search the codebase / git working tree
 - Write, StrReplace, Delete — modify files (subject to permission policy)
 - Shell — run commands (subject to permission policy). Login profiles (~/.bash_profile, ~/.zshrc, PowerShell $PROFILE, etc.) are sourced automatically — do not prepend source ~/.bash_profile yourself.
 - Task — spawn a read-only subagent for a focused investigation (parallel Tasks allowed)
 - Team — run a local multi-role team from .codex/teams/ (shared BOARD.md)
 - WebSearch — search the public web for external docs / errors
 - MemoryAppend — append durable project notes to .codex/memory/MEMORY.md
-- GenerateVideo — Markdown / 手順書から解説動画を生成（slides+TTS / Runway / hybrid）。出力は .codex/video/
-- GeneratePresentation — Markdown からプレゼン資料（PPTX + SVG）を生成。出力は .codex/presentation/
+- GenerateVideo — Markdown / 手順書から解説動画を生成（slides+TTS / Runway / hybrid）。出力は videos/<slug>/<slug>.mp4
+- GeneratePresentation — Markdown からプレゼン資料（PPTX + Mermaid 図）を生成。出力は presentations/<slug>/<slug>.pptx
 
 For code questions, use Read/Grep/Glob first. For independent research threads, spawn Task subagents then synthesize.
 For multi-perspective reviews, prefer Team when a matching team exists.
@@ -163,6 +206,7 @@ export class AgentOrchestrator {
           languageBlock,
           depth > 0,
           ctx.personaPrompt,
+          Boolean(ctx.planMode),
         ),
       },
       ...history,
@@ -175,6 +219,7 @@ export class AgentOrchestrator {
       signal: ctx.signal,
       resolvePath: ctx.resolvePath,
       getRelativePath: ctx.getRelativePath,
+      isIgnoredPath: ctx.isIgnoredPath,
       onFileChanged: ctx.onFileChanged,
       onWorkspaceChanged: ctx.onWorkspaceChanged,
       subagentDepth: depth,
@@ -206,27 +251,57 @@ export class AgentOrchestrator {
 
       let assistantText = ''
       let pendingToolCalls: ToolCall[] = []
-
-      for await (const chunk of this.llm.agentChat(messages, {
+      let iterationUsage: LlmUsage | undefined
+      const llmObs = ctx.observability?.onLlmStart({
+        iteration: i,
         model: ctx.modelId,
-        apiKey: ctx.apiKey,
-        baseUrl: ctx.baseUrl,
-        tools,
-        signal: ctx.signal,
-        maxTokens: ctx.maxTokens,
-        enablePromptCache: ctx.enablePromptCache,
-      })) {
-        if (chunk.type === 'text') {
-          assistantText += chunk.delta
-          yield { type: 'text_delta', content: chunk.delta }
-        } else if (chunk.type === 'tool_calls') {
-          pendingToolCalls = chunk.calls
-        } else if (chunk.type === 'done') {
-          totalUsage = addUsage(totalUsage, chunk.usage)
-        } else if (chunk.type === 'error') {
-          yield { type: 'error', message: chunk.error }
-          return
+        messageCount: messages.length,
+      })
+
+      try {
+        for await (const chunk of this.llm.agentChat(messages, {
+          model: ctx.modelId,
+          apiKey: ctx.apiKey,
+          baseUrl: ctx.baseUrl,
+          tools,
+          signal: ctx.signal,
+          maxTokens: ctx.maxTokens,
+          enablePromptCache: ctx.enablePromptCache,
+        })) {
+          if (chunk.type === 'text') {
+            assistantText += chunk.delta
+            yield { type: 'text_delta', content: chunk.delta }
+          } else if (chunk.type === 'tool_calls') {
+            pendingToolCalls = chunk.calls
+          } else if (chunk.type === 'done') {
+            iterationUsage = chunk.usage
+            totalUsage = addUsage(totalUsage, chunk.usage)
+          } else if (chunk.type === 'error') {
+            llmObs?.end({
+              outputText: assistantText,
+              toolCalls: pendingToolCalls,
+              usage: iterationUsage,
+              error: chunk.error,
+            })
+            yield { type: 'error', message: chunk.error }
+            return
+          }
         }
+        llmObs?.end({
+          outputText: assistantText,
+          toolCalls: pendingToolCalls,
+          usage: iterationUsage,
+        })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        llmObs?.end({
+          outputText: assistantText,
+          toolCalls: pendingToolCalls,
+          usage: iterationUsage,
+          error: message,
+        })
+        yield { type: 'error', message }
+        return
       }
 
       if (pendingToolCalls.length === 0) {
@@ -344,13 +419,38 @@ export class AgentOrchestrator {
     permissions: AgentPermissions,
     baseToolCtx: Omit<ToolContext, 'executeMode'>,
   ): Promise<ToolResult> {
+    const toolObs = ctx.observability?.onToolStart({
+      toolCallId: call.id,
+      tool: call.name,
+      args: call.arguments,
+    })
+    try {
+      const result = await this.executeToolCallInner(call, ctx, permissions, baseToolCtx)
+      toolObs?.end({ output: result.output, success: result.success })
+      return result
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      toolObs?.end({ output: message, success: false })
+      throw err
+    }
+  }
+
+  private async executeToolCallInner(
+    call: ToolCall,
+    ctx: AgentRunContext,
+    permissions: AgentPermissions,
+    baseToolCtx: Omit<ToolContext, 'executeMode'>,
+  ): Promise<ToolResult> {
     const tool = this.registry.get(call.name)
     const perm = resolvePermission(call.name, ctx.yoloMode, permissions)
 
     if (perm === 'deny') {
       return {
         success: false,
-        output: `Error: tool "${call.name}" is denied by permission policy`,
+        output:
+          `Error: tool "${call.name}" is denied by permission policy. ` +
+          `Open Settings → Agent → set permission preset to coding (or yolo), ` +
+          `and ensure edit is not deny.`,
       }
     }
 

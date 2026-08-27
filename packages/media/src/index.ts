@@ -1,7 +1,10 @@
 export type {
   Shot,
   ShotKind,
+  ShotRole,
   Shotlist,
+  SlideVisual,
+  VideoIntentSummary,
   VideoPipelineOptions,
   VideoPipelineResult,
   VideoRenderMode,
@@ -24,6 +27,11 @@ export {
   slugifyTitle,
 } from './shotlist'
 export {
+  detectLanguage,
+  estimateNarrationDurationSec,
+  extractVideoIntentHeuristic,
+} from './intent'
+export {
   buildHeuristicDeck,
   normalizeDeck,
   parseDeckJson,
@@ -36,7 +44,14 @@ export { runVideoPipeline } from './pipeline'
 export { runPresentationPipeline } from './presentation-pipeline'
 export { writePresentationSlideSvg } from './presentation-svg'
 export { writeSlideSvg } from './slides'
-export { findFfmpeg, svgToPng } from './ffmpeg'
+export { findFfmpeg, svgToPng, videoWorkDir } from './ffmpeg'
+export {
+  DEFAULT_PRESENTATION_OUTPUT_DIR,
+  DEFAULT_VIDEO_OUTPUT_DIR,
+  resolveMediaOutput,
+  resolveOutputSlug,
+} from './output-paths'
+export { isMermaidLanguage, renderMermaidToPng } from './mermaid-render'
 /** Lazy re-export — do not statically pull @resvg/resvg-js into Electron main. */
 export async function renderSvgToPng(
   ...args: Parameters<typeof import('./svg-render').renderSvgToPng>

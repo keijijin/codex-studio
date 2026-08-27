@@ -38,7 +38,11 @@ function MarkdownContentPreview({
           color: '#cccccc',
         }}
       >
-        <MarkdownRenderer content={content || '(空)'} baseFilePath={baseFilePath} />
+        <MarkdownRenderer
+          content={content || '(空)'}
+          baseFilePath={baseFilePath}
+          enableMermaid={false}
+        />
       </div>
     </div>
   )

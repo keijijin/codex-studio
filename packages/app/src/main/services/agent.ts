@@ -13,6 +13,7 @@ import {
   type Message,
   type ToolCallRecord,
 } from '@codex/shared'
+import { langfuseService } from './langfuse-service'
 import { approvalService } from './approval'
 import { ceoApprovalService } from './ceo-approval'
 import { agentEnvService } from './agent-env-service'
@@ -41,12 +42,16 @@ import { hooksService } from './hooks-service'
 import { fileWatcherService } from './file-watcher'
 import { sessionService, settingsService } from './settings'
 import { workspaceService } from './workspace'
+import { pathIgnoreService } from './path-ignore-service'
 import { assertUnderDailyBudget, recordLlmTurn } from './usage-helpers'
+import { formatAttachments, materializeAttachments } from './attachment-context'
+import { mcpService } from './mcp-service'
 
 const ALL_AGENT_TOOLS = [
   'Read',
   'Grep',
   'Glob',
+  'GitStatus',
   'Write',
   'StrReplace',
   'Delete',
@@ -57,7 +62,19 @@ const ALL_AGENT_TOOLS = [
   'MemoryAppend',
   'GenerateVideo',
   'GeneratePresentation',
+  '*mcp*',
 ]
+
+const PLAN_TOOLS = ['Read', 'Grep', 'Glob', 'GitStatus'] as const
+
+const PLAN_PERMISSIONS = {
+  read: 'allow' as const,
+  edit: 'deny' as const,
+  shell: 'deny' as const,
+  network: 'deny' as const,
+  media: 'deny' as const,
+  mcp: 'deny' as const,
+}
 
 export class AgentService {
   private abortControllers = new Map<string, AbortController>()
@@ -83,10 +100,21 @@ export class AgentService {
   }
 
   async run(params: ChatSendParams, webContents: WebContents): Promise<void> {
-    const { sessionId, attachments = [] } = params
+    const { sessionId } = params
     let content = params.content
+    const isPlan = params.mode === 'plan'
+    const attachments = await materializeAttachments(params.attachments ?? [], content)
     const settings = settingsService.get()
     const root = workspaceService.getRoot()
+
+    // Refresh MCP tools (best-effort; failures surface in MCP status)
+    if (!isPlan && (settings.mcpServers?.length ?? 0) > 0) {
+      try {
+        await mcpService.syncFromSettings(settings.mcpServers)
+      } catch (err) {
+        console.warn('[agent] MCP sync failed', err)
+      }
+    }
 
     if (!root) {
       this.emit(webContents, sessionId, {
@@ -139,9 +167,10 @@ export class AgentService {
     }
 
     // Prefer explicit /team, then skill names that alias a team (e.g. /virtual-company).
-    let teamMatch = await teamsService.matchInvocation(content)
+    // Plan mode is read-only planning — skip Team execution.
+    let teamMatch = isPlan ? null : await teamsService.matchInvocation(content)
     let skillPrompt: string | undefined
-    if (!teamMatch) {
+    if (!teamMatch && !isPlan) {
       const skillMatch = await skillsService.matchInvocation(content)
       if (skillMatch) {
         const asTeam = await teamsService.matchSkillAsTeam(
@@ -320,10 +349,12 @@ export class AgentService {
       ...attachments.map((a) => a.path),
     ]
     const rulesPrompt = await rulesService.buildPrompt(contextPaths)
-    const permissions = {
-      ...DEFAULT_AGENT_PERMISSIONS,
-      ...settings.agent.permissions,
-    }
+    const permissions = isPlan
+      ? { ...PLAN_PERMISSIONS }
+      : {
+          ...DEFAULT_AGENT_PERMISSIONS,
+          ...settings.agent.permissions,
+        }
     const runLimited = createConcurrencyLimiter(settings.agent.maxSubagents ?? 3)
     const userPromptForMemory = content
 
@@ -366,6 +397,7 @@ export class AgentService {
           sessionId,
           root,
           history,
+          userInput: content,
           runtime,
           isE2eMock,
           settings,
@@ -374,6 +406,8 @@ export class AgentService {
           skillPrompt,
           personaPrompt,
           permissions,
+          enabledTools: isPlan ? [...PLAN_TOOLS] : ALL_AGENT_TOOLS,
+          planMode: isPlan,
           runLimited,
           notifyFileChanged,
           notifyWorkspaceChanged,
@@ -457,6 +491,7 @@ export class AgentService {
     sessionId: string
     root: string
     history: AgentMessage[]
+    userInput: string
     runtime: LlmRuntimeConfig
     isE2eMock: boolean
     settings: ReturnType<typeof settingsService.get>
@@ -465,6 +500,8 @@ export class AgentService {
     skillPrompt: string | undefined
     personaPrompt: string | undefined
     permissions: typeof DEFAULT_AGENT_PERMISSIONS
+    enabledTools: string[]
+    planMode?: boolean
     runLimited: ReturnType<typeof createConcurrencyLimiter>
     notifyFileChanged: (absolutePath: string) => void
     notifyWorkspaceChanged: () => void
@@ -483,6 +520,7 @@ export class AgentService {
       sessionId,
       root,
       history,
+      userInput,
       runtime,
       isE2eMock,
       settings,
@@ -491,6 +529,8 @@ export class AgentService {
       skillPrompt,
       personaPrompt,
       permissions,
+      enabledTools,
+      planMode,
       runLimited,
       notifyFileChanged,
       notifyWorkspaceChanged,
@@ -504,6 +544,14 @@ export class AgentService {
     let toolsStarted = false
     let usage: { inputTokens: number; outputTokens: number; cachedInputTokens: number } | undefined
     const startedAt = Date.now()
+    const agentTrace = langfuseService.startAgentTrace({
+      sessionId,
+      input: userInput,
+      provider: runtime.provider,
+      model: runtime.model,
+      planMode: Boolean(planMode),
+      settings,
+    })
 
     try {
       for await (const event of this.orchestrator.run(history, {
@@ -513,20 +561,23 @@ export class AgentService {
         apiKey: runtime.apiKey,
         baseUrl: runtime.baseUrl,
         maxIterations: settings.agent.maxIterations,
-        enabledTools: ALL_AGENT_TOOLS,
-        yoloMode: isE2eMock ? false : settings.agent.yoloMode,
+        enabledTools,
+        yoloMode: isE2eMock || planMode ? false : settings.agent.yoloMode,
         permissions,
+        planMode: Boolean(planMode),
         compactTokenThreshold: settings.agent.compactTokenThreshold,
         maxTokens: settings.cost?.maxOutputTokensAgent ?? 8192,
         enablePromptCache: settings.cost?.enablePromptCache !== false,
         signal: abortController.signal,
         resolvePath: (p) => workspaceService.resolveWithinWorkspace(p),
         getRelativePath: (p) => workspaceService.getRelativePath(p),
+        isIgnoredPath: (rel) => pathIgnoreService.getRules().ignores(rel),
         onFileChanged: notifyFileChanged,
         onWorkspaceChanged: notifyWorkspaceChanged,
         rulesPrompt,
         skillPrompt,
         personaPrompt,
+        observability: agentTrace?.hooks,
         subagentDepth: 0,
         runSubagent: async ({ prompt, description }) => {
           const result = await runLimited(() =>
@@ -666,6 +717,14 @@ export class AgentService {
             filePath: typeof event.filePath === 'string' ? event.filePath : undefined,
           })
         } else if (event.type === 'error') {
+          agentTrace?.end({
+            output: assistantContent,
+            model: runtime.model,
+            provider: runtime.provider,
+            usage,
+            error: event.message,
+            toolCount: toolCalls.length,
+          })
           return { status: 'error', error: event.message, toolsStarted }
         } else if (event.type === 'done') {
           usage = event.usage
@@ -673,6 +732,13 @@ export class AgentService {
         }
       }
 
+      agentTrace?.end({
+        output: assistantContent,
+        model: runtime.model,
+        provider: runtime.provider,
+        usage,
+        toolCount: toolCalls.length,
+      })
       return {
         status: 'ok',
         assistantContent,
@@ -682,6 +748,14 @@ export class AgentService {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Agent failed'
+      agentTrace?.end({
+        output: assistantContent,
+        model: runtime.model,
+        provider: runtime.provider,
+        usage,
+        error: message,
+        toolCount: toolCalls.length,
+      })
       return { status: 'error', error: message, toolsStarted }
     }
   }
@@ -693,10 +767,7 @@ export class AgentService {
       if (msg.role === 'user') {
         let content = msg.content
         if (msg.attachments?.length) {
-          const attachmentText = msg.attachments
-            .filter((a) => a.content)
-            .map((a) => `\n\n--- Attached file: ${a.name} (${a.path}) ---\n${a.content}\n--- End ---`)
-            .join('')
+          const attachmentText = formatAttachments(msg.attachments)
           if (attachmentText) content += attachmentText
         }
         agentMessages.push({ role: 'user', content })
@@ -729,10 +800,7 @@ export class AgentService {
     if (latestAttachments.length > 0) {
       const last = agentMessages[agentMessages.length - 1]
       if (last?.role === 'user') {
-        const extra = latestAttachments
-          .filter((a) => a.content)
-          .map((a) => `\n\n--- Attached file: ${a.name} (${a.path}) ---\n${a.content}\n--- End ---`)
-          .join('')
+        const extra = formatAttachments(latestAttachments)
         if (extra && !last.content.includes(extra)) {
           last.content += extra
         }

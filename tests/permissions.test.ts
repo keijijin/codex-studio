@@ -9,6 +9,7 @@ describe('permissions', () => {
   it('maps tools to categories with defaults', () => {
     expect(permissionForTool('Read', DEFAULT_AGENT_PERMISSIONS)).toBe('allow')
     expect(permissionForTool('Grep', DEFAULT_AGENT_PERMISSIONS)).toBe('allow')
+    expect(permissionForTool('GitStatus', DEFAULT_AGENT_PERMISSIONS)).toBe('allow')
     expect(permissionForTool('Task', DEFAULT_AGENT_PERMISSIONS)).toBe('allow')
     expect(permissionForTool('Write', DEFAULT_AGENT_PERMISSIONS)).toBe('ask')
     expect(permissionForTool('Shell', DEFAULT_AGENT_PERMISSIONS)).toBe('ask')
@@ -25,6 +26,7 @@ describe('permissions', () => {
       shell: 'deny',
       network: 'deny',
       media: 'deny',
+      mcp: 'deny',
     }
     expect(permissionForTool('Glob', permissions)).toBe('deny')
     expect(permissionForTool('StrReplace', permissions)).toBe('allow')
@@ -32,5 +34,10 @@ describe('permissions', () => {
     expect(permissionForTool('WebSearch', permissions)).toBe('deny')
     expect(permissionForTool('GenerateVideo', permissions)).toBe('deny')
     expect(permissionForTool('GeneratePresentation', permissions)).toBe('deny')
+    expect(permissionForTool('mcp__demo__tool', permissions)).toBe('deny')
+  })
+
+  it('maps mcp__ tools to mcp category', () => {
+    expect(permissionForTool('mcp__fs__list', DEFAULT_AGENT_PERMISSIONS)).toBe('ask')
   })
 })

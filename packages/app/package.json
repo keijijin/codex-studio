@@ -11,13 +11,18 @@
     "@codex/agent-core": "workspace:*",
     "@codex/indexer": "workspace:*",
     "@codex/llm-adapters": "workspace:*",
+    "@codex/mcp-client": "workspace:*",
     "@codex/shared": "workspace:*",
     "@codex/tools": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@resvg/resvg-js": "^2.6.2",
     "@vscode/ripgrep": "^1.18.0",
     "chokidar": "^4.0.3",
     "electron-store": "^10.1.0",
-    "node-pty": "^1.1.0"
+    "electron-updater": "^6.8.9",
+    "langfuse": "^3.38.20",
+    "node-pty": "^1.1.0",
+    "simple-git": "^3.36.0"
   },
   "optionalDependencies": {
     "@vscode/ripgrep-darwin-arm64": "1.18.0",

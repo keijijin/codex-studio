@@ -9,6 +9,7 @@ const sharedAlias = {
   '@codex/tools': resolve(__dirname, 'packages/tools/src/index.ts'),
   '@codex/agent-core': resolve(__dirname, 'packages/agent-core/src/index.ts'),
   '@codex/media': resolve(__dirname, 'packages/media/src/index.ts'),
+  '@codex/mcp-client': resolve(__dirname, 'packages/mcp-client/src/index.ts'),
 }
 
 /** Native / special deps that must not be bundled into Electron main. */
@@ -18,6 +19,9 @@ const mainExternals = [
   'node-pty',
   '@resvg/resvg-js',
   /^@resvg\/resvg-js-/,
+  // Keep MCP SDK external (ESM); main bundle resolves it at runtime.
+  '@modelcontextprotocol/sdk',
+  /^@modelcontextprotocol\/sdk\//,
 ]
 
 export default defineConfig({
@@ -31,6 +35,7 @@ export default defineConfig({
           '@codex/tools',
           '@codex/agent-core',
           '@codex/media',
+          '@codex/mcp-client',
         ],
       }),
     ],
