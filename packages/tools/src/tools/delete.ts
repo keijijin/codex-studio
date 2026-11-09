@@ -1,5 +1,18 @@
+import { lstatSync } from 'fs'
+import { readFile } from 'fs/promises'
 import type { Tool, ToolContext, ToolResult } from '../types'
-import { applyDelete, readTextFile } from '../utils/file-ops'
+import { resolveUnlinkWithinWorkspace } from '../resolve-path'
+import { applyDelete } from '../utils/file-ops'
+
+function resolveDeleteTarget(ctx: ToolContext, pathArg: string): string {
+  try {
+    // Prefer unlink semantics on the primary root (keeps workspace symlinks as links).
+    return resolveUnlinkWithinWorkspace(ctx.workspaceRoot, pathArg)
+  } catch {
+    // Secondary workspace roots are only reachable via ctx.resolvePath.
+    return ctx.resolvePath(pathArg)
+  }
+}
 
 export const deleteTool: Tool = {
   name: 'Delete',
@@ -17,10 +30,25 @@ export const deleteTool: Tool = {
     if (!pathArg) return { success: false, output: 'Error: path is required' }
 
     try {
-      const { resolved, content: oldContent } = await readTextFile(ctx, pathArg)
+      const resolved = resolveDeleteTarget(ctx, pathArg)
+      let oldContent = ''
+      let isLink = false
+      try {
+        const st = lstatSync(resolved)
+        isLink = st.isSymbolicLink()
+        if (!isLink) {
+          oldContent = await readFile(resolved, 'utf-8')
+        }
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+      }
+
       const rel = ctx.getRelativePath(resolved)
 
-      if (oldContent === '' && !(await exists(resolved))) {
+      if (!isLink && oldContent === '' && !(await exists(resolved))) {
+        return { success: false, output: `Error: file not found: ${rel}` }
+      }
+      if (isLink && !(await linkExists(resolved))) {
         return { success: false, output: `Error: file not found: ${rel}` }
       }
 
@@ -45,6 +73,16 @@ async function exists(path: string): Promise<boolean> {
   try {
     const { stat } = await import('fs/promises')
     await stat(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function linkExists(path: string): Promise<boolean> {
+  try {
+    const { lstat } = await import('fs/promises')
+    await lstat(path)
     return true
   } catch {
     return false

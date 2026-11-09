@@ -6,10 +6,18 @@ interface TrustStore {
   trustedRoots: string[]
 }
 
-const store = new Store<TrustStore>({
-  name: 'workspace-trust',
-  defaults: { trustedRoots: [] },
-})
+let store: Store<TrustStore> | null = null
+
+function getStore(): Store<TrustStore> {
+  if (!store) {
+    // Construct lazily so unit tests can import this module without touching userData.
+    store = new Store<TrustStore>({
+      name: 'workspace-trust',
+      defaults: { trustedRoots: [] },
+    })
+  }
+  return store
+}
 
 function normalizeRoot(root: string): string {
   return resolve(root)
@@ -18,21 +26,21 @@ function normalizeRoot(root: string): string {
 class WorkspaceTrustService {
   isTrusted(root: string): boolean {
     const key = normalizeRoot(root)
-    const list = store.get('trustedRoots') ?? []
+    const list = getStore().get('trustedRoots') ?? []
     return list.some((r) => normalizeRoot(r) === key)
   }
 
   trust(root: string): void {
     const key = normalizeRoot(root)
-    const list = store.get('trustedRoots') ?? []
+    const list = getStore().get('trustedRoots') ?? []
     if (list.some((r) => normalizeRoot(r) === key)) return
-    store.set('trustedRoots', [...list, key])
+    getStore().set('trustedRoots', [...list, key])
   }
 
   untrust(root: string): void {
     const key = normalizeRoot(root)
-    const list = store.get('trustedRoots') ?? []
-    store.set(
+    const list = getStore().get('trustedRoots') ?? []
+    getStore().set(
       'trustedRoots',
       list.filter((r) => normalizeRoot(r) !== key),
     )

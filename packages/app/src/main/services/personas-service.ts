@@ -12,6 +12,7 @@ import {
 import type { PersonaFile, PersonaMatch, PersonaSaveParams } from '@codex/shared'
 import { isPathInsideRoot } from '@codex/shared'
 import { workspaceService } from './workspace'
+import { workspaceTrustService } from './workspace-trust'
 
 export function globalPersonasDir(): string {
   return join(homedir(), '.codex-studio', 'personas')
@@ -29,7 +30,11 @@ export class PersonasService {
   async list(): Promise<PersonaFile[]> {
     const root = workspaceService.getRoot()
     if (!root) return []
-    return collectPersonas(root, { globalPersonasDir: globalPersonasDir() })
+    const trusted = workspaceTrustService.isTrusted(root)
+    return collectPersonas(root, {
+      globalPersonasDir: globalPersonasDir(),
+      includeWorkspacePersonas: trusted,
+    })
   }
 
   async matchInvocation(content: string): Promise<PersonaMatch | null> {

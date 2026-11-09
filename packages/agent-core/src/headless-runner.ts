@@ -185,7 +185,17 @@ export async function runHeadlessAgent(
     skillPrompt,
     personaPrompt,
     subagentDepth: 0,
-    getShellEnv: () => resolveAgentShellEnv(workspaceRoot),
+    getShellEnv: () => {
+      // CLI/headless has no trust dialog — only apply workspace overlays when explicitly trusted.
+      if (
+        process.env.CODEX_TRUST_WORKSPACE === '1' ||
+        process.env.CODEX_E2E_WORKSPACE ||
+        process.env.CODEX_CLI_TRUST_WORKSPACE === '1'
+      ) {
+        return resolveAgentShellEnv(workspaceRoot)
+      }
+      return { ...process.env }
+    },
     getVideoConfig: () => ({
       video: options.video ?? {
         enabled: true,

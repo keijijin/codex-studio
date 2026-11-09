@@ -66,9 +66,20 @@ export interface RunTeamOptions {
   /** Also load personas from ~/.codex-studio/personas (and extras) */
   globalPersonasDir?: string
   extraPersonasDirs?: string[]
+  /** When false, skip `.codex/personas` under the workspace (untrusted). Default true. */
+  includeWorkspacePersonas?: boolean
+  /** When false, skip workspace `.codex/skills` (untrusted). Default true. */
+  includeWorkspaceSkills?: boolean
 }
 
-function boardAbsolutePath(workspaceRoot: string, team: TeamDefinition): string {
+function boardAbsolutePath(
+  workspaceRoot: string,
+  team: TeamDefinition,
+  resolvePath?: (path: string) => string,
+): string {
+  if (resolvePath) {
+    return resolvePath(team.boardRelativePath)
+  }
   return join(workspaceRoot, team.boardRelativePath)
 }
 
@@ -220,7 +231,7 @@ Reply in the user's language.`,
  */
 export async function runTeam(options: RunTeamOptions): Promise<TeamRunResult> {
   const { workspaceRoot, team, task, signal } = options
-  const boardPath = boardAbsolutePath(workspaceRoot, team)
+  const boardPath = boardAbsolutePath(workspaceRoot, team, options.resolvePath)
   const runLimited = createConcurrencyLimiter(options.maxConcurrency ?? 3)
   const stagesCompleted: TeamPipelineStage[] = []
   const pipeline = team.pipeline ?? {}
@@ -229,16 +240,24 @@ export async function runTeam(options: RunTeamOptions): Promise<TeamRunResult> {
 
   const globalPersonas =
     options.globalPersonasDir ?? pathJoin(homedir(), '.codex-studio', 'personas')
+  const includeWorkspacePersonas = options.includeWorkspacePersonas !== false
+  const includeWorkspaceSkills = options.includeWorkspaceSkills !== false
   const [skills, personas] = await Promise.all([
-    collectSkills(workspaceRoot),
+    collectSkills(includeWorkspaceSkills ? workspaceRoot : null, {
+      globalSkillsDir: pathJoin(homedir(), '.codex-studio', 'skills'),
+    }),
     collectPersonas(workspaceRoot, {
       globalPersonasDir: globalPersonas,
+      includeWorkspacePersonas,
     }),
   ])
   // Merge optional extra persona dirs (e.g. product repo .codex/personas while -w is elsewhere)
   if (options.extraPersonasDirs?.length) {
     for (const dir of options.extraPersonasDirs) {
-      const extra = await collectPersonas(workspaceRoot, { globalPersonasDir: dir })
+      const extra = await collectPersonas(workspaceRoot, {
+        globalPersonasDir: dir,
+        includeWorkspacePersonas: false,
+      })
       for (const p of extra) {
         if (!personas.some((x) => x.name === p.name)) personas.push(p)
       }

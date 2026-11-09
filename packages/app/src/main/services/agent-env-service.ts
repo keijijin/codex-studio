@@ -4,39 +4,14 @@ import {
   agentEnvCapturedPath,
   agentEnvFilePath,
   loadEnvFile,
-  loadWorkspaceAgentEnv,
   mergeShellEnv,
   parseEnvFile,
+  scrubAgentEnvFile,
+  scrubLoaderEnv,
 } from '@codex/tools'
 import { ensureUtf8LocaleEnv } from '@codex/shared'
 import { workspaceService } from './workspace'
 import { workspaceTrustService } from './workspace-trust'
-
-/** Workspace/captured env must not override process identity / loader hooks. */
-const BLOCKED_AGENT_ENV_KEYS = new Set([
-  'PATH',
-  'Path',
-  'BASH_ENV',
-  'ENV',
-  'SHELL',
-  'LD_PRELOAD',
-  'DYLD_INSERT_LIBRARIES',
-  'DYLD_LIBRARY_PATH',
-  'LD_LIBRARY_PATH',
-  'NODE_OPTIONS',
-  'PYTHONPATH',
-  'PERL5OPT',
-  'RUBYOPT',
-])
-
-function scrubDangerousEnv(env: Record<string, string>): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const [key, value] of Object.entries(env)) {
-    if (BLOCKED_AGENT_ENV_KEYS.has(key)) continue
-    out[key] = value
-  }
-  return out
-}
 
 export interface AgentEnvStatus {
   capturedKeyCount: number
@@ -55,7 +30,8 @@ class AgentEnvService {
 
   /** Apply a captured env map and persist under `.codex/.agent-env.captured`. */
   setCaptured(env: Record<string, string>, workspaceRoot?: string): void {
-    this.overlay = scrubDangerousEnv(env)
+    // Terminal sync may include PATH (venv etc.); only strip loader hijacks.
+    this.overlay = scrubLoaderEnv(env)
     this.capturedAt = new Date().toISOString()
     const root = workspaceRoot ?? workspaceService.getRoot()
     if (!root) return
@@ -80,7 +56,7 @@ class AgentEnvService {
       this.capturedAt = null
       return
     }
-    const fromFile = scrubDangerousEnv(loadEnvFile(agentEnvCapturedPath(workspaceRoot)))
+    const fromFile = scrubLoaderEnv(loadEnvFile(agentEnvCapturedPath(workspaceRoot)))
     if (Object.keys(fromFile).length === 0) return
     this.overlay = fromFile
     if (!this.capturedAt) {
@@ -114,8 +90,9 @@ class AgentEnvService {
     }
     return mergeShellEnv(
       base,
-      scrubDangerousEnv(loadWorkspaceAgentEnv(root)),
-      scrubDangerousEnv(this.overlay),
+      scrubAgentEnvFile(loadEnvFile(agentEnvFilePath(root))),
+      scrubLoaderEnv(loadEnvFile(agentEnvCapturedPath(root))),
+      scrubLoaderEnv(this.overlay),
     )
   }
 

@@ -6,7 +6,7 @@
       "exclude": ["**/node_modules/**", "**/out/**", "**/dist/**", "**/release/**"],
       "action": {
         "type": "shell",
-        "command": "echo \"[hook] saved ${relativePath}\""
+        "command": "echo \"[hook] saved $CODEX_RELATIVE_PATH\""
       },
       "cooldownMs": 2000
     }

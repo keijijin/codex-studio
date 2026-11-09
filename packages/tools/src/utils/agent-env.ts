@@ -50,11 +50,58 @@ export function loadEnvFile(path: string): Record<string, string> {
   }
 }
 
+/** Loader / shell-hijack keys never accepted from workspace overlays. */
+export const BLOCKED_LOADER_ENV_KEYS = new Set([
+  'BASH_ENV',
+  'ENV',
+  'SHELL',
+  'HOME',
+  'USERPROFILE',
+  'ZDOTDIR',
+  'LD_PRELOAD',
+  'DYLD_INSERT_LIBRARIES',
+  'DYLD_LIBRARY_PATH',
+  'LD_LIBRARY_PATH',
+  'NODE_OPTIONS',
+  'PYTHONPATH',
+  'PERL5OPT',
+  'RUBYOPT',
+])
+
+/** Additional keys blocked only for `.codex/agent.env` (not terminal sync). */
+export const BLOCKED_AGENT_ENV_FILE_KEYS = new Set([
+  ...BLOCKED_LOADER_ENV_KEYS,
+  'PATH',
+  'Path',
+])
+
+export function scrubEnvKeys(
+  env: Record<string, string>,
+  blocked: Set<string>,
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(env)) {
+    if (blocked.has(key)) continue
+    out[key] = value
+  }
+  return out
+}
+
+/** Scrub loader hijacks; PATH from terminal sync is allowed. */
+export function scrubLoaderEnv(env: Record<string, string>): Record<string, string> {
+  return scrubEnvKeys(env, BLOCKED_LOADER_ENV_KEYS)
+}
+
+/** Scrub `.codex/agent.env` including PATH overrides. */
+export function scrubAgentEnvFile(env: Record<string, string>): Record<string, string> {
+  return scrubEnvKeys(env, BLOCKED_AGENT_ENV_FILE_KEYS)
+}
+
 /** Load `.codex/agent.env` then `.codex/.agent-env.captured` (captured wins on conflict). */
 export function loadWorkspaceAgentEnv(workspaceRoot: string): Record<string, string> {
   return {
-    ...loadEnvFile(agentEnvFilePath(workspaceRoot)),
-    ...loadEnvFile(agentEnvCapturedPath(workspaceRoot)),
+    ...scrubAgentEnvFile(loadEnvFile(agentEnvFilePath(workspaceRoot))),
+    ...scrubLoaderEnv(loadEnvFile(agentEnvCapturedPath(workspaceRoot))),
   }
 }
 
@@ -82,5 +129,9 @@ export function resolveAgentShellEnv(
   overlay?: Record<string, string>,
   base: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
-  return mergeShellEnv(base, loadWorkspaceAgentEnv(workspaceRoot), overlay)
+  return mergeShellEnv(
+    base,
+    loadWorkspaceAgentEnv(workspaceRoot),
+    overlay ? scrubLoaderEnv(overlay) : undefined,
+  )
 }

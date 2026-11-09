@@ -52,7 +52,8 @@ export default defineConfig({
     },
   },
   preload: {
-    plugins: [externalizeDepsPlugin({ exclude: ['@codex/shared'] })],
+    // Sandboxed preload cannot load ESM (.mjs) or external deps — emit a single CJS bundle.
+    plugins: [],
     resolve: {
       alias: sharedAlias,
     },
@@ -60,6 +61,11 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'packages/app/src/preload/index.ts'),
+        },
+        output: {
+          format: 'cjs',
+          entryFileNames: '[name].cjs',
+          inlineDynamicImports: true,
         },
       },
     },

@@ -127,6 +127,8 @@ export interface CollectTeamsOptions {
    * Precedence on id clash: workspace > in-memory builtins > extra/global dirs.
    */
   extraTeamsDirs?: string[]
+  /** When false, skip `.codex/teams` under the workspace (untrusted workspace). Default true. */
+  includeWorkspaceTeams?: boolean
 }
 
 /** Load teams from `.codex/teams` plus optional global/bundled dirs + in-code builtins. */
@@ -143,7 +145,9 @@ export async function collectTeams(
     if (dir?.trim()) await collectFromTeamsRoot(dir, workspaceRoot, out)
   }
   out.push(...builtinTeamDefinitions(workspaceRoot))
-  await collectFromTeamsRoot(join(workspaceRoot, '.codex', 'teams'), workspaceRoot, out)
+  if (options?.includeWorkspaceTeams !== false) {
+    await collectFromTeamsRoot(join(workspaceRoot, '.codex', 'teams'), workspaceRoot, out)
+  }
 
   const byId = new Map<string, TeamDefinition>()
   for (const team of out) byId.set(team.id, team)

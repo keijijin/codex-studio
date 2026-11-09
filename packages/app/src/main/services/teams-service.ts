@@ -16,12 +16,14 @@ import type {
   TeamRunResult,
 } from '@codex/shared'
 import { getProviderInstance } from '@codex/llm-adapters'
-import { defaultToolRegistry, resolveAgentShellEnv } from '@codex/tools'
+import { defaultToolRegistry } from '@codex/tools'
 import { getLlmRuntimeConfig } from './llm-config'
 import { rulesService } from './rules-service'
 import { settingsService } from './settings'
 import { workspaceService } from './workspace'
 import { ceoApprovalService } from './ceo-approval'
+import { agentEnvService } from './agent-env-service'
+import { workspaceTrustService } from './workspace-trust'
 
 export function globalTeamsDir(): string {
   return join(homedir(), '.codex-studio', 'teams')
@@ -55,9 +57,16 @@ export class TeamsService {
     const root = workspaceService.getRoot()
     const extra = [globalTeamsDir()]
     if (!root) {
-      return collectTeams(homedir(), { extraTeamsDirs: extra })
+      return collectTeams(homedir(), {
+        extraTeamsDirs: extra,
+        includeWorkspaceTeams: false,
+      })
     }
-    return collectTeams(root, { extraTeamsDirs: extra })
+    const trusted = workspaceTrustService.isTrusted(root)
+    return collectTeams(root, {
+      extraTeamsDirs: extra,
+      includeWorkspaceTeams: trusted,
+    })
   }
 
   async findById(id: string): Promise<TeamDefinition | undefined> {
@@ -125,7 +134,9 @@ export class TeamsService {
       maxConcurrency: settings.agent.maxSubagents ?? 3,
       sessionId,
       globalPersonasDir: join(homedir(), '.codex-studio', 'personas'),
-      getShellEnv: () => resolveAgentShellEnv(root),
+      includeWorkspacePersonas: workspaceTrustService.isTrusted(root),
+      includeWorkspaceSkills: workspaceTrustService.isTrusted(root),
+      getShellEnv: () => agentEnvService.resolve(root),
       onFileChanged: ui?.onFileChanged,
       onWorkspaceChanged: ui?.onWorkspaceChanged,
       onStage: (stage: TeamPipelineStage, detail?: string) => {

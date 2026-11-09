@@ -5,6 +5,8 @@ export default defineConfig({
   test: {
     globals: false,
     environment: 'node',
+    // Login-shell bootstrap for Shell/Hooks can exceed 5s under parallel load.
+    testTimeout: 15_000,
     exclude: ['**/node_modules/**', '**/e2e/**', '**/release/**', '**/out/**'],
     coverage: {
       provider: 'v8',

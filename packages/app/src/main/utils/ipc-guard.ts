@@ -26,12 +26,23 @@ function isTrustedRendererUrl(url: string): boolean {
       return true
     }
   }
-  // Vite HMR / file protocol variants of our own index
-  if (url.startsWith('file:') && url.includes(`${'/'}out/renderer/index.html`)) {
-    return true
+  // Exact file:// match for built renderer (no substring/includes bypass).
+  if (url.startsWith('file:')) {
+    try {
+      const indexHtml = resolve(app.getAppPath(), 'out/renderer/index.html')
+      const expected = pathToFileURL(indexHtml).href
+      if (url === expected || url.startsWith(`${expected}#`) || url.startsWith(`${expected}?`)) {
+        return true
+      }
+    } catch {
+      // ignore
+    }
   }
-  if (process.env.ELECTRON_RENDERER_URL && url.startsWith(process.env.ELECTRON_RENDERER_URL)) {
-    return true
+  if (process.env.ELECTRON_RENDERER_URL) {
+    const base = process.env.ELECTRON_RENDERER_URL.replace(/\/$/, '')
+    if (url === base || url.startsWith(`${base}/`) || url.startsWith(`${base}?`) || url.startsWith(`${base}#`)) {
+      return true
+    }
   }
   return false
 }

@@ -60,6 +60,7 @@ export { runTeam, type RunTeamOptions } from './team-runner'
 export { loadHooksConfig } from './hooks-loader'
 export {
   HooksRuntime,
+  expandHookCommand,
   type HookDispatchContext,
   type HookRunResult,
   type HookSkillRunner,

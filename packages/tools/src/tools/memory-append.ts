@@ -2,8 +2,11 @@ import type { Tool, ToolResult } from '../types'
 import { appendFile, mkdir } from 'fs/promises'
 import { dirname, join } from 'path'
 
+export const MEMORY_RELATIVE_PATH = '.codex/memory/MEMORY.md'
+
+/** Logical memory path (does not validate symlinks — use resolvePath at write time). */
 export function memoryFilePath(workspaceRoot: string): string {
-  return join(workspaceRoot, '.codex', 'memory', 'MEMORY.md')
+  return join(workspaceRoot, MEMORY_RELATIVE_PATH)
 }
 
 /** Append a durable note to project memory (opt-in usage by the agent). */
@@ -26,7 +29,13 @@ export const memoryAppendTool: Tool = {
     const note = String(args.note ?? '').trim()
     if (!note) return { success: false, output: 'Error: note is required' }
 
-    const path = memoryFilePath(ctx.workspaceRoot)
+    let path: string
+    try {
+      path = ctx.resolvePath(MEMORY_RELATIVE_PATH)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Invalid memory path'
+      return { success: false, output: `Error: ${message}` }
+    }
     const relativePath = ctx.getRelativePath(path)
     const date = new Date().toISOString().slice(0, 10)
     const entry = `\n- [${date}] ${note.replace(/\s+/g, ' ').trim()}\n`

@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, writeFile, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { describe, expect, it } from 'vitest'
-import { loadHooksConfig, HooksRuntime } from '@codex/agent-core'
+import { expandHookCommand, loadHooksConfig, HooksRuntime } from '@codex/agent-core'
 
 describe('hooks-loader', () => {
   it('returns empty config when hooks.json is missing', async () => {
@@ -48,6 +48,25 @@ describe('hooks-loader', () => {
     } finally {
       await rm(root, { recursive: true, force: true })
     }
+  })
+})
+
+describe('expandHookCommand', () => {
+  it('maps placeholders without embedding values', () => {
+    expect(expandHookCommand('echo ${file}')).toBe('echo "$CODEX_FILE"')
+    expect(expandHookCommand('echo "${file}"')).toBe('echo "$CODEX_FILE"')
+    expect(expandHookCommand("echo '${file}'")).toBe('echo "$CODEX_FILE"')
+    expect(expandHookCommand('printf "%s" "src/${relativePath}"')).toBe(
+      'printf "%s" "src/$CODEX_RELATIVE_PATH"',
+    )
+    expect(expandHookCommand("echo 'src/${relativePath}'")).toBe(
+      'echo "src/$CODEX_RELATIVE_PATH"',
+    )
+  })
+
+  it('uses PowerShell env syntax when requested', () => {
+    expect(expandHookCommand('echo ${file}', true)).toBe('echo $env:CODEX_FILE')
+    expect(expandHookCommand('echo "${relativePath}"', true)).toBe('echo "$env:CODEX_RELATIVE_PATH"')
   })
 })
 

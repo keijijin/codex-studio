@@ -5,7 +5,7 @@ export const teamTool: Tool = {
   name: 'Team',
   description:
     'Run a named local Agent Team (parallel role subagents + shared BOARD.md + synthesizer). Prefer for multi-perspective reviews. Team ids live under .codex/teams/.',
-  requiresApproval: false,
+  requiresApproval: true,
   parameters: {
     type: 'object',
     properties: {
@@ -32,7 +32,17 @@ export const teamTool: Tool = {
       return { success: false, output: 'Error: Team runner is not available in this runtime' }
     }
     if (ctx.executeMode === 'preview') {
-      return { success: true, output: `Would run team "${teamId}": ${prompt.slice(0, 80)}` }
+      return {
+        success: true,
+        output: `Would run team "${teamId}": ${prompt.slice(0, 80)}`,
+        metadata: {
+          path: '',
+          relativePath: `team:${teamId}`,
+          oldContent: '',
+          newContent: prompt,
+          action: 'edit',
+        },
+      }
     }
     return ctx.runTeam({ teamId, prompt })
   },

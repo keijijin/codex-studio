@@ -94,13 +94,15 @@ async function collectFromDir(
 
 export async function collectPersonas(
   workspaceRoot: string,
-  options?: { globalPersonasDir?: string },
+  options?: { globalPersonasDir?: string; includeWorkspacePersonas?: boolean },
 ): Promise<PersonaFile[]> {
   const out: PersonaFile[] = []
   if (options?.globalPersonasDir) {
     await collectFromDir(options.globalPersonasDir, workspaceRoot, 'global', out)
   }
-  await collectFromDir(join(workspaceRoot, '.codex', 'personas'), workspaceRoot, 'workspace', out)
+  if (options?.includeWorkspacePersonas !== false) {
+    await collectFromDir(join(workspaceRoot, '.codex', 'personas'), workspaceRoot, 'workspace', out)
+  }
   const byName = new Map<string, PersonaFile>()
   for (const persona of out) {
     const existing = byName.get(persona.name)

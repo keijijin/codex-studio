@@ -5,7 +5,7 @@ import {
   type HookDefinition,
   type HooksConfig,
 } from '@codex/shared'
-import { wrapShellCommand, resolveAgentShellEnv } from '@codex/tools'
+import { wrapShellCommand, resolveAgentShellEnv, defaultShell, isPowerShell } from '@codex/tools'
 import { matchGlob } from './rules-loader'
 import { loadHooksConfig } from './hooks-loader'
 
@@ -49,21 +49,67 @@ export interface HooksRuntimeOptions {
   getShellEnv?: (workspaceRoot: string) => NodeJS.ProcessEnv
 }
 
-/** Single-quote for POSIX shells so spaces / $() / backticks cannot break out. */
-function shellSingleQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`
+const PLACEHOLDER_NAMES = ['file', 'relativePath', 'workspace', 'sessionId'] as const
+
+function envRef(name: (typeof PLACEHOLDER_NAMES)[number], powershell: boolean): string {
+  const envName =
+    name === 'file'
+      ? 'CODEX_FILE'
+      : name === 'relativePath'
+        ? 'CODEX_RELATIVE_PATH'
+        : name === 'workspace'
+          ? 'CODEX_WORKSPACE'
+          : 'CODEX_SESSION_ID'
+  return powershell ? `$env:${envName}` : `$${envName}`
 }
 
-function expandCommand(template: string, ctx: HookDispatchContext): string {
-  const file = shellSingleQuote(ctx.filePath ?? '')
-  const rel = shellSingleQuote(ctx.relativePath ?? '')
-  const workspace = shellSingleQuote(ctx.workspaceRoot)
-  const sessionId = shellSingleQuote(ctx.sessionId ?? '')
-  return template
-    .replaceAll('${file}', file)
-    .replaceAll('${relativePath}', rel)
-    .replaceAll('${workspace}', workspace)
-    .replaceAll('${sessionId}', sessionId)
+/**
+ * Map legacy `${file}` placeholders to shell env var references.
+ * Values are never interpolated into the command string (avoids quote/`$()` injection).
+ * Handles partial embedding: `"src/${relativePath}"` → `"src/$CODEX_RELATIVE_PATH"`.
+ */
+export function expandHookCommand(template: string, powershell = false): string {
+  const ph = (name: string) => `\${${name}}`
+
+  let out = template
+
+  // Single-quoted strings containing a placeholder → double-quoted so env vars expand.
+  out = out.replace(/'([^']*)'/g, (full, inner: string) => {
+    if (!PLACEHOLDER_NAMES.some((n) => inner.includes(ph(n)))) return full
+    let replaced = inner
+    for (const name of PLACEHOLDER_NAMES) {
+      replaced = replaced.replaceAll(ph(name), envRef(name, powershell))
+    }
+    return `"${replaced}"`
+  })
+
+  // Double-quoted strings: replace placeholders with bare env refs (keep surrounding quotes).
+  out = out.replace(/"([^"]*)"/g, (full, inner: string) => {
+    if (!PLACEHOLDER_NAMES.some((n) => inner.includes(ph(n)))) return full
+    let replaced = inner
+    for (const name of PLACEHOLDER_NAMES) {
+      replaced = replaced.replaceAll(ph(name), envRef(name, powershell))
+    }
+    return `"${replaced}"`
+  })
+
+  // Remaining bare placeholders → quoted env refs (POSIX) / env refs (PowerShell).
+  for (const name of PLACEHOLDER_NAMES) {
+    const ref = envRef(name, powershell)
+    const token = powershell ? ref : `"${ref}"`
+    out = out.replaceAll(ph(name), token)
+  }
+
+  return out
+}
+
+function hookEnvVars(ctx: HookDispatchContext): Record<string, string> {
+  return {
+    CODEX_FILE: ctx.filePath ?? '',
+    CODEX_RELATIVE_PATH: ctx.relativePath ?? '',
+    CODEX_WORKSPACE: ctx.workspaceRoot,
+    CODEX_SESSION_ID: ctx.sessionId ?? '',
+  }
 }
 
 function pathMatches(hook: HookDefinition, relativePath: string | undefined): boolean {
@@ -165,6 +211,7 @@ export class HooksRuntime {
 
     if (matching.length === 0) return []
 
+    const powershell = isPowerShell(defaultShell())
     this.depth++
     const results: HookRunResult[] = []
     try {
@@ -178,17 +225,26 @@ export class HooksRuntime {
         this.lastFired.set(key, now)
 
         if (hook.action.type === 'shell') {
-          const command = expandCommand(hook.action.command, dispatchCtx)
+          const command = expandHookCommand(hook.action.command, powershell)
+          const env = {
+            ...this.getShellEnv(ctx.workspaceRoot),
+            ...hookEnvVars(dispatchCtx),
+          }
           const result = await runShellCommand(
             command,
             ctx.workspaceRoot,
             this.shellTimeoutMs,
-            this.getShellEnv(ctx.workspaceRoot),
+            env,
           )
           results.push({ type: 'shell', command, ...result })
         } else if (hook.action.type === 'skill') {
           const skill = hook.action.skill
-          const args = expandCommand(hook.action.args ?? '', dispatchCtx)
+          // Skill args are not shell-executed — substitute literal values.
+          const args = (hook.action.args ?? '')
+            .replaceAll('${file}', dispatchCtx.filePath ?? '')
+            .replaceAll('${relativePath}', dispatchCtx.relativePath ?? '')
+            .replaceAll('${workspace}', dispatchCtx.workspaceRoot)
+            .replaceAll('${sessionId}', dispatchCtx.sessionId ?? '')
           if (!this.runSkill) {
             results.push({
               type: 'skill',

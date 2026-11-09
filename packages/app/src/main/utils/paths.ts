@@ -2,11 +2,12 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import { app } from 'electron'
 
-/** Resolve preload script path (electron-vite outputs .mjs in dev, .js in prod). */
+/** Resolve preload script path (sandbox requires CJS `.cjs`; keep legacy fallbacks). */
 export function resolvePreloadPath(mainDirname: string): string {
   const candidates = [
-    join(mainDirname, '../preload/index.mjs'),
+    join(mainDirname, '../preload/index.cjs'),
     join(mainDirname, '../preload/index.js'),
+    join(mainDirname, '../preload/index.mjs'),
   ]
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate
