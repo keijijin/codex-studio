@@ -3,6 +3,9 @@ import { createPortal } from 'react-dom'
 import {
   IPC_CHANNELS,
   API_KEY_REDACTED,
+  DEFAULT_LLAMACPP_BASE_URL,
+  DEFAULT_LLAMACPP_CONTEXT_SIZE,
+  DEFAULT_LLAMACPP_MODEL,
   DEFAULT_OLLAMA_BASE_URL,
   DEFAULT_AGENT_PERMISSIONS,
   DEFAULT_COST_SETTINGS,
@@ -117,6 +120,8 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
   const [anthropicKey, setAnthropicKey] = useState('')
   const [xaiKey, setXaiKey] = useState('')
   const [ollamaBaseUrl, setOllamaBaseUrl] = useState(DEFAULT_OLLAMA_BASE_URL)
+  const [llamacppBaseUrl, setLlamacppBaseUrl] = useState(DEFAULT_LLAMACPP_BASE_URL)
+  const [llamacppContextSize, setLlamacppContextSize] = useState(DEFAULT_LLAMACPP_CONTEXT_SIZE)
   const [showBuildOutputs, setShowBuildOutputs] = useState(true)
   const [yoloMode, setYoloMode] = useState(false)
   const [maxIterations, setMaxIterations] = useState(100)
@@ -151,7 +156,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
     aKey: string,
     ollamaUrl: string,
     xKey: string,
-    options?: FetchModelsOptions,
+    options?: FetchModelsOptions & { llamacppUrl?: string },
   ) => {
     if (!hasCodexApi()) return
     setLoadingModels(true)
@@ -165,6 +170,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
           anthropicApiKey: aKey || current.models.anthropicApiKey,
           xaiApiKey: xKey || current.models.xaiApiKey,
           ollamaBaseUrl: ollamaUrl || current.models.ollamaBaseUrl,
+          llamacppBaseUrl: options?.llamacppUrl || current.models.llamacppBaseUrl,
         },
       })
       const list = await window.codex.invoke(IPC_CHANNELS.MODELS_LIST, p)
@@ -198,6 +204,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
         const xKey = settings.models.xaiApiKey ?? ''
         const savedModel = settings.models.defaultChatModel
         const ollamaUrl = settings.models.ollamaBaseUrl ?? DEFAULT_OLLAMA_BASE_URL
+        const llamacppUrl = settings.models.llamacppBaseUrl ?? DEFAULT_LLAMACPP_BASE_URL
         setProvider(p)
         setModel(savedModel)
         setRoutingMode(settings.routing?.mode ?? 'fixed')
@@ -211,6 +218,10 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
         setAnthropicKey(aKey)
         setXaiKey(xKey)
         setOllamaBaseUrl(ollamaUrl)
+        setLlamacppBaseUrl(llamacppUrl)
+        setLlamacppContextSize(
+          settings.models.llamacppContextSize ?? DEFAULT_LLAMACPP_CONTEXT_SIZE,
+        )
         setShowBuildOutputs(Boolean(settings.general?.showBuildOutputs))
         setYoloMode(settings.agent.yoloMode)
         setMaxIterations(settings.agent.maxIterations)
@@ -232,7 +243,10 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
         setVideo({ ...DEFAULT_VIDEO_SETTINGS, ...settings.video })
         setPresentation({ ...DEFAULT_PRESENTATION_SETTINGS, ...settings.presentation })
         setRunwayKey(settings.video?.runwayApiKey ?? '')
-        await fetchModels(p, oKey, aKey, ollamaUrl, xKey, { preferredModel: savedModel })
+        await fetchModels(p, oKey, aKey, ollamaUrl, xKey, {
+          preferredModel: savedModel,
+          llamacppUrl,
+        })
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : '設定の読み込みに失敗しました')
@@ -242,7 +256,10 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
 
   const handleProviderChange = (p: LLMProviderId) => {
     setProvider(p)
-    void fetchModels(p, openaiKey, anthropicKey, ollamaBaseUrl, xaiKey, { resetModel: true })
+    void fetchModels(p, openaiKey, anthropicKey, ollamaBaseUrl, xaiKey, {
+      resetModel: true,
+      llamacppUrl: llamacppBaseUrl,
+    })
   }
 
   const handleSubmit = async (e: FormEvent) => {
@@ -262,6 +279,11 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
           anthropicApiKey: anthropicKey,
           xaiApiKey: xaiKey,
           ollamaBaseUrl,
+          llamacppBaseUrl,
+          llamacppContextSize: Math.max(
+            2048,
+            Math.floor(llamacppContextSize) || DEFAULT_LLAMACPP_CONTEXT_SIZE,
+          ),
           defaultChatModel: model,
           defaultAgentModel: model,
         },
@@ -453,6 +475,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                 <option value="anthropic">Anthropic</option>
                 <option value="xai">xAI (Grok)</option>
                 <option value="ollama">Ollama (Local)</option>
+                <option value="llamacpp">llama.cpp (Local)</option>
               </select>
 
               {provider === 'ollama' && (
@@ -469,13 +492,47 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                 </>
               )}
 
+              {provider === 'llamacpp' && (
+                <>
+                  <label style={labelStyle} htmlFor="llamacpp-base-url">llama.cpp Base URL</label>
+                  <input
+                    id="llamacpp-base-url"
+                    type="text"
+                    style={inputStyle}
+                    placeholder={DEFAULT_LLAMACPP_BASE_URL}
+                    value={llamacppBaseUrl}
+                    onChange={(e) => setLlamacppBaseUrl(e.target.value)}
+                  />
+                  <label style={labelStyle} htmlFor="llamacpp-context-size">
+                    Context size（llama-server の -c と同じ値）
+                  </label>
+                  <input
+                    id="llamacpp-context-size"
+                    type="number"
+                    min={2048}
+                    step={1024}
+                    style={inputStyle}
+                    value={llamacppContextSize}
+                    onChange={(e) => setLlamacppContextSize(Number(e.target.value))}
+                  />
+                  <p style={{ margin: '6px 0 0', fontSize: 11, color: '#858585' }}>
+                    llama-server の OpenAI 互換 API（例: {DEFAULT_LLAMACPP_MODEL}）。現在のサーバは
+                    -c 32768。不一致だと Context size exceeded になります。
+                  </p>
+                </>
+              )}
+
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 16 }}>
                 <label style={{ ...labelStyle, marginTop: 0 }} htmlFor="chat-model">Chat Model</label>
                 <button
                   type="button"
                   style={{ ...btnSecondary, padding: '4px 10px', fontSize: 12 }}
                   disabled={loadingModels}
-                  onClick={() => void fetchModels(provider, openaiKey, anthropicKey, ollamaBaseUrl, xaiKey)}
+                  onClick={() =>
+                    void fetchModels(provider, openaiKey, anthropicKey, ollamaBaseUrl, xaiKey, {
+                      llamacppUrl: llamacppBaseUrl,
+                    })
+                  }
                 >
                   {loadingModels ? '取得中...' : 'モデル一覧を更新'}
                 </button>
@@ -567,6 +624,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                         <option value="anthropic">Anthropic</option>
                         <option value="xai">xAI</option>
                         <option value="ollama">Ollama</option>
+                        <option value="llamacpp">llama.cpp</option>
                       </select>
                       <input
                         aria-label={`フォールバック ${index + 1} モデル`}

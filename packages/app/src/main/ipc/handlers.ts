@@ -15,7 +15,9 @@ import { skillsService } from '../services/skills-service'
 import { personasService } from '../services/personas-service'
 import { hooksService } from '../services/hooks-service'
 import { assertFilePath, assertNonEmptyString, assertSessionId, assertTerminalId } from '../utils/validate-ipc'
+import { assertTrustedIpcSender } from '../utils/ipc-guard'
 import { redactSettingsForRenderer } from '../services/settings-redact'
+import { workspaceTrustService } from '../services/workspace-trust'
 import { getDailyUsageSummary, listRecentUsage } from '../services/usage-log'
 import { pathIgnoreService } from '../services/path-ignore-service'
 import { gitService } from '../services/git-service'
@@ -34,6 +36,15 @@ async function applyIgnoreRules(root: string): Promise<void> {
 }
 
 export function registerIpcHandlers(): void {
+  // Wrap all invoke handlers so navigated-away documents cannot call IPC.
+  const originalHandle = ipcMain.handle.bind(ipcMain)
+  ipcMain.handle = ((channel: string, listener: (...args: unknown[]) => unknown) => {
+    return originalHandle(channel, (event, ...args) => {
+      assertTrustedIpcSender(event)
+      return listener(event, ...args)
+    })
+  }) as typeof ipcMain.handle
+
   indexService.setProgressCallback((status: IndexStatus) => {
     for (const win of BrowserWindow.getAllWindows()) {
       win.webContents.send(IPC_EVENTS.INDEX_PROGRESS, status)
@@ -44,9 +55,14 @@ export function registerIpcHandlers(): void {
     const target = assertFilePath(path)
     const workspace = await workspaceService.open(target)
     const root = workspace.rootPaths[0]
+    const trusted = await workspaceTrustService.ensureTrusted(root)
     settingsService.addRecentWorkspace(root)
     sessionService.rememberWorkspaceId(root, workspace.id)
-    agentEnvService.hydrateFromWorkspace(root)
+    if (trusted) {
+      agentEnvService.hydrateFromWorkspace(root)
+    } else {
+      agentEnvService.clearMemory()
+    }
     await applyIgnoreRules(root)
     fileWatcherService.start(root)
     void indexService.scan(root)

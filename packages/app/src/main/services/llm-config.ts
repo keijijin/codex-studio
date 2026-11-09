@@ -1,4 +1,6 @@
 import {
+  DEFAULT_LLAMACPP_BASE_URL,
+  DEFAULT_LLAMACPP_CONTEXT_SIZE,
   DEFAULT_OLLAMA_BASE_URL,
   DEFAULT_XAI_BASE_URL,
   migrateModelId,
@@ -19,6 +21,11 @@ import {
   markOllamaAvailability,
   probeOllamaAvailable,
 } from './ollama-availability'
+import {
+  getCachedLlamacppAvailability,
+  markLlamacppAvailability,
+  probeLlamacppAvailable,
+} from './llamacpp-availability'
 import { modelCatalogService } from './model-catalog-service'
 
 export interface LlmRuntimeConfig {
@@ -39,6 +46,9 @@ export function getApiKeyForProvider(
 ): string | undefined {
   if (provider === 'ollama') {
     return 'ollama'
+  }
+  if (provider === 'llamacpp') {
+    return 'llamacpp'
   }
   if (provider === 'anthropic') {
     return models.anthropicApiKey || process.env.ANTHROPIC_API_KEY
@@ -72,9 +82,11 @@ export function runtimeFromCandidate(
   const baseUrl =
     candidate.provider === 'ollama'
       ? modelsOllamaBaseUrl(settings.models)
-      : candidate.provider === 'xai'
-        ? modelsXaiBaseUrl(settings.models)
-        : undefined
+      : candidate.provider === 'llamacpp'
+        ? modelsLlamacppBaseUrl(settings.models)
+        : candidate.provider === 'xai'
+          ? modelsXaiBaseUrl(settings.models)
+          : undefined
   return {
     provider: candidate.provider,
     apiKey: apiKey ?? '',
@@ -86,6 +98,49 @@ export function runtimeFromCandidate(
 
 export function modelsOllamaBaseUrl(models: AppSettings['models']): string {
   return models.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || DEFAULT_OLLAMA_BASE_URL
+}
+
+export function modelsLlamacppBaseUrl(models: AppSettings['models']): string {
+  return (
+    models.llamacppBaseUrl ||
+    process.env.LLAMACPP_BASE_URL ||
+    process.env.LLAMA_CPP_BASE_URL ||
+    DEFAULT_LLAMACPP_BASE_URL
+  )
+}
+
+export function modelsLlamacppContextSize(models: AppSettings['models']): number {
+  const raw =
+    models.llamacppContextSize ||
+    Number(process.env.LLAMACPP_CONTEXT_SIZE) ||
+    DEFAULT_LLAMACPP_CONTEXT_SIZE
+  if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_LLAMACPP_CONTEXT_SIZE
+  return Math.floor(raw)
+}
+
+/**
+ * Effective history budget for Ask/Agent.
+ * For llama.cpp, cap below server `-c` and reserve room for completion tokens
+ * (avoids "Context size has been exceeded" when Compact 閾値 > n_ctx).
+ */
+export function effectiveCompactTokenBudget(
+  settings: AppSettings,
+  provider: LLMProviderId,
+  mode: 'chat' | 'agent' = 'chat',
+): number {
+  const configured = settings.agent.compactTokenThreshold
+  if (!configured || configured <= 0) return 0
+
+  if (provider !== 'llamacpp') return configured
+
+  const ctx = modelsLlamacppContextSize(settings.models)
+  const maxOut =
+    mode === 'agent'
+      ? settings.cost?.maxOutputTokensAgent ?? 8192
+      : settings.cost?.maxOutputTokens ?? 4096
+  // Keep ~70% of window for prompt; leave maxOut (+ small slack) for generation.
+  const promptCap = Math.max(2_048, Math.floor(ctx * 0.7) - maxOut - 512)
+  return Math.min(configured, promptCap)
 }
 
 export function modelsXaiBaseUrl(models: AppSettings['models']): string {
@@ -104,6 +159,10 @@ export function isCandidateAvailable(
     const cached = getCachedOllamaAvailability(modelsOllamaBaseUrl(settings.models))
     return cached === true
   }
+  if (candidate.provider === 'llamacpp') {
+    const cached = getCachedLlamacppAvailability(modelsLlamacppBaseUrl(settings.models))
+    return cached === true
+  }
   return Boolean(getApiKeyForProvider(candidate.provider, settings.models))
 }
 
@@ -113,6 +172,9 @@ export async function isCandidateAvailableAsync(
 ): Promise<boolean> {
   if (candidate.provider === 'ollama') {
     return probeOllamaAvailable(modelsOllamaBaseUrl(settings.models))
+  }
+  if (candidate.provider === 'llamacpp') {
+    return probeLlamacppAvailable(modelsLlamacppBaseUrl(settings.models))
   }
   return Boolean(getApiKeyForProvider(candidate.provider, settings.models))
 }
@@ -170,6 +232,14 @@ export async function resolveRoutingDecisionAsync(
     await probeOllamaAvailable(modelsOllamaBaseUrl(settings.models))
   }
 
+  const maybeNeedsLlamacpp =
+    primary.provider === 'llamacpp' ||
+    routing.fallbackChain.some((c) => c.provider === 'llamacpp')
+
+  if (maybeNeedsLlamacpp) {
+    await probeLlamacppAvailable(modelsLlamacppBaseUrl(settings.models))
+  }
+
   // Ensure catalog is reasonably fresh for Auto cost routing
   if ((options.modeOverride ?? routing.mode) === 'auto') {
     await modelCatalogService.refresh(settings).catch(() => undefined)
@@ -186,6 +256,9 @@ export function getLlmRuntimeConfig(settings: AppSettings, mode: 'chat' | 'agent
 export function missingApiKeyMessage(provider: LLMProviderId): string {
   if (provider === 'ollama') {
     return 'Ollama に接続できません。Ollama が起動しているか、設定の Base URL を確認してください。'
+  }
+  if (provider === 'llamacpp') {
+    return 'llama.cpp (llama-server) に接続できません。起動中か、設定の Base URL（既定 http://127.0.0.1:8080）を確認してください。'
   }
   return `${providerDisplayName(provider)} API キーが設定されていません。設定画面から登録してください。`
 }
@@ -213,6 +286,9 @@ export function formatLlmConnectionError(
   if (provider === 'ollama') {
     return missingApiKeyMessage('ollama')
   }
+  if (provider === 'llamacpp') {
+    return missingApiKeyMessage('llamacpp')
+  }
 
   return (
     `${providerDisplayName(provider)} への接続に失敗しました。` +
@@ -228,5 +304,8 @@ export function noteProviderConnectionFailure(
 ): void {
   if (provider === 'ollama') {
     markOllamaAvailability(modelsOllamaBaseUrl(settings.models), false)
+  }
+  if (provider === 'llamacpp') {
+    markLlamacppAvailability(modelsLlamacppBaseUrl(settings.models), false)
   }
 }

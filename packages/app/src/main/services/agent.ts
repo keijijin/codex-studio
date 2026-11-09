@@ -19,6 +19,7 @@ import { ceoApprovalService } from './ceo-approval'
 import { agentEnvService } from './agent-env-service'
 import { createE2eMockAgentProvider } from './e2e-mock-agent'
 import {
+  effectiveCompactTokenBudget,
   formatLlmConnectionError,
   missingApiKeyMessage,
   noteProviderConnectionFailure,
@@ -309,7 +310,9 @@ export class AgentService {
         const message = err instanceof Error ? err.message : 'Team failed'
         this.emit(webContents, sessionId, { type: 'error', message })
       } finally {
-        this.abortControllers.delete(sessionId)
+        if (this.abortControllers.get(sessionId) === abortController) {
+          this.abortControllers.delete(sessionId)
+        }
       }
       return
     }
@@ -482,7 +485,10 @@ export class AgentService {
       const message = formatLlmConnectionError(provider, err)
       this.emit(webContents, sessionId, { type: 'error', message })
     } finally {
-      this.abortControllers.delete(sessionId)
+      // Only clear if we still own the slot (a newer run may have replaced us).
+      if (this.abortControllers.get(sessionId) === abortController) {
+        this.abortControllers.delete(sessionId)
+      }
     }
   }
 
@@ -565,7 +571,11 @@ export class AgentService {
         yoloMode: isE2eMock || planMode ? false : settings.agent.yoloMode,
         permissions,
         planMode: Boolean(planMode),
-        compactTokenThreshold: settings.agent.compactTokenThreshold,
+        compactTokenThreshold: effectiveCompactTokenBudget(
+          settings,
+          runtime.provider,
+          'agent',
+        ),
         maxTokens: settings.cost?.maxOutputTokensAgent ?? 8192,
         enablePromptCache: settings.cost?.enablePromptCache !== false,
         signal: abortController.signal,

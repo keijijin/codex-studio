@@ -114,7 +114,22 @@ export class McpManager {
         description: `[MCP:${config.name}] ${t.description ?? t.name}`,
         requiresApproval: true,
         parameters: jsonSchemaToToolParams(t.inputSchema),
-        async execute(_ctx, args): Promise<ToolResult> {
+        async execute(ctx, args): Promise<ToolResult> {
+          // Preview must not call the MCP server (approval gate).
+          if (ctx.executeMode === 'preview') {
+            const previewArgs = JSON.stringify(args ?? {}, null, 2).slice(0, 2_000)
+            return {
+              success: true,
+              output: `Preview: MCP ${config.name}/${t.name}\nArgs:\n${previewArgs}`,
+              metadata: {
+                mcpServerId: config.id,
+                mcpTool: t.name,
+                action: 'mcp',
+                newContent: previewArgs,
+                relativePath: `mcp:${config.id}/${t.name}`,
+              },
+            }
+          }
           try {
             const result = await client.callTool({
               name: t.name,

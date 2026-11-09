@@ -11,6 +11,7 @@ import {
 } from '@codex/llm-adapters'
 import {
   APP_USER_DATA_DIR,
+  DEFAULT_LLAMACPP_BASE_URL,
   DEFAULT_OLLAMA_BASE_URL,
   DEFAULT_XAI_BASE_URL,
   type AppSettings,
@@ -39,6 +40,7 @@ function catalogPath(): string {
 
 function apiKeyFor(provider: LLMProviderId, models: AppSettings['models']): string | undefined {
   if (provider === 'ollama') return 'ollama'
+  if (provider === 'llamacpp') return 'llamacpp'
   if (provider === 'anthropic') return models.anthropicApiKey || process.env.ANTHROPIC_API_KEY
   if (provider === 'xai') return models.xaiApiKey || process.env.XAI_API_KEY
   return models.openaiApiKey || process.env.OPENAI_API_KEY
@@ -47,6 +49,14 @@ function apiKeyFor(provider: LLMProviderId, models: AppSettings['models']): stri
 function baseUrlFor(provider: LLMProviderId, models: AppSettings['models']): string | undefined {
   if (provider === 'ollama') {
     return models.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || DEFAULT_OLLAMA_BASE_URL
+  }
+  if (provider === 'llamacpp') {
+    return (
+      models.llamacppBaseUrl ||
+      process.env.LLAMACPP_BASE_URL ||
+      process.env.LLAMA_CPP_BASE_URL ||
+      DEFAULT_LLAMACPP_BASE_URL
+    )
   }
   if (provider === 'xai') {
     return models.xaiBaseUrl || process.env.XAI_BASE_URL || DEFAULT_XAI_BASE_URL
@@ -93,12 +103,12 @@ class ModelCatalogService {
 
   private async fetchAndStore(settings: AppSettings): Promise<ModelCatalogSnapshot> {
     const available: Partial<Record<LLMProviderId, string[]>> = {}
-    const providers: LLMProviderId[] = ['openai', 'anthropic', 'xai', 'ollama']
+    const providers: LLMProviderId[] = ['openai', 'anthropic', 'xai', 'ollama', 'llamacpp']
 
     await Promise.all(
       providers.map(async (provider) => {
         const apiKey = apiKeyFor(provider, settings.models)
-        if (!apiKey && provider !== 'ollama') return
+        if (!apiKey && provider !== 'ollama' && provider !== 'llamacpp') return
         try {
           const models = await listModels(provider, apiKey ?? 'ollama', {
             baseUrl: baseUrlFor(provider, settings.models),

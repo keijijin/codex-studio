@@ -102,7 +102,7 @@ export class TeamsService {
 
     const settings = settingsService.get()
     const runtime = getLlmRuntimeConfig(settings, 'agent')
-    if (!runtime.apiKey && runtime.provider !== 'ollama') {
+    if (!runtime.apiKey && runtime.provider !== 'ollama' && runtime.provider !== 'llamacpp') {
       throw new Error(`Missing API key for ${runtime.provider}`)
     }
     const rulesPrompt = await rulesService.buildPrompt([])

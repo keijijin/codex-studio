@@ -50,9 +50,13 @@ export interface Attachment {
   mimeType?: string
 }
 
-export type LLMProviderId = 'openai' | 'anthropic' | 'ollama' | 'xai'
+export type LLMProviderId = 'openai' | 'anthropic' | 'ollama' | 'xai' | 'llamacpp'
 
 export const DEFAULT_OLLAMA_BASE_URL = 'http://localhost:11434'
+export const DEFAULT_LLAMACPP_BASE_URL = 'http://127.0.0.1:8080'
+export const DEFAULT_LLAMACPP_MODEL = 'Qwen-AgentWorld-35B-A3B-UD-Q4_K_M.gguf'
+/** Must match llama-server `-c` (your current server uses 32768). */
+export const DEFAULT_LLAMACPP_CONTEXT_SIZE = 32_768
 export const DEFAULT_XAI_BASE_URL = 'https://api.x.ai/v1'
 export const DEFAULT_XAI_MODEL = 'grok-4.5'
 
@@ -163,6 +167,13 @@ export interface AppSettings {
     /** xAI (Grok) API key */
     xaiApiKey?: string
     ollamaBaseUrl?: string
+    /** llama-server / llama.cpp OpenAI-compatible base (default http://127.0.0.1:8080) */
+    llamacppBaseUrl?: string
+    /**
+     * llama-server `-c` context size. Used to cap auto-compact so we don't
+     * send prompts larger than the server window (default 32768).
+     */
+    llamacppContextSize?: number
     /** Override xAI OpenAI-compatible base (default https://api.x.ai/v1) */
     xaiBaseUrl?: string
   }
@@ -210,6 +221,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
     defaultChatModel: 'gpt-5.4-mini',
     defaultAgentModel: 'gpt-5.4-mini',
     ollamaBaseUrl: DEFAULT_OLLAMA_BASE_URL,
+    llamacppBaseUrl: DEFAULT_LLAMACPP_BASE_URL,
+    llamacppContextSize: DEFAULT_LLAMACPP_CONTEXT_SIZE,
   },
   routing: { ...DEFAULT_ROUTING, fallbackChain: [...DEFAULT_ROUTING.fallbackChain] },
   agent: {

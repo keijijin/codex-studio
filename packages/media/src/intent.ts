@@ -31,7 +31,7 @@ function plainFromMarkdown(md: string): string {
   return md
     .replace(CODE_FENCE, ' ')
     .replace(/^#+\s+/gm, '')
-    .replace(/[*_`>#\[\]()!-]/g, ' ')
+    .replace(/[*_`>#[\]()!-]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 }

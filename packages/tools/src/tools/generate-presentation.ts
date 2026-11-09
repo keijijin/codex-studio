@@ -44,6 +44,21 @@ export const generatePresentationTool: Tool = {
       }
     }
 
+    if (ctx.executeMode === 'preview') {
+      const themeId =
+        typeof args.themeId === 'string' ? args.themeId : config?.presentation.themeId ?? 'midnight'
+      return {
+        success: true,
+        output: `Preview: GeneratePresentation from ${pathArg} (theme=${themeId}). No API calls until approved.`,
+        metadata: {
+          path: pathArg,
+          relativePath: pathArg,
+          action: 'generate_presentation',
+          newContent: `GeneratePresentation ${pathArg} theme=${themeId}`,
+        },
+      }
+    }
+
     const absolute = ctx.resolvePath(pathArg)
     let markdown: string
     try {

@@ -66,7 +66,8 @@ export function AIPanel() {
   }, [workspace])
 
   const hasApiKey =
-    settings?.models.defaultProvider === 'ollama'
+    settings?.models.defaultProvider === 'ollama' ||
+    settings?.models.defaultProvider === 'llamacpp'
       ? true
       : settings?.models.defaultProvider === 'anthropic'
         ? hasConfiguredKey(settings?.models.anthropicApiKey)
@@ -79,17 +80,21 @@ export function AIPanel() {
       ? 'Anthropic'
       : routingInfo?.provider === 'ollama'
         ? 'Ollama'
-        : routingInfo?.provider === 'xai'
-          ? 'xAI'
-          : routingInfo?.provider === 'openai'
-            ? 'OpenAI'
-            : settings?.models.defaultProvider === 'anthropic'
-              ? 'Anthropic'
-              : settings?.models.defaultProvider === 'ollama'
-                ? 'Ollama'
-                : settings?.models.defaultProvider === 'xai'
-                  ? 'xAI'
-                  : 'OpenAI'
+        : routingInfo?.provider === 'llamacpp'
+          ? 'llama.cpp'
+          : routingInfo?.provider === 'xai'
+            ? 'xAI'
+            : routingInfo?.provider === 'openai'
+              ? 'OpenAI'
+              : settings?.models.defaultProvider === 'anthropic'
+                ? 'Anthropic'
+                : settings?.models.defaultProvider === 'ollama'
+                  ? 'Ollama'
+                  : settings?.models.defaultProvider === 'llamacpp'
+                    ? 'llama.cpp'
+                    : settings?.models.defaultProvider === 'xai'
+                      ? 'xAI'
+                      : 'OpenAI'
   const modelLabel =
     routingInfo?.model ??
     (sessionMode === 'agent' || sessionMode === 'plan'

@@ -1,6 +1,10 @@
 import type { LLMProviderId, ModelInfo } from './types'
 import { createOpenAIClient } from './create-clients'
 import { getSystemCaFetch } from './system-ca-fetch'
+import {
+  DEFAULT_LLAMACPP_BASE_URL,
+  DEFAULT_LLAMACPP_MODEL,
+} from './llamacpp-provider'
 import { DEFAULT_XAI_BASE_URL } from './xai-provider'
 
 const ANTHROPIC_MODELS: ModelInfo[] = [
@@ -53,6 +57,10 @@ export async function listModels(
 ): Promise<ModelInfo[]> {
   if (provider === 'ollama') {
     return listOllamaModels(options?.baseUrl)
+  }
+
+  if (provider === 'llamacpp') {
+    return listLlamacppModels(options?.baseUrl)
   }
 
   if (provider === 'anthropic') {
@@ -120,6 +128,7 @@ export async function listModels(
 export function getProviderForModel(modelId: string): LLMProviderId {
   if (modelId.startsWith('claude')) return 'anthropic'
   if (modelId.startsWith('grok')) return 'xai'
+  if (modelId.endsWith('.gguf') || /agentworld/i.test(modelId)) return 'llamacpp'
   if (modelId.includes(':') || modelId.startsWith('llama') || modelId.startsWith('mistral')) {
     return 'ollama'
   }
@@ -144,6 +153,42 @@ async function listOllamaModels(baseUrl = 'http://localhost:11434'): Promise<Mod
     return [
       { id: 'llama3.2', name: 'llama3.2 (fallback)', provider: 'ollama' },
       { id: 'mistral', name: 'mistral (fallback)', provider: 'ollama' },
+    ]
+  }
+}
+
+async function listLlamacppModels(
+  baseUrl = DEFAULT_LLAMACPP_BASE_URL,
+): Promise<ModelInfo[]> {
+  const root = baseUrl.replace(/\/$/, '').replace(/\/v1$/, '')
+  const url = `${root}/v1/models`
+  try {
+    const res = await fetch(url)
+    if (!res.ok) {
+      throw new Error(`llama.cpp API error: ${res.status}`)
+    }
+    const data = (await res.json()) as {
+      data?: { id: string }[]
+      models?: { name?: string; model?: string }[]
+    }
+    const fromData = (data.data ?? []).map((m) => m.id).filter(Boolean)
+    const fromModels = (data.models ?? [])
+      .map((m) => m.name || m.model || '')
+      .filter(Boolean)
+    const ids = [...new Set([...fromData, ...fromModels])]
+    const models = ids.map((id) => ({
+      id,
+      name: id.replace(/\.gguf$/i, ''),
+      provider: 'llamacpp' as const,
+    }))
+    return models.sort((a, b) => a.id.localeCompare(b.id))
+  } catch {
+    return [
+      {
+        id: DEFAULT_LLAMACPP_MODEL,
+        name: DEFAULT_LLAMACPP_MODEL.replace(/\.gguf$/i, ''),
+        provider: 'llamacpp',
+      },
     ]
   }
 }

@@ -3,6 +3,7 @@ import { realpath, readdir, readFile, stat, writeFile } from 'fs/promises'
 import { basename, dirname, join, relative, resolve } from 'path'
 import type { FileNode, PathIgnore, Workspace } from '@codex/shared'
 import { createDefaultPathIgnore, isPathInsideRoot } from '@codex/shared'
+import { resolveWithinWorkspace as resolvePathInRoot } from '@codex/tools'
 import { pathIgnoreService } from './path-ignore-service'
 
 export function workspaceIdFromPath(resolvedPath: string): string {
@@ -87,24 +88,15 @@ export class WorkspaceService {
       throw new Error('No workspace open')
     }
 
-    const resolved = resolve(targetPath)
+    const errors: string[] = []
     for (const root of roots) {
-      const normalizedRoot = resolve(root)
-      if (isPathInsideRoot(normalizedRoot, resolved)) {
-        return resolved
+      try {
+        return resolvePathInRoot(root, targetPath)
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : String(err))
       }
     }
-
-    // Relative path: try each root
-    for (const root of roots) {
-      const normalizedRoot = resolve(root)
-      const relativeResolved = resolve(normalizedRoot, targetPath)
-      if (isPathInsideRoot(normalizedRoot, relativeResolved)) {
-        return relativeResolved
-      }
-    }
-
-    throw new Error('Path is outside workspace')
+    throw new Error(errors[0] || 'Path is outside workspace')
   }
 
   /** Resolve a markdown href to an absolute path inside the workspace. */

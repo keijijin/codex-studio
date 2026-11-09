@@ -23,6 +23,8 @@ import {
   formatLlmConnectionError,
   getApiKeyForProvider,
   missingApiKeyMessage,
+  effectiveCompactTokenBudget,
+  modelsLlamacppBaseUrl,
   modelsOllamaBaseUrl,
   modelsXaiBaseUrl,
   noteProviderConnectionFailure,
@@ -55,15 +57,17 @@ export class ChatService {
   async listModels(provider: LLMProviderId) {
     const settings = settingsService.get()
     const apiKey = getApiKeyForProvider(provider, settings.models)
-    if (!apiKey && provider !== 'ollama') {
+    if (!apiKey && provider !== 'ollama' && provider !== 'llamacpp') {
       throw new Error(missingApiKeyMessage(provider))
     }
     const baseUrl =
       provider === 'ollama'
         ? modelsOllamaBaseUrl(settings.models)
-        : provider === 'xai'
-          ? modelsXaiBaseUrl(settings.models)
-          : undefined
+        : provider === 'llamacpp'
+          ? modelsLlamacppBaseUrl(settings.models)
+          : provider === 'xai'
+            ? modelsXaiBaseUrl(settings.models)
+            : undefined
     const list = await listModels(provider, apiKey ?? 'ollama', { baseUrl })
     // Refresh cost-routing catalog in the background when models are listed
     void modelCatalogService.refresh(settings).catch(() => undefined)
@@ -209,8 +213,8 @@ export class ChatService {
       })
     }
 
-    // Soft trim Ask context using the same compact threshold as Agent
-    const askBudget = settings.agent.compactTokenThreshold
+    // Soft trim Ask context (llama.cpp: capped below server -c)
+    const askBudget = effectiveCompactTokenBudget(settings, decision.selected.provider, 'chat')
     if (askBudget && askBudget > 0) {
       const estimated = llmMessages.reduce(
         (sum, m) => sum + estimateTokens(flattenChatContent(m.content)),
@@ -378,7 +382,9 @@ export class ChatService {
         message: lastError || 'Chat failed',
       })
     } finally {
-      this.abortControllers.delete(sessionId)
+      if (this.abortControllers.get(sessionId) === abortController) {
+        this.abortControllers.delete(sessionId)
+      }
     }
   }
 

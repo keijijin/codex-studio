@@ -1,6 +1,6 @@
 import './bootstrap-app'
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, session, shell } from 'electron'
-import { dirname, join } from 'path'
+import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { APP_NAME, IPC_CHANNELS } from '@codex/shared'
 
@@ -37,7 +37,7 @@ function createWindow(): void {
       preload: resolvePreloadPath(mainDirname),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   })
 
@@ -71,7 +71,19 @@ function createWindow(): void {
   mainWindow.webContents.on('will-navigate', (event, url) => {
     const isDev = Boolean(process.env.ELECTRON_RENDERER_URL)
     if (isDev && url.startsWith(process.env.ELECTRON_RENDERER_URL!)) return
-    if (url.startsWith('file://')) return
+
+    // Only allow navigating to our own packaged renderer entry — never arbitrary file://
+    // (Mermaid/XSS pages must not keep preload + IPC).
+    if (url.startsWith('file://')) {
+      try {
+        const target = resolve(fileURLToPath(url))
+        const allowed = resolve(join(mainDirname, '../renderer/index.html'))
+        if (target === allowed) return
+      } catch {
+        // fall through to deny
+      }
+    }
+
     event.preventDefault()
     try {
       const parsed = new URL(url)

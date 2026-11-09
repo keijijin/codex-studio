@@ -49,11 +49,16 @@ export interface HooksRuntimeOptions {
   getShellEnv?: (workspaceRoot: string) => NodeJS.ProcessEnv
 }
 
+/** Single-quote for POSIX shells so spaces / $() / backticks cannot break out. */
+function shellSingleQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
 function expandCommand(template: string, ctx: HookDispatchContext): string {
-  const file = ctx.filePath ?? ''
-  const rel = ctx.relativePath ?? ''
-  const workspace = ctx.workspaceRoot
-  const sessionId = ctx.sessionId ?? ''
+  const file = shellSingleQuote(ctx.filePath ?? '')
+  const rel = shellSingleQuote(ctx.relativePath ?? '')
+  const workspace = shellSingleQuote(ctx.workspaceRoot)
+  const sessionId = shellSingleQuote(ctx.sessionId ?? '')
   return template
     .replaceAll('${file}', file)
     .replaceAll('${relativePath}', rel)

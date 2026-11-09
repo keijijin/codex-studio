@@ -1,7 +1,7 @@
 import type { LLMProvider, AgentMessage, ToolCall, LlmUsage } from '@codex/llm-adapters'
 import { addUsage, emptyUsage } from '@codex/llm-adapters'
 import type { AgentPermissions, ApprovalRequest } from '@codex/shared'
-import { DEFAULT_AGENT_PERMISSIONS, permissionForTool } from '@codex/shared'
+import { DEFAULT_AGENT_PERMISSIONS, isToolEnabled, permissionForTool } from '@codex/shared'
 import type { ToolRegistry, ToolResult } from '@codex/tools'
 import type { ToolContext } from '@codex/tools'
 import { estimateMessagesTokens, trimAgentHistory } from './context-builder'
@@ -442,20 +442,29 @@ export class AgentOrchestrator {
     baseToolCtx: Omit<ToolContext, 'executeMode'>,
   ): Promise<ToolResult> {
     const tool = this.registry.get(call.name)
-    const perm = resolvePermission(call.name, ctx.yoloMode, permissions)
+    const canonicalName = tool?.name ?? call.name
+
+    if (!isToolEnabled(canonicalName, ctx.enabledTools)) {
+      return {
+        success: false,
+        output: `Error: tool "${call.name}" is not enabled for this run (plan/readonly allow-list).`,
+      }
+    }
+
+    const perm = resolvePermission(canonicalName, ctx.yoloMode, permissions)
 
     if (perm === 'deny') {
       return {
         success: false,
         output:
-          `Error: tool "${call.name}" is denied by permission policy. ` +
+          `Error: tool "${canonicalName}" is denied by permission policy. ` +
           `Open Settings → Agent → set permission preset to coding (or yolo), ` +
           `and ensure edit is not deny.`,
       }
     }
 
     if (perm === 'ask' && tool?.requiresApproval) {
-      const preview = await this.registry.execute(call.name, call.arguments, {
+      const preview = await this.registry.execute(canonicalName, call.arguments, {
         ...baseToolCtx,
         executeMode: 'preview',
       })
@@ -467,9 +476,9 @@ export class AgentOrchestrator {
       const meta = preview.metadata ?? {}
       const approvalReq: ApprovalRequest = {
         toolCallId: call.id,
-        tool: call.name,
+        tool: canonicalName,
         path: String(meta.path ?? ''),
-        relativePath: String(meta.relativePath ?? meta.path ?? call.name),
+        relativePath: String(meta.relativePath ?? meta.path ?? canonicalName),
         oldContent: String(meta.oldContent ?? ''),
         newContent: String(meta.newContent ?? ''),
         summary: preview.output,
@@ -483,7 +492,7 @@ export class AgentOrchestrator {
       }
     }
 
-    return this.registry.execute(call.name, call.arguments, {
+    return this.registry.execute(canonicalName, call.arguments, {
       ...baseToolCtx,
       executeMode: 'apply',
     })

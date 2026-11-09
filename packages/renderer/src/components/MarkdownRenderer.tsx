@@ -40,7 +40,13 @@ function MermaidBlock({ chart }: { chart: string }) {
           }
         } catch (error) {
           if (!cancelled) {
-            container.innerHTML = `<pre class="mermaid-error">${String(error)}</pre>`
+            // Never put error text through innerHTML — Mermaid includes the
+            // diagram source in the message (XSS / IPC pivot via meta refresh).
+            container.replaceChildren()
+            const pre = document.createElement('pre')
+            pre.className = 'mermaid-error'
+            pre.textContent = String(error)
+            container.appendChild(pre)
           }
         }
       })()

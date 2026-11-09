@@ -39,6 +39,21 @@ export const generateVideoTool: Tool = {
       }
     }
 
+    if (ctx.executeMode === 'preview') {
+      const mode = typeof args.mode === 'string' ? args.mode : config?.video.mode ?? 'hybrid'
+      const relativePath = pathArg
+      return {
+        success: true,
+        output: `Preview: GenerateVideo from ${relativePath} (mode=${mode}). No API calls until approved.`,
+        metadata: {
+          path: pathArg,
+          relativePath,
+          action: 'generate_video',
+          newContent: `GenerateVideo ${relativePath} mode=${mode}`,
+        },
+      }
+    }
+
     const absolute = ctx.resolvePath(pathArg)
     let markdown: string
     try {

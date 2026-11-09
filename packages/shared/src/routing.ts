@@ -83,7 +83,8 @@ export function normalizeRoutingSettings(
             (c.provider === 'openai' ||
               c.provider === 'anthropic' ||
               c.provider === 'ollama' ||
-              c.provider === 'xai') &&
+              c.provider === 'xai' ||
+              c.provider === 'llamacpp') &&
             typeof c.model === 'string' &&
             c.model.length > 0,
         )

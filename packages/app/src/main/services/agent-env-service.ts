@@ -10,6 +10,33 @@ import {
 } from '@codex/tools'
 import { ensureUtf8LocaleEnv } from '@codex/shared'
 import { workspaceService } from './workspace'
+import { workspaceTrustService } from './workspace-trust'
+
+/** Workspace/captured env must not override process identity / loader hooks. */
+const BLOCKED_AGENT_ENV_KEYS = new Set([
+  'PATH',
+  'Path',
+  'BASH_ENV',
+  'ENV',
+  'SHELL',
+  'LD_PRELOAD',
+  'DYLD_INSERT_LIBRARIES',
+  'DYLD_LIBRARY_PATH',
+  'LD_LIBRARY_PATH',
+  'NODE_OPTIONS',
+  'PYTHONPATH',
+  'PERL5OPT',
+  'RUBYOPT',
+])
+
+function scrubDangerousEnv(env: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(env)) {
+    if (BLOCKED_AGENT_ENV_KEYS.has(key)) continue
+    out[key] = value
+  }
+  return out
+}
 
 export interface AgentEnvStatus {
   capturedKeyCount: number
@@ -28,17 +55,19 @@ class AgentEnvService {
 
   /** Apply a captured env map and persist under `.codex/.agent-env.captured`. */
   setCaptured(env: Record<string, string>, workspaceRoot?: string): void {
-    this.overlay = { ...env }
+    this.overlay = scrubDangerousEnv(env)
     this.capturedAt = new Date().toISOString()
     const root = workspaceRoot ?? workspaceService.getRoot()
     if (!root) return
+    if (!workspaceTrustService.isTrusted(root)) return
     const path = agentEnvCapturedPath(root)
     try {
       mkdirSync(dirname(path), { recursive: true })
+      // Mode 0600 — avoid world-readable secrets in captured env dumps.
       const body = Object.entries(this.overlay)
         .map(([k, v]) => `${k}=${v}`)
         .join('\n')
-      writeFileSync(path, `${body}\n`, 'utf-8')
+      writeFileSync(path, `${body}\n`, { encoding: 'utf-8', mode: 0o600 })
     } catch {
       // persistence is best-effort; in-memory overlay still applies
     }
@@ -46,7 +75,12 @@ class AgentEnvService {
 
   /** Load previously captured file into memory (e.g. after workspace open). */
   hydrateFromWorkspace(workspaceRoot: string): void {
-    const fromFile = loadEnvFile(agentEnvCapturedPath(workspaceRoot))
+    if (!workspaceTrustService.isTrusted(workspaceRoot)) {
+      this.overlay = {}
+      this.capturedAt = null
+      return
+    }
+    const fromFile = scrubDangerousEnv(loadEnvFile(agentEnvCapturedPath(workspaceRoot)))
     if (Object.keys(fromFile).length === 0) return
     this.overlay = fromFile
     if (!this.capturedAt) {
@@ -75,10 +109,14 @@ class AgentEnvService {
   resolve(workspaceRoot?: string | null): NodeJS.ProcessEnv {
     const root = workspaceRoot ?? workspaceService.getRoot()
     const base = ensureUtf8LocaleEnv(process.env)
-    if (!root) {
-      return mergeShellEnv(base, this.overlay)
+    if (!root || !workspaceTrustService.isTrusted(root)) {
+      return mergeShellEnv(base)
     }
-    return mergeShellEnv(base, loadWorkspaceAgentEnv(root), this.overlay)
+    return mergeShellEnv(
+      base,
+      scrubDangerousEnv(loadWorkspaceAgentEnv(root)),
+      scrubDangerousEnv(this.overlay),
+    )
   }
 
   status(workspaceRoot?: string | null): AgentEnvStatus {

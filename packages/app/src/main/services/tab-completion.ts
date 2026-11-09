@@ -2,6 +2,7 @@ import { getProviderInstance } from '@codex/llm-adapters'
 import { settingsService } from './settings'
 import {
   getApiKeyForProvider,
+  modelsLlamacppBaseUrl,
   modelsOllamaBaseUrl,
   modelsXaiBaseUrl,
 } from './llm-config'
@@ -29,7 +30,7 @@ export async function completeInline(
 
   const provider = settings.models.defaultProvider
   const apiKey = getApiKeyForProvider(provider, settings.models)
-  if (!apiKey && provider !== 'ollama') {
+  if (!apiKey && provider !== 'ollama' && provider !== 'llamacpp') {
     return { text: '', skipped: 'no-api-key' }
   }
 
@@ -39,9 +40,11 @@ export async function completeInline(
   const baseUrl =
     provider === 'ollama'
       ? modelsOllamaBaseUrl(settings.models)
-      : provider === 'xai'
-        ? modelsXaiBaseUrl(settings.models)
-        : undefined
+      : provider === 'llamacpp'
+        ? modelsLlamacppBaseUrl(settings.models)
+        : provider === 'xai'
+          ? modelsXaiBaseUrl(settings.models)
+          : undefined
 
   const prefix = req.prefix.slice(-4000)
   const suffix = (req.suffix ?? '').slice(0, 500)

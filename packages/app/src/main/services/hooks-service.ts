@@ -10,6 +10,7 @@ import { settingsService } from './settings'
 import { workspaceService } from './workspace'
 import { auditLog } from './audit-log'
 import { agentEnvService } from './agent-env-service'
+import { workspaceTrustService } from './workspace-trust'
 
 /**
  * Electron-side hooks service.
@@ -24,7 +25,7 @@ class HooksService {
       runSkill: async (skill, args, ctx) => {
         const settings = settingsService.get()
         const runtime = getLlmRuntimeConfig(settings, 'agent')
-        if (!runtime.apiKey && runtime.provider !== 'ollama') {
+        if (!runtime.apiKey && runtime.provider !== 'ollama' && runtime.provider !== 'llamacpp') {
           return { success: false, output: `Missing API key for ${runtime.provider}` }
         }
         const prompt = args ? `/${skill} ${args}` : `/${skill}`
@@ -54,6 +55,7 @@ class HooksService {
   async onFileSave(absolutePath: string): Promise<HookRunResult[]> {
     const root = workspaceService.getRoot()
     if (!root) return []
+    if (!workspaceTrustService.isTrusted(root)) return []
     if (this.runtime.isRunning) return []
 
     const ctx: HookDispatchContext = {
@@ -74,6 +76,7 @@ class HooksService {
   async onAgentComplete(sessionId: string): Promise<HookRunResult[]> {
     const root = workspaceService.getRoot()
     if (!root) return []
+    if (!workspaceTrustService.isTrusted(root)) return []
     if (this.runtime.isRunning) return []
 
     const results = await this.runtime.dispatch('onAgentComplete', {

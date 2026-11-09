@@ -14,6 +14,7 @@ import { getProviderInstance, decideRouting, isRetryableError, type ModelCandida
 import { defaultToolRegistry, resolveWithinWorkspace } from '@codex/tools'
 import {
   DEFAULT_FALLBACK_CHAIN,
+  DEFAULT_LLAMACPP_BASE_URL,
   DEFAULT_OLLAMA_BASE_URL,
   DEFAULT_XAI_BASE_URL,
   type LLMProviderId,
@@ -35,7 +36,7 @@ Usage:
 
 Options:
   -w, --workspace <path>   Workspace root (default: cwd)
-  -p, --provider <id>      openai | anthropic | xai | ollama (default: openai)
+  -p, --provider <id>      openai | anthropic | xai | ollama | llamacpp (default: openai)
   -m, --model <id>         Model id
   --profile <name>         readonly | coding | yolo (default: readonly; ask→coding, allow→yolo)
   --routing <mode>         fixed | auto | fallback-only (default: fixed)
@@ -45,7 +46,7 @@ Options:
   -h, --help               Show help
 
 Environment:
-  OPENAI_API_KEY / ANTHROPIC_API_KEY / XAI_API_KEY / OLLAMA_BASE_URL / XAI_BASE_URL
+  OPENAI_API_KEY / ANTHROPIC_API_KEY / XAI_API_KEY / OLLAMA_BASE_URL / LLAMACPP_BASE_URL / XAI_BASE_URL
   (Desktop Settings の平文キーへフォールバック可。OS 秘密ストア移行後は環境変数必須)
 
 Examples:
@@ -73,6 +74,16 @@ function resolveApiKey(provider: LLMProviderId): { apiKey: string; baseUrl?: str
         DEFAULT_OLLAMA_BASE_URL,
     }
   }
+  if (provider === 'llamacpp') {
+    return {
+      apiKey: 'llamacpp',
+      baseUrl:
+        process.env.LLAMACPP_BASE_URL ||
+        process.env.LLAMA_CPP_BASE_URL ||
+        stored?.llamacppBaseUrl ||
+        DEFAULT_LLAMACPP_BASE_URL,
+    }
+  }
   if (provider === 'anthropic') {
     const apiKey = process.env.ANTHROPIC_API_KEY || stored?.anthropicApiKey
     if (!apiKey) return null
@@ -94,6 +105,9 @@ function resolveApiKey(provider: LLMProviderId): { apiKey: string; baseUrl?: str
 function missingKeyHint(provider: LLMProviderId): string {
   if (provider === 'ollama') {
     return 'Ollama が利用できません。`ollama serve` と Base URL を確認してください。'
+  }
+  if (provider === 'llamacpp') {
+    return 'llama.cpp が利用できません。llama-server と LLAMACPP_BASE_URL（既定 http://127.0.0.1:8080）を確認してください。'
   }
   const envName =
     provider === 'anthropic'
@@ -261,8 +275,8 @@ async function runTeamCli(args: CliArgs): Promise<void> {
   const creds = resolveApiKey(args.provider)
   if (!creds) {
     throw new Error(
-      args.provider === 'ollama'
-        ? 'Ollama is not configured'
+      args.provider === 'ollama' || args.provider === 'llamacpp'
+        ? missingKeyHint(args.provider)
         : missingKeyHint(args.provider),
     )
   }

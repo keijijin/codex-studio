@@ -11,6 +11,7 @@ import {
 } from '@codex/agent-core'
 import type { RuleFile, RuleSaveParams } from '@codex/shared'
 import { workspaceService } from './workspace'
+import { workspaceTrustService } from './workspace-trust'
 
 function globalRulesDir(): string {
   return join(app.getPath('home'), '.codex-studio', 'rules')
@@ -39,10 +40,13 @@ export class RulesService {
 
   async buildPrompt(contextPaths: string[] = []): Promise<string> {
     const root = workspaceService.getRoot()
+    const trusted = Boolean(root && workspaceTrustService.isTrusted(root))
+    // Untrusted workspaces: only global (~/.codex-studio) rules; skip project Rules/memory.
+    const workspaceRoot = trusted ? root : null
     const [rules, project, memory] = await Promise.all([
-      loadRules(root, { globalRulesDir: globalRulesDir(), contextPaths }),
-      root ? loadProjectContext(root) : Promise.resolve(''),
-      root ? loadMemory(root) : Promise.resolve(''),
+      loadRules(workspaceRoot, { globalRulesDir: globalRulesDir(), contextPaths }),
+      trusted && root ? loadProjectContext(root) : Promise.resolve(''),
+      trusted && root ? loadMemory(root) : Promise.resolve(''),
     ])
     return `${rules}${project}${memory}`
   }
