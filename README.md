@@ -101,7 +101,7 @@ packages/
 
 ## 技術スタック
 
-Electron 35 · React 19 · TypeScript 5 · Monaco · Tailwind · Zustand · Vitest · Playwright
+Electron 45 · React 19 · TypeScript 5 · Monaco · Tailwind · Zustand · Vitest · Playwright
 
 ## ライセンス
 

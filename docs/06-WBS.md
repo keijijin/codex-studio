@@ -153,7 +153,7 @@
 
 | WBS ID | タスク | 期間 | 依存 | 担当 |
 |--------|--------|------|------|------|
-| 1.5.1 | SQLite セットアップ（better-sqlite3） | 1d | 1.2.4 | BE |
+| 1.5.1 | SQLite セットアップ（実装は `node:sqlite`） | 1d | 1.2.4 | BE |
 | 1.5.2 | sessions.db スキーマ + Migration | 1d | 1.5.1 | BE |
 | 1.5.3 | Index Service（初回スキャン） | 3d | 1.3.3.1 | BE |
 | 1.5.4 | Index Worker Thread | 1d | 1.5.3 | BE |

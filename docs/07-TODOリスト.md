@@ -97,8 +97,8 @@
 
 ### 索引
 
-- [ ] SQLite 初期化（better-sqlite3）— Post-MVP
-- [ ] index.db スキーマ作成 — Post-MVP
+- [x] SQLite 初期化（`node:sqlite` / sessions.db・semantic.db）— better-sqlite3 は不採用
+- [x] index / semantic DB スキーマ（`node:sqlite`）
 - [x] Index Service 初回スキャン（インメモリ）
 - [ ] Index Worker Thread
 - [ ] FileWatcher → 増分索引連携

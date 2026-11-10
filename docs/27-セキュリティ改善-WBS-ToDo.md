@@ -51,7 +51,7 @@ W1        W2        W3        W4        W5        W6        W7        W8–W10
 
 | WBS ID | タスク | 目安 | 依存 | 担当 | 状態 |
 |--------|--------|------|------|------|------|
-| 2.0.1 | Electron バージョン差分調査と更新/据置方針 | 1d | - | BE | [x] → [release.md](./release.md)（35 暫定 / 45 へ更新予定） |
+| 2.0.1 | Electron バージョン差分調査と更新/据置方針 | 1d | - | BE | [x] → [release.md](./release.md)（`^45.2.3` へ更新済み） |
 | 2.0.2 | 署名・公証フロー確認（Secrets 有無） | 0.5d | - | DevOps | [x] release.yml + release.md と checklist を一致 |
 | 2.0.3 | electron-builder パッケージ起動スモーク | 1d | 2.0.1 | BE | [x] → [release.md](./release.md) 記録済 |
 | 2.0.4 | `pnpm audit --prod` 分類（修正/許容/更新） | 1d | - | BE | [x] → [28](./28-audit-prod-triage.md) |
