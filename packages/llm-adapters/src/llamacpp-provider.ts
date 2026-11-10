@@ -125,13 +125,10 @@ export class LlamaCppProvider implements LLMProvider {
         const chunkUsage = usageFromOpenAIChunk(chunk)
         if (chunkUsage) usage = chunkUsage
 
-        const text = textFromDelta(delta)
-        // Only stream final content for agent (avoid dumping chain-of-thought into tool loops)
+        // Never stream reasoning_content into the agent transcript — it bloats
+        // the next prefill on local models. Ask/chat still shows thinking via textFromDelta.
         if (delta?.content) {
           yield { type: 'text', delta: delta.content }
-        } else if (text && !delta?.tool_calls?.length) {
-          // If the model only emits reasoning_content, still show progress
-          yield { type: 'text', delta: text }
         }
 
         if (delta?.tool_calls) {

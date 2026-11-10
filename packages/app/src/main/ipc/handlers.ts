@@ -81,6 +81,28 @@ export function registerIpcHandlers(): void {
     return workspaceService.get()
   })
 
+  ipcMain.handle(IPC_CHANNELS.WORKSPACE_TRUST_STATUS, () => {
+    return workspaceTrustService.status(workspaceService.getRoot())
+  })
+
+  ipcMain.handle(IPC_CHANNELS.WORKSPACE_TRUST, () => {
+    const root = workspaceService.getRoot()
+    if (!root) return workspaceTrustService.status(null)
+    workspaceTrustService.trust(root)
+    agentEnvService.hydrateFromWorkspace(root)
+    void auditLog('workspace:trust', { root })
+    return workspaceTrustService.status(root)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.WORKSPACE_UNTRUST, () => {
+    const root = workspaceService.getRoot()
+    if (!root) return workspaceTrustService.status(null)
+    workspaceTrustService.untrust(root)
+    agentEnvService.clearMemory()
+    void auditLog('workspace:untrust', { root })
+    return workspaceTrustService.status(root)
+  })
+
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_GET_TREE, async () => {
     return workspaceService.getFileTree()
   })
@@ -91,6 +113,10 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.FILE_READ, async (_event, path: string) => {
     return workspaceService.readFile(assertFilePath(path))
+  })
+
+  ipcMain.handle(IPC_CHANNELS.FILE_READ_BINARY, async (_event, path: string) => {
+    return workspaceService.readFileBinary(assertFilePath(path))
   })
 
   ipcMain.handle(IPC_CHANNELS.FILE_RESOLVE, (_event, href: string, baseFilePath?: string) => {

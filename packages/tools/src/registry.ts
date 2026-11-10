@@ -91,6 +91,12 @@ export class ToolRegistry {
     if (ctx.signal.aborted) {
       return { success: false, output: 'Error: cancelled' }
     }
+    if (ctx.executeMode === 'preview' && tool.preview) {
+      return tool.preview(ctx, args)
+    }
+    if (ctx.executeMode === 'apply' && tool.apply) {
+      return tool.apply(ctx, args)
+    }
     return tool.execute(ctx, args)
   }
 }

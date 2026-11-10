@@ -24,6 +24,7 @@ const OPENAI_FALLBACK: ModelInfo[] = [
 ]
 
 const XAI_FALLBACK: ModelInfo[] = [
+  { id: 'grok-4.7', name: 'Grok 4.7', provider: 'xai' },
   { id: 'grok-4.5', name: 'Grok 4.5', provider: 'xai' },
   { id: 'grok-4.3', name: 'Grok 4.3', provider: 'xai' },
   { id: 'grok-4-1-fast-non-reasoning', name: 'Grok 4.1 Fast', provider: 'xai' },

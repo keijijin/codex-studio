@@ -40,7 +40,41 @@ git push origin v0.1.3
 - 更新メタ: GitHub Releases 上の `latest-mac.yml`（mac）/ `latest.yml`（win）/ `latest-linux.yml`
 - 開発モード（`electron-vite dev`）では更新チェックはスキップされます
 
+## セキュリティ監査・パッケージ確認
+
+- 本番依存の audit 分類: [28-audit-prod-triage.md](./28-audit-prod-triage.md)
+- CI: unit（`tests/security` 含む）+ Playwright e2e を必須。packaged アプリの E2E は当面手動
+- リリース前手動スモーク: `pnpm package:mac`（または該当 OS）後、成果物を起動し `window.codex` とフォルダオープンを確認
+
+### 手動パッケージ起動スモーク（記録）
+
+| 項目 | 記録 |
+|------|------|
+| 日付 | 2026-11-09 |
+| OS / arch | macOS 27.2.0 / arm64 |
+| Electron | 45.2.3（2026-11-09 更新後の再スモークは e2e 緑で代替確認） |
+| 成果物 | `release/mac-arm64/CodexStudio.app`（`electron-builder --mac --publish never`） |
+| 起動 | OK（メイン + sandboxed Renderer プロセス確認） |
+| `window.codex` | OK（Playwright `executablePath` 起動で `invoke` 関数あり） |
+| ワークスペース open | OK（`CODEX_E2E_WORKSPACE` → Explorer に `sample-workspace`） |
+| 備考 | 署名なし（Developer ID なし）。Gatekeeper 警告あり得る。任意 OS の optional deps は pnpm10 で未同梱警告あり（arm64 mac 本体は動作） |
+
+## Electron バージョン方針（S0 / 2026-11-09）
+
+| 項目 | 内容 |
+|------|------|
+| 現状 | `electron@^45.2.3`（2026-11-09 に 35.x EOL から更新） |
+| 補足 | `pnpm.overrides.node-abi=4.40.0` で `@electron/rebuild` が Electron 45 ABI を解決。`safeStorage` は async API（`isAsyncEncryptionAvailable` / `encryptStringAsync` / `decryptStringAsync`）を使用 |
+| 方針 | stable の現行メジャー（45.x）を追従。パッチは随時 |
+| 更新条件 | (1) `pnpm test` + e2e 緑 (2) `pnpm package:mac` 起動スモーク (3) Terminal / safeStorage / updater 動作確認 |
+
 ## コード署名・公証
+
+### 現状（checklist と一致）
+
+- Release CI（`.github/workflows/release.yml`）は `CSC_LINK` があるとき署名を有効化し、mac では `APPLE_*` があるとき `notarize=true` を付与する
+- Secrets 未設定時は `CSC_IDENTITY_AUTO_DISCOVERY=false` の **署名なし** ビルド（α/β 配布可、Gatekeeper 警告あり）
+- ローカル `electron-builder.json` の `mac.notarize` 既定は `false`（Secrets / 明示フラグでのみ公証）
 
 ### macOS
 

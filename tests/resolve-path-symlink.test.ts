@@ -1,8 +1,82 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtempSync, mkdirSync, realpathSync, symlinkSync, writeFileSync, rmSync } from 'fs'
+import { existsSync, lstatSync, mkdtempSync, mkdirSync, realpathSync, symlinkSync, writeFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { resolveUnlinkWithinWorkspace, resolveWithinWorkspace } from '@codex/tools'
+import type { ToolContext } from '@codex/tools'
+import {
+  createWorkspaceFs,
+  deleteTool,
+  resolveUnlinkWithinWorkspace,
+  resolveWithinWorkspace,
+} from '@codex/tools'
+
+describe('Delete in a secondary workspace root', () => {
+  function setup() {
+    const first = realpathSync(mkdtempSync(join(tmpdir(), 'codex-root1-')))
+    const second = realpathSync(mkdtempSync(join(tmpdir(), 'codex-root2-')))
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'codex-out-')))
+    const fs = createWorkspaceFs([first, second])
+    const ctx: ToolContext = {
+      workspaceRoot: first,
+      sessionId: 's',
+      executeMode: 'apply',
+      signal: new AbortController().signal,
+      fs,
+      getRelativePath: (p: string) => p,
+      resolvePath: (p: string) => fs.resolve(p),
+    }
+    const cleanup = () => {
+      for (const dir of [first, second, outside]) rmSync(dir, { recursive: true, force: true })
+    }
+    return { second, outside, ctx, cleanup }
+  }
+
+  it('removes the link and keeps its target', async () => {
+    const { second, ctx, cleanup } = setup()
+    try {
+      writeFileSync(join(second, 'real.txt'), 'keep', 'utf-8')
+      symlinkSync(join(second, 'real.txt'), join(second, 'link.txt'))
+
+      const result = await deleteTool.execute(ctx, { path: join(second, 'link.txt') })
+
+      expect(result.success).toBe(true)
+      expect(existsSync(join(second, 'real.txt'))).toBe(true)
+      expect(() => lstatSync(join(second, 'link.txt'))).toThrow()
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('removes a link that escapes the workspace without touching the target', async () => {
+    const { second, outside, ctx, cleanup } = setup()
+    try {
+      writeFileSync(join(outside, 'secret.txt'), 'keep', 'utf-8')
+      symlinkSync(join(outside, 'secret.txt'), join(second, 'leak.txt'))
+
+      const result = await deleteTool.execute(ctx, { path: join(second, 'leak.txt') })
+
+      expect(result.success).toBe(true)
+      expect(existsSync(join(outside, 'secret.txt'))).toBe(true)
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('still rejects files reached through an escaping directory link', async () => {
+    const { second, outside, ctx, cleanup } = setup()
+    try {
+      writeFileSync(join(outside, 'secret.txt'), 'keep', 'utf-8')
+      symlinkSync(outside, join(second, 'linkdir'))
+
+      const result = await deleteTool.execute(ctx, { path: join(second, 'linkdir', 'secret.txt') })
+
+      expect(result.success).toBe(false)
+      expect(existsSync(join(outside, 'secret.txt'))).toBe(true)
+    } finally {
+      cleanup()
+    }
+  })
+})
 
 describe('resolveWithinWorkspace symlink safety', () => {
   it('rejects symlinks that escape the workspace', () => {

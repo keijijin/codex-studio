@@ -43,17 +43,19 @@ describe('mergeShellEnv / resolveAgentShellEnv', () => {
     expect(merged).toEqual({ A: '1', B: '3', C: '4' })
   })
 
-  it('loads .codex/agent.env from workspace but ignores PATH overrides', () => {
+  it('loads .codex/agent.env allowlisted keys and ignores PATH / unknown', () => {
     const root = mkdtempSync(join(tmpdir(), 'codex-agent-env-'))
     mkdirSync(join(root, '.codex'), { recursive: true })
     writeFileSync(
       join(root, '.codex', 'agent.env'),
-      'OC_TOKEN=secret\nPATH=/custom/bin\nBASH_ENV=/tmp/evil\n',
+      'OC_TOKEN=secret\nKUBECONFIG=/tmp/kube\nPATH=/custom/bin\nBASH_ENV=/tmp/evil\nMY_TOOL_HOME=/opt\n',
     )
     const env = resolveAgentShellEnv(root, undefined, { PATH: '/usr/bin', HOME: '/Users/x' })
     expect(env.OC_TOKEN).toBe('secret')
+    expect(env.KUBECONFIG).toBe('/tmp/kube')
     expect(env.PATH).toBe('/usr/bin')
     expect(env.BASH_ENV).toBeUndefined()
+    expect(env.MY_TOOL_HOME).toBeUndefined()
     expect(env.HOME).toBe('/Users/x')
   })
 

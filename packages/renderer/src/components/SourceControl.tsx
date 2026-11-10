@@ -1,10 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import {
-  IPC_CHANNELS,
-  IPC_EVENTS,
-  type GitChange,
-  type GitStatusSnapshot,
-} from '@codex/shared'
+import { IPC_EVENTS, type GitChange, type GitStatusSnapshot } from '@codex/shared'
 import { useAppStore } from '@renderer/store/app-store'
 
 function statusLabel(c: GitChange): string {
@@ -29,11 +24,11 @@ export function SourceControl() {
       return
     }
     try {
-      const snap = await window.codex.invoke(IPC_CHANNELS.GIT_STATUS)
+      const snap = await window.codex.git.status()
       setStatus(snap)
       setError(snap.error && !snap.isRepo ? snap.error : null)
       if (snap.isRepo) {
-        const list = await window.codex.invoke(IPC_CHANNELS.GIT_BRANCHES)
+        const list = await window.codex.git.branches()
         setBranches(list)
       }
     } catch (err) {
@@ -102,7 +97,7 @@ export function SourceControl() {
               return
             }
             void run(async () => {
-              const r = await window.codex.invoke(IPC_CHANNELS.GIT_CHECKOUT, b)
+              const r = await window.codex.git.checkout(b)
               if (!r.success) throw new Error(r.message)
             })
           }}
@@ -150,7 +145,7 @@ export function SourceControl() {
         actionLabel="Unstage"
         onAction={(paths) =>
           void run(async () => {
-            await window.codex.invoke(IPC_CHANNELS.GIT_UNSTAGE, paths)
+            await window.codex.git.unstage(paths)
           })
         }
         onOpen={(c) => void openFile(c.absolutePath, c.path.split('/').pop() ?? c.path)}
@@ -164,7 +159,7 @@ export function SourceControl() {
         actionLabel="Stage"
         onAction={(paths) =>
           void run(async () => {
-            await window.codex.invoke(IPC_CHANNELS.GIT_STAGE, paths)
+            await window.codex.git.stage(paths)
           })
         }
         onOpen={(c) => void openFile(c.absolutePath, c.path.split('/').pop() ?? c.path)}
@@ -186,7 +181,7 @@ export function SourceControl() {
           disabled={busy || !message.trim() || staged.length + both.length === 0}
           onClick={() =>
             void run(async () => {
-              const r = await window.codex.invoke(IPC_CHANNELS.GIT_COMMIT, message)
+              const r = await window.codex.git.commit(message)
               if (!r.success) throw new Error(r.message)
               setMessage('')
             })
@@ -206,8 +201,7 @@ function ChangeSection({
   actionLabel,
   onAction,
   onOpen,
-  busy,
-}: {
+  busy }: {
   title: string
   items: GitChange[]
   empty: string

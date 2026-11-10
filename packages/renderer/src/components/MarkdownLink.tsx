@@ -1,5 +1,4 @@
 import type { MouseEvent, ReactNode } from 'react'
-import { IPC_CHANNELS } from '@codex/shared'
 import { useAppStore } from '@renderer/store/app-store'
 
 function isExternalHref(href: string): boolean {
@@ -44,7 +43,7 @@ export function MarkdownLink({ href, baseFilePath, children }: MarkdownLinkProps
     event.preventDefault()
     if (!workspace) return
     try {
-      const resolved = await window.codex.invoke(IPC_CHANNELS.FILE_RESOLVE, href, baseFilePath)
+      const resolved = await window.codex.file.resolve(href, baseFilePath)
       const name = resolved.split(/[/\\]/).pop() ?? resolved
       await openFile(resolved, name)
     } catch (err) {

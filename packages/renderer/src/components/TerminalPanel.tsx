@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { IPC_CHANNELS, IPC_EVENTS } from '@codex/shared'
+import { IPC_EVENTS } from '@codex/shared'
 import { hasCodexApi } from '@renderer/components/ErrorBoundary'
 import { useAppStore } from '@renderer/store/app-store'
 
@@ -10,8 +10,7 @@ const TERMINAL_THEME = {
   background: '#1e1e1e',
   foreground: '#cccccc',
   cursor: '#cccccc',
-  selectionBackground: '#264f78',
-}
+  selectionBackground: '#264f78' }
 
 export function TerminalPanel() {
   const workspace = useAppStore((s) => s.workspace)
@@ -28,7 +27,7 @@ export function TerminalPanel() {
     setSyncing(true)
     setSyncStatus(null)
     try {
-      const result = await window.codex.invoke(IPC_CHANNELS.TERMINAL_CAPTURE_ENV, id)
+      const result = await window.codex.terminal.captureEnv(id)
       setSyncStatus(`Agent に同期済み (${result.keyCount} 変数)`)
     } catch (err) {
       setSyncStatus(`同期失敗: ${err instanceof Error ? err.message : String(err)}`)
@@ -51,8 +50,7 @@ export function TerminalPanel() {
       theme: TERMINAL_THEME,
       scrollback: 5000,
       allowProposedApi: false,
-      convertEol: true,
-    })
+      convertEol: true })
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
     term.open(container)
@@ -67,7 +65,7 @@ export function TerminalPanel() {
       fitAddon.fit()
       const id = terminalIdRef.current
       if (id) {
-        void window.codex.invoke(IPC_CHANNELS.TERMINAL_RESIZE, id, term.cols, term.rows)
+        void window.codex.terminal.resize(id, term.cols, term.rows)
       }
     }
 
@@ -81,9 +79,9 @@ export function TerminalPanel() {
 
     const setup = async () => {
       try {
-        const { id } = await window.codex.invoke(IPC_CHANNELS.TERMINAL_CREATE)
+        const { id } = await window.codex.terminal.create()
         if (disposed) {
-          void window.codex.invoke(IPC_CHANNELS.TERMINAL_DESTROY, id)
+          void window.codex.terminal.destroy(id)
           return
         }
         terminalIdRef.current = id
@@ -112,7 +110,7 @@ export function TerminalPanel() {
     const dataDisposable = term.onData((data) => {
       const id = terminalIdRef.current
       if (id) {
-        void window.codex.invoke(IPC_CHANNELS.TERMINAL_WRITE, id, data)
+        void window.codex.terminal.write(id, data)
       }
     })
 
@@ -124,7 +122,7 @@ export function TerminalPanel() {
       dataDisposable.dispose()
       const id = terminalIdRef.current
       if (id) {
-        void window.codex.invoke(IPC_CHANNELS.TERMINAL_DESTROY, id)
+        void window.codex.terminal.destroy(id)
       }
       terminalIdRef.current = null
       term.dispose()

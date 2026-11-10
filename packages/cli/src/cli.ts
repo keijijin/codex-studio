@@ -48,6 +48,9 @@ Options:
 Environment:
   OPENAI_API_KEY / ANTHROPIC_API_KEY / XAI_API_KEY / OLLAMA_BASE_URL / LLAMACPP_BASE_URL / XAI_BASE_URL
   (Desktop Settings の平文キーへフォールバック可。OS 秘密ストア移行後は環境変数必須)
+  CODEX_TRUST_WORKSPACE=1   Trust workspace overlays (.codex/agent.env, hooks, workspace Rules/Skills/Teams)
+  CODEX_CLI_TRUST_WORKSPACE=1   Same as above (CLI alias)
+  (Default: untrusted — workspace agent.env / hooks / local Skills·Teams·Personas are skipped)
 
 Examples:
   pnpm cli -- agent "README を要約して" -w .

@@ -10,11 +10,16 @@ import type {
   Session,
   SessionMode,
   ToolCallRecord,
-  Workspace,
-} from '@codex/shared'
-import { IPC_CHANNELS, IPC_EVENTS } from '@codex/shared'
+  Workspace } from '@codex/shared'
+import { IPC_EVENTS } from '@codex/shared'
 import { hasCodexApi } from '@renderer/components/ErrorBoundary'
-import { defaultMdViewMode, type MdViewMode } from '@renderer/utils/files'
+import {
+  defaultMdViewMode,
+  defaultTabKind,
+  isPdfFile,
+  type EditorTabKind,
+  type MdViewMode,
+} from '@renderer/utils/files'
 
 const openingPaths = new Set<string>()
 /** Ignore out-of-order WORKSPACE_GET_TREE responses. */
@@ -28,6 +33,11 @@ interface EditorTab {
   content: string
   isDirty: boolean
   mdViewMode: MdViewMode
+  /** text (Monaco/Markdown) or pdf (binary preview) */
+  kind: EditorTabKind
+  /** Base64 payload for binary preview tabs (PDF). */
+  binaryBase64?: string
+  mimeType?: string
 }
 
 type SidebarView = 'explorer' | 'search' | 'git'
@@ -200,9 +210,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     get().setupListeners()
     await get().loadSettings()
-    const workspace = await window.codex.invoke(IPC_CHANNELS.WORKSPACE_GET)
+    const workspace = await window.codex.workspace.get()
     if (workspace) {
-      const fileTree = await window.codex.invoke(IPC_CHANNELS.WORKSPACE_GET_TREE)
+      const fileTree = await window.codex.workspace.getTree()
       set({ workspace, fileTree })
       await get().loadSessions()
       if (get().sessions.length === 0) {
@@ -229,20 +239,16 @@ export const useAppStore = create<AppState>((set, get) => ({
             oldContent: event.oldContent,
             newContent: event.newContent,
             summary: event.summary,
-            action: event.action as ApprovalRequest['action'],
-          },
-          aiPanelOpen: true,
-        })
+            action: event.action as ApprovalRequest['action'] },
+          aiPanelOpen: true })
         return
       }
       if (event.type === 'ceo_approval_required') {
         set({
           pendingCeoApproval: {
             sessionId: event.sessionId,
-            ...event.request,
-          },
-          aiPanelOpen: true,
-        })
+            ...event.request },
+          aiPanelOpen: true })
         return
       }
 
@@ -252,20 +258,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (event.type === 'text_delta') {
         set((s) => ({
           streamingContent: s.streamingContent + event.content,
-          chatError: null,
-        }))
+          chatError: null }))
       } else if (event.type === 'tool_call_start') {
         set((s) => {
           const next: ToolCallRecord = {
             id: event.toolCallId,
             name: event.tool,
             args: event.args,
-            status: 'running' as const,
-          }
+            status: 'running' as const }
           return {
             streamingToolCalls: [...s.streamingToolCalls, next],
-            sessionToolLog: [...s.sessionToolLog, next],
-          }
+            sessionToolLog: [...s.sessionToolLog, next] }
         })
       } else if (event.type === 'tool_call_result') {
         set((s) => {
@@ -274,13 +277,11 @@ export const useAppStore = create<AppState>((set, get) => ({
               ? {
                   ...tc,
                   result: event.result,
-                  status: event.success ? ('done' as const) : ('error' as const),
-                }
+                  status: event.success ? ('done' as const) : ('error' as const) }
               : tc
           return {
             streamingToolCalls: s.streamingToolCalls.map(patch),
-            sessionToolLog: s.sessionToolLog.map(patch),
-          }
+            sessionToolLog: s.sessionToolLog.map(patch) }
         })
         // Do not auto-open files from Agent tools — user opens via Explorer / Search / tool card.
       } else if (event.type === 'team_stage') {
@@ -288,26 +289,20 @@ export const useAppStore = create<AppState>((set, get) => ({
           teamStage: {
             stage: event.stage,
             teamId: event.teamId,
-            detail: event.detail,
-          },
-        })
+            detail: event.detail } })
       } else if (event.type === 'routing') {
         set({
           routingInfo: {
             provider: event.provider,
             model: event.model,
             reason: event.reason,
-            mode: event.mode,
-          },
-          chatError: null,
-        })
+            mode: event.mode },
+          chatError: null })
       } else if (event.type === 'persona_applied') {
         set({
           activePersona: {
             personaId: event.personaId,
-            personaName: event.personaName,
-          },
-        })
+            personaName: event.personaName } })
       } else if (event.type === 'retrying') {
         set({
           streamingContent: '',
@@ -317,13 +312,11 @@ export const useAppStore = create<AppState>((set, get) => ({
             provider: event.provider,
             model: event.model,
             reason: `再試行 ${event.attempt}: ${event.previousError.slice(0, 80)}`,
-            mode: get().routingInfo?.mode ?? 'fallback-only',
-          },
-        })
+            mode: get().routingInfo?.mode ?? 'fallback-only' } })
       } else if (event.type === 'done') {
         void (async () => {
-          const messages = await window.codex.invoke(IPC_CHANNELS.SESSION_SELECT, event.sessionId)
-          const sessions = await window.codex.invoke(IPC_CHANNELS.SESSION_LIST)
+          const messages = await window.codex.session.select(event.sessionId)
+          const sessions = await window.codex.session.list()
           const session = sessions.find((s) => s.id === event.sessionId)
           const sticky = session?.personaName
           const { pendingApproval, pendingCeoApproval } = get()
@@ -350,18 +343,15 @@ export const useAppStore = create<AppState>((set, get) => ({
                   provider: event.trace.provider,
                   model: event.trace.model,
                   routeReason: event.trace.routeReason,
-                  toolCount: event.trace.toolCount,
-                }
+                  toolCount: event.trace.toolCount }
               : sticky
                 ? {
                     personaName: sticky,
                     provider: get().routingInfo?.provider,
                     model: get().routingInfo?.model,
                     routeReason: get().routingInfo?.reason,
-                    toolCount: get().sessionToolLog.length,
-                  }
-                : get().lastTrace,
-          })
+                    toolCount: get().sessionToolLog.length }
+                : get().lastTrace })
         })()
       } else if (event.type === 'error') {
         const { pendingApproval, pendingCeoApproval } = get()
@@ -373,8 +363,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           pendingApproval:
             pendingApproval?.sessionId === event.sessionId ? null : pendingApproval,
           pendingCeoApproval:
-            pendingCeoApproval?.sessionId === event.sessionId ? null : pendingCeoApproval,
-        })
+            pendingCeoApproval?.sessionId === event.sessionId ? null : pendingCeoApproval })
       }
     })
 
@@ -418,12 +407,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   loadSettings: async () => {
-    const settings = await window.codex.invoke(IPC_CHANNELS.SETTINGS_GET)
+    const settings = await window.codex.settings.get()
     set({ settings })
   },
 
   refreshIndexStatus: async () => {
-    const indexStatus = await window.codex.invoke(IPC_CHANNELS.INDEX_STATUS)
+    const indexStatus = await window.codex.index.status()
     set({ indexStatus })
   },
 
@@ -432,25 +421,25 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       let targetPath = path
       if (!targetPath) {
-        targetPath = (await window.codex.invoke(IPC_CHANNELS.DIALOG_OPEN_DIRECTORY)) ?? undefined
+        targetPath = (await window.codex.dialog.openDirectory()) ?? undefined
       }
       if (!targetPath) return
 
       // Cancel in-flight chat for the previous folder (history is kept in store)
       if (get().activeSessionId) {
         try {
-          await window.codex.invoke(IPC_CHANNELS.CHAT_CANCEL, get().activeSessionId!)
+          await window.codex.chat.cancel(get().activeSessionId!)
         } catch {
           // ignore
         }
       }
       if (get().workspace) {
-        await window.codex.invoke(IPC_CHANNELS.WORKSPACE_CLOSE)
+        await window.codex.workspace.close()
       }
 
-      const workspace = await window.codex.invoke(IPC_CHANNELS.WORKSPACE_OPEN, targetPath)
-      const fileTree = await window.codex.invoke(IPC_CHANNELS.WORKSPACE_GET_TREE)
-      const sessions = await window.codex.invoke(IPC_CHANNELS.SESSION_LIST)
+      const workspace = await window.codex.workspace.open(targetPath)
+      const fileTree = await window.codex.workspace.getTree()
+      const sessions = await window.codex.session.list()
 
       set({
         workspace,
@@ -467,12 +456,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         messages: [],
         streamingContent: '',
         streamingToolCalls: [],
+        sessionToolLog: [],
         isStreaming: false,
         chatError: null,
         pendingApproval: null,
+        routingInfo: null,
+        lastTrace: null,
+        lastUsage: null,
+        activePersona: null,
         sessionMode: 'agent',
-        indexStatus: { state: 'indexing', totalFiles: 0, indexedFiles: 0 },
-      })
+        indexStatus: { state: 'indexing', totalFiles: 0, indexedFiles: 0 } })
 
       if (sessions.length === 0) {
         // First time in this folder → start a fresh chat
@@ -490,7 +483,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   closeWorkspace: async () => {
-    await window.codex.invoke(IPC_CHANNELS.WORKSPACE_CLOSE)
+    await window.codex.workspace.close()
     set({
       workspace: null,
       fileTree: [],
@@ -504,18 +497,27 @@ export const useAppStore = create<AppState>((set, get) => ({
       sessions: [],
       activeSessionId: null,
       messages: [],
-      indexStatus: { state: 'idle', totalFiles: 0, indexedFiles: 0 },
-    })
+      streamingContent: '',
+      streamingToolCalls: [],
+      sessionToolLog: [],
+      isStreaming: false,
+      chatError: null,
+      pendingApproval: null,
+      routingInfo: null,
+      lastTrace: null,
+      lastUsage: null,
+      activePersona: null,
+      indexStatus: { state: 'idle', totalFiles: 0, indexedFiles: 0 } })
   },
 
   addWorkspaceRoot: async (path?: string) => {
     let targetPath = path
     if (!targetPath) {
-      targetPath = (await window.codex.invoke(IPC_CHANNELS.DIALOG_OPEN_DIRECTORY)) ?? undefined
+      targetPath = (await window.codex.dialog.openDirectory()) ?? undefined
     }
     if (!targetPath) return
-    const workspace = await window.codex.invoke(IPC_CHANNELS.WORKSPACE_ADD_ROOT, targetPath)
-    const fileTree = await window.codex.invoke(IPC_CHANNELS.WORKSPACE_GET_TREE)
+    const workspace = await window.codex.workspace.addRoot(targetPath)
+    const fileTree = await window.codex.workspace.getTree()
     set({ workspace, fileTree })
   },
 
@@ -557,7 +559,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             if (!get().workspace) {
               set({ fileTree: [] })
             } else {
-              const fileTree = await window.codex.invoke(IPC_CHANNELS.WORKSPACE_GET_TREE)
+              const fileTree = await window.codex.workspace.getTree()
               if (generation === fileTreeRefreshGeneration) {
                 set({ fileTree })
               }
@@ -582,16 +584,46 @@ export const useAppStore = create<AppState>((set, get) => ({
         : {
             primaryTabPath: path,
             activeTabPath: path,
-            activePane: 'primary' as const,
-          }
+            activePane: 'primary' as const }
     if (existing) {
       set(panePatch)
       return
     }
 
-    const content = await window.codex.invoke(IPC_CHANNELS.FILE_READ, path)
+    if (isPdfFile(name) || defaultTabKind(name) === 'pdf') {
+      const binary = await window.codex.file.readBinary(path)
+      set({
+        tabs: [
+          ...tabs,
+          {
+            path,
+            name,
+            content: '',
+            isDirty: false,
+            mdViewMode: 'preview',
+            kind: 'pdf',
+            binaryBase64: binary.base64,
+            mimeType: binary.mimeType,
+          },
+        ],
+        ...panePatch,
+      })
+      return
+    }
+
+    const content = await window.codex.file.read(path)
     set({
-      tabs: [...tabs, { path, name, content, isDirty: false, mdViewMode: defaultMdViewMode(name) }],
+      tabs: [
+        ...tabs,
+        {
+          path,
+          name,
+          content,
+          isDirty: false,
+          mdViewMode: defaultMdViewMode(name),
+          kind: 'text',
+        },
+      ],
       ...panePatch,
     })
   },
@@ -609,12 +641,30 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       // Only refresh tabs the user already opened — never auto-open new ones.
       if (existing) {
-        const content = await window.codex.invoke(IPC_CHANNELS.FILE_READ, path)
-        set({
-          tabs: get().tabs.map((t) =>
-            t.path === path ? { ...t, content, isDirty: false } : t,
-          ),
-        })
+        if (existing.kind === 'pdf' || isPdfFile(existing.name)) {
+          const binary = await window.codex.file.readBinary(path)
+          set({
+            tabs: get().tabs.map((t) =>
+              t.path === path
+                ? {
+                    ...t,
+                    content: '',
+                    isDirty: false,
+                    kind: 'pdf',
+                    binaryBase64: binary.base64,
+                    mimeType: binary.mimeType,
+                  }
+                : t,
+            ),
+          })
+        } else {
+          const content = await window.codex.file.read(path)
+          set({
+            tabs: get().tabs.map((t) =>
+              t.path === path ? { ...t, content, isDirty: false } : t,
+            ),
+          })
+        }
       }
     } catch (err) {
       console.error('[app] openChangedFile failed:', path, err)
@@ -647,8 +697,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       tabs: next,
       activeTabPath: nextActive,
       primaryTabPath: nextPrimary,
-      secondaryTabPath: nextSecondary,
-    })
+      secondaryTabPath: nextSecondary })
   },
 
   closeAllTabs: () => {
@@ -667,8 +716,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       primaryTabPath: null,
       secondaryTabPath: null,
       editorSplit: false,
-      activePane: 'primary',
-    })
+      activePane: 'primary' })
   },
 
   setActiveTab: (path: string) => {
@@ -688,8 +736,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         editorSplit: false,
         secondaryTabPath: null,
         activePane: 'primary',
-        activeTabPath: primaryTabPath ?? activeTabPath,
-      })
+        activeTabPath: primaryTabPath ?? activeTabPath })
       return
     }
     const primary = primaryTabPath ?? activeTabPath
@@ -699,8 +746,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       primaryTabPath: primary,
       secondaryTabPath: other,
       activePane: 'primary',
-      activeTabPath: primary,
-    })
+      activeTabPath: primary })
   },
 
   setActivePane: (pane) => {
@@ -710,22 +756,19 @@ export const useAppStore = create<AppState>((set, get) => ({
       activeTabPath:
         pane === 'secondary'
           ? (secondaryTabPath ?? activeTabPath)
-          : (primaryTabPath ?? activeTabPath),
-    })
+          : (primaryTabPath ?? activeTabPath) })
   },
 
   setTabMdViewMode: (path: string, mode: MdViewMode) => {
     set({
-      tabs: get().tabs.map((t) => (t.path === path ? { ...t, mdViewMode: mode } : t)),
-    })
+      tabs: get().tabs.map((t) => (t.path === path ? { ...t, mdViewMode: mode } : t)) })
   },
 
   updateTabContent: (path: string, content: string) => {
     set({
       tabs: get().tabs.map((t) =>
         t.path === path ? { ...t, content, isDirty: t.content !== content } : t,
-      ),
-    })
+      ) })
   },
 
   saveActiveFile: async () => {
@@ -733,8 +776,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!activeTabPath) return
     const tab = tabs.find((t) => t.path === activeTabPath)
     if (!tab) return
+    if (tab.kind === 'pdf' || isPdfFile(tab.name)) return
 
-    await window.codex.invoke(IPC_CHANNELS.FILE_WRITE, tab.path, tab.content)
+    await window.codex.file.write(tab.path, tab.content)
     set({
       tabs: tabs.map((t) => (t.path === activeTabPath ? { ...t, isDirty: false } : t)),
     })
@@ -757,7 +801,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   loadSessions: async () => {
-    const sessions = await window.codex.invoke(IPC_CHANNELS.SESSION_LIST)
+    const sessions = await window.codex.session.list()
     const activeStillValid = sessions.some((s) => s.id === get().activeSessionId)
 
     set({
@@ -772,9 +816,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             isStreaming: false,
             chatError: null,
             pendingApproval: null,
-            sessionMode: 'agent' as const,
-          }),
-    })
+            sessionMode: 'agent' as const }) })
 
     if (sessions.length === 0) return
 
@@ -787,7 +829,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   selectSession: async (sessionId: string) => {
-    const messages = await window.codex.invoke(IPC_CHANNELS.SESSION_SELECT, sessionId)
+    const messages = await window.codex.session.select(sessionId)
     const session = get().sessions.find((s) => s.id === sessionId)
     const lastWithTrace = [...messages].reverse().find((m) => m.role === 'assistant' && m.trace)
     const stickyName = session?.personaName
@@ -797,6 +839,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       streamingContent: '',
       streamingToolCalls: [],
       sessionToolLog: toolLogFromMessages(messages),
+      // Drop previous workspace/session routing overlay so the header shows settings.
+      routingInfo: null,
       lastUsage: lastWithTrace?.trace?.usage ?? null,
       lastTrace: lastWithTrace?.trace
         ? {
@@ -805,25 +849,22 @@ export const useAppStore = create<AppState>((set, get) => ({
             provider: lastWithTrace.trace.provider,
             model: lastWithTrace.trace.model,
             routeReason: lastWithTrace.trace.routeReason,
-            toolCount: lastWithTrace.trace.toolCount,
-          }
+            toolCount: lastWithTrace.trace.toolCount }
         : null,
       activePersona: stickyName
         ? { personaId: stickyName, personaName: stickyName }
         : lastWithTrace?.trace?.personaName
           ? {
               personaId: lastWithTrace.trace.personaId ?? '',
-              personaName: lastWithTrace.trace.personaName,
-            }
+              personaName: lastWithTrace.trace.personaName }
           : null,
       chatError: null,
       isStreaming: false,
-      sessionMode: session?.mode ?? 'ask',
-    })
+      sessionMode: session?.mode ?? 'ask' })
   },
 
   createSession: async () => {
-    const session = await window.codex.invoke(IPC_CHANNELS.SESSION_CREATE)
+    const session = await window.codex.session.create()
     set({
       sessions: [session, ...get().sessions],
       activeSessionId: session.id,
@@ -833,10 +874,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       sessionToolLog: [],
       lastUsage: null,
       lastTrace: null,
+      routingInfo: null,
       activePersona: null,
       chatError: null,
-      sessionMode: session.mode,
-    })
+      sessionMode: session.mode })
   },
 
   clearSessionToolLog: () => set({ sessionToolLog: [] }),
@@ -850,14 +891,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       sessionMode: mode,
       sessions: sessions.map((s) =>
         s.id === activeSessionId ? { ...s, mode } : s,
-      ),
-    })
+      ) })
 
     try {
-      const updated = await window.codex.invoke(IPC_CHANNELS.SESSION_SET_MODE, activeSessionId, mode)
+      const updated = await window.codex.session.setMode(activeSessionId, mode)
       set({
-        sessions: get().sessions.map((s) => (s.id === updated.id ? updated : s)),
-      })
+        sessions: get().sessions.map((s) => (s.id === updated.id ? updated : s)) })
     } catch (err) {
       console.warn('[app] session mode persist failed (restart pnpm dev if needed):', err)
     }
@@ -872,21 +911,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       activePersona: next ? { personaId: next, personaName: next } : null,
       sessions: sessions.map((s) =>
         s.id === activeSessionId ? { ...s, personaName: next } : s,
-      ),
-    })
+      ) })
 
     try {
-      const updated = await window.codex.invoke(
-        IPC_CHANNELS.SESSION_SET_PERSONA,
-        activeSessionId,
+      const updated = await window.codex.session.setPersona(activeSessionId,
         next ?? null,
       )
       set({
         sessions: get().sessions.map((s) => (s.id === updated.id ? updated : s)),
         activePersona: updated.personaName
           ? { personaId: updated.personaName, personaName: updated.personaName }
-          : null,
-      })
+          : null })
     } catch (err) {
       console.warn('[app] session persona persist failed:', err)
     }
@@ -898,18 +933,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({
         settings: {
           ...current,
-          routing: { ...current.routing, mode },
-        },
-      })
+          routing: { ...current.routing, mode } } })
     }
     try {
-      const latest = await window.codex.invoke(IPC_CHANNELS.SETTINGS_GET)
-      const updated = await window.codex.invoke(IPC_CHANNELS.SETTINGS_SET, {
+      const latest = await window.codex.settings.get()
+      const updated = await window.codex.settings.set({
         routing: {
           ...latest.routing,
-          mode,
-        },
-      })
+          mode } })
       set({ settings: updated })
     } catch (err) {
       console.warn('[app] routing mode persist failed:', err)
@@ -920,9 +951,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   respondApproval: async (approved: boolean) => {
     const { pendingApproval } = get()
     if (!pendingApproval) return
-    await window.codex.invoke(
-      IPC_CHANNELS.AGENT_APPROVAL_RESPOND,
-      pendingApproval.sessionId,
+    await window.codex.agent.approvalRespond(pendingApproval.sessionId,
       pendingApproval.toolCallId,
       approved,
     )
@@ -932,14 +961,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   respondCeoApproval: async (decision, note) => {
     const { pendingCeoApproval } = get()
     if (!pendingCeoApproval) return
-    await window.codex.invoke(
-      IPC_CHANNELS.CEO_APPROVAL_RESPOND,
-      pendingCeoApproval.sessionId,
+    await window.codex.ceo.approvalRespond(pendingCeoApproval.sessionId,
       pendingCeoApproval.approvalId,
       {
         decision,
-        note,
-      },
+        note },
     )
     set({ pendingCeoApproval: null })
   },
@@ -954,8 +980,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       role: 'user',
       content,
       attachments: attachments.map(({ type, path, name }) => ({ type, path, name })),
-      createdAt: new Date().toISOString(),
-    }
+      createdAt: new Date().toISOString() }
 
     set({
       messages: [...get().messages, userMessage],
@@ -966,31 +991,28 @@ export const useAppStore = create<AppState>((set, get) => ({
       routingInfo: null,
       activePersona: null,
       pendingCeoApproval: null,
-      teamStage: null,
-    })
+      teamStage: null })
 
     const contextPaths = get().tabs.map((t) => t.path)
 
-    await window.codex.invoke(IPC_CHANNELS.CHAT_SEND, {
+    await window.codex.chat.send({
       sessionId: activeSessionId,
       content,
       attachments,
       mode: sessionMode === 'agent' ? 'agent' : sessionMode === 'plan' ? 'plan' : 'ask',
-      contextPaths,
-    })
+      contextPaths })
   },
 
   cancelChat: async () => {
     const { activeSessionId } = get()
     if (!activeSessionId) return
-    await window.codex.invoke(IPC_CHANNELS.CHAT_CANCEL, activeSessionId)
+    await window.codex.chat.cancel(activeSessionId)
     set({ isStreaming: false, streamingContent: '', streamingToolCalls: [] })
   },
 
   compactChat: async () => {
     const { activeSessionId, isStreaming } = get()
     if (!activeSessionId || isStreaming) return
-    const messages = await window.codex.invoke(IPC_CHANNELS.CHAT_COMPACT, activeSessionId)
+    const messages = await window.codex.chat.compact(activeSessionId)
     set({ messages, chatError: null })
-  },
-}))
+  } }))

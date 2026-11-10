@@ -2,7 +2,9 @@ import {
   DEFAULT_LLAMACPP_BASE_URL,
   DEFAULT_LLAMACPP_CONTEXT_SIZE,
   DEFAULT_OLLAMA_BASE_URL,
+  DEFAULT_OLLAMA_CONTEXT_SIZE,
   DEFAULT_XAI_BASE_URL,
+  isLocalLlmProvider,
   migrateModelId,
   normalizeRoutingSettings,
   type AppSettings,
@@ -118,10 +120,39 @@ export function modelsLlamacppContextSize(models: AppSettings['models']): number
   return Math.floor(raw)
 }
 
+export function modelsOllamaContextSize(models: AppSettings['models']): number {
+  const raw =
+    models.ollamaContextSize ||
+    Number(process.env.OLLAMA_CONTEXT_SIZE) ||
+    DEFAULT_OLLAMA_CONTEXT_SIZE
+  if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_OLLAMA_CONTEXT_SIZE
+  return Math.floor(raw)
+}
+
+/** Prompt-side token budget for local servers (prefill-bound). */
+export function localPromptTokenCap(
+  settings: AppSettings,
+  provider: LLMProviderId,
+  mode: 'chat' | 'agent' = 'chat',
+): number {
+  if (!isLocalLlmProvider(provider)) return 0
+  const ctx =
+    provider === 'llamacpp'
+      ? modelsLlamacppContextSize(settings.models)
+      : modelsOllamaContextSize(settings.models)
+  // Local generation should stay short; reserve less than cloud defaults.
+  const configuredOut =
+    mode === 'agent'
+      ? settings.cost?.maxOutputTokensAgent ?? 2048
+      : settings.cost?.maxOutputTokens ?? 1024
+  const maxOut = Math.min(configuredOut, mode === 'agent' ? 2048 : 1024)
+  return Math.max(2_048, Math.floor(ctx * 0.7) - maxOut - 512)
+}
+
 /**
  * Effective history budget for Ask/Agent.
- * For llama.cpp, cap below server `-c` and reserve room for completion tokens
- * (avoids "Context size has been exceeded" when Compact 閾値 > n_ctx).
+ * Local providers (Ollama / llama.cpp) are always capped below the assumed
+ * context window so huge Compact 閾値 values cannot dominate prefill latency.
  */
 export function effectiveCompactTokenBudget(
   settings: AppSettings,
@@ -129,18 +160,38 @@ export function effectiveCompactTokenBudget(
   mode: 'chat' | 'agent' = 'chat',
 ): number {
   const configured = settings.agent.compactTokenThreshold
-  if (!configured || configured <= 0) return 0
+  const localCap = localPromptTokenCap(settings, provider, mode)
 
-  if (provider !== 'llamacpp') return configured
+  if (!configured || configured <= 0) {
+    // "Compact off" still must not send 100k-token histories to local models.
+    return localCap
+  }
+  if (!localCap) return configured
+  return Math.min(configured, localCap)
+}
 
-  const ctx = modelsLlamacppContextSize(settings.models)
-  const maxOut =
+/** Cap completion tokens for local providers (long decode is very slow). */
+export function effectiveMaxOutputTokens(
+  settings: AppSettings,
+  provider: LLMProviderId,
+  mode: 'chat' | 'agent' = 'chat',
+): number {
+  const configured =
     mode === 'agent'
       ? settings.cost?.maxOutputTokensAgent ?? 8192
       : settings.cost?.maxOutputTokens ?? 4096
-  // Keep ~70% of window for prompt; leave maxOut (+ small slack) for generation.
-  const promptCap = Math.max(2_048, Math.floor(ctx * 0.7) - maxOut - 512)
-  return Math.min(configured, promptCap)
+  if (!isLocalLlmProvider(provider)) return configured
+  return Math.min(configured, mode === 'agent' ? 2048 : 1024)
+}
+
+/** Local GPUs usually have one slot — avoid parallel subagents by default. */
+export function effectiveMaxSubagents(
+  settings: AppSettings,
+  provider: LLMProviderId,
+): number {
+  const configured = settings.agent.maxSubagents ?? 3
+  if (!isLocalLlmProvider(provider)) return configured
+  return Math.min(configured, 1)
 }
 
 export function modelsXaiBaseUrl(models: AppSettings['models']): string {

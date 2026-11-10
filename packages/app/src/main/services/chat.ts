@@ -24,6 +24,7 @@ import {
   getApiKeyForProvider,
   missingApiKeyMessage,
   effectiveCompactTokenBudget,
+  effectiveMaxOutputTokens,
   modelsLlamacppBaseUrl,
   modelsOllamaBaseUrl,
   modelsXaiBaseUrl,
@@ -292,7 +293,7 @@ export class ChatService {
             apiKey: runtime.apiKey,
             baseUrl: runtime.baseUrl,
             signal: abortController.signal,
-            maxTokens: settings.cost?.maxOutputTokens ?? 4096,
+            maxTokens: effectiveMaxOutputTokens(settings, runtime.provider, 'chat'),
             enablePromptCache: settings.cost?.enablePromptCache !== false,
           })) {
             if (chunk.type === 'text') {

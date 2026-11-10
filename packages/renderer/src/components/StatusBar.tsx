@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { IPC_CHANNELS, IPC_EVENTS } from '@codex/shared'
+import { IPC_EVENTS } from '@codex/shared'
 import { useAppStore } from '@renderer/store/app-store'
 
 export function StatusBar() {
@@ -12,19 +12,27 @@ export function StatusBar() {
   const closeWorkspace = useAppStore((s) => s.closeWorkspace)
   const setSidebarView = useAppStore((s) => s.setSidebarView)
   const [branch, setBranch] = useState<string | null>(null)
+  const [trusted, setTrusted] = useState<boolean | null>(null)
 
   useEffect(() => {
     if (!workspace) {
       setBranch(null)
+      setTrusted(null)
       return
     }
     let cancelled = false
     const load = async () => {
       try {
-        const snap = await window.codex.invoke(IPC_CHANNELS.GIT_STATUS)
+        const snap = await window.codex.git.status()
         if (!cancelled) setBranch(snap.isRepo ? snap.branch : null)
       } catch {
         if (!cancelled) setBranch(null)
+      }
+      try {
+        const trust = await window.codex.workspace.trustStatus()
+        if (!cancelled) setTrusted(trust.trusted)
+      } catch {
+        if (!cancelled) setTrusted(null)
       }
     }
     void load()
@@ -54,8 +62,7 @@ export function StatusBar() {
               backgroundColor: 'rgba(255,255,255,0.15)',
               border: 'none',
               borderRadius: 3,
-              cursor: 'pointer',
-            }}
+              cursor: 'pointer' }}
           >
             ← Welcome
           </button>
@@ -72,13 +79,17 @@ export function StatusBar() {
               backgroundColor: 'rgba(255,255,255,0.15)',
               border: 'none',
               borderRadius: 3,
-              cursor: 'pointer',
-            }}
+              cursor: 'pointer' }}
           >
             ⎇ {branch}
           </button>
         )}
         <span>{workspace ? workspace.name : 'No folder open'}</span>
+        {workspace && trusted !== null && (
+          <span title={trusted ? 'ワークスペース信頼済み' : '未信頼（制限モード）'}>
+            {trusted ? 'Trusted' : 'Restricted'}
+          </span>
+        )}
         {activeTab?.isDirty && <span>● Modified</span>}
         {indexStatus.state === 'indexing' && (
           <span>Indexing {indexStatus.indexedFiles}...</span>

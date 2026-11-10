@@ -36,8 +36,8 @@ export const PREFERRED_MODEL_ALIASES: Record<
       'grok-3-mini',
       'grok-3-fast',
     ],
-    standard: ['grok-4.3', 'grok-4', 'grok-3'],
-    premium: ['grok-4.5', 'grok-4', 'grok-3'],
+    standard: ['grok-4.7', 'grok-4.3', 'grok-4', 'grok-3'],
+    premium: ['grok-4.5', 'grok-4.7', 'grok-4', 'grok-3'],
   },
 }
 
@@ -55,7 +55,7 @@ export const DEFAULT_PROVIDER_TIERS: Record<'openai' | 'anthropic' | 'xai', Prov
   },
   xai: {
     lite: 'grok-4-1-fast-non-reasoning',
-    standard: 'grok-4.3',
+    standard: 'grok-4.7',
     premium: 'grok-4.5',
   },
 }

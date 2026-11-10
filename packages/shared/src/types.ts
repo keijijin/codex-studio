@@ -57,6 +57,15 @@ export const DEFAULT_LLAMACPP_BASE_URL = 'http://127.0.0.1:8080'
 export const DEFAULT_LLAMACPP_MODEL = 'Qwen-AgentWorld-35B-A3B-UD-Q4_K_M.gguf'
 /** Must match llama-server `-c` (your current server uses 32768). */
 export const DEFAULT_LLAMACPP_CONTEXT_SIZE = 32_768
+/**
+ * Soft context budget for Ollama when the server does not expose `-c`.
+ * Prefill dominates local latency — keep this modest unless the model is large-ctx.
+ */
+export const DEFAULT_OLLAMA_CONTEXT_SIZE = 16_384
+
+export function isLocalLlmProvider(provider: LLMProviderId): boolean {
+  return provider === 'ollama' || provider === 'llamacpp'
+}
 export const DEFAULT_XAI_BASE_URL = 'https://api.x.ai/v1'
 export const DEFAULT_XAI_MODEL = 'grok-4.5'
 
@@ -167,6 +176,11 @@ export interface AppSettings {
     /** xAI (Grok) API key */
     xaiApiKey?: string
     ollamaBaseUrl?: string
+    /**
+     * Assumed Ollama context window for compact/prefill budgeting
+     * (default 16384). Raise only if the model was started with a larger num_ctx.
+     */
+    ollamaContextSize?: number
     /** llama-server / llama.cpp OpenAI-compatible base (default http://127.0.0.1:8080) */
     llamacppBaseUrl?: string
     /**
@@ -221,6 +235,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     defaultChatModel: 'gpt-5.4-mini',
     defaultAgentModel: 'gpt-5.4-mini',
     ollamaBaseUrl: DEFAULT_OLLAMA_BASE_URL,
+    ollamaContextSize: DEFAULT_OLLAMA_CONTEXT_SIZE,
     llamacppBaseUrl: DEFAULT_LLAMACPP_BASE_URL,
     llamacppContextSize: DEFAULT_LLAMACPP_CONTEXT_SIZE,
   },

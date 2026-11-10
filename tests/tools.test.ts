@@ -3,22 +3,25 @@ import { join, relative } from 'path'
 import { tmpdir } from 'os'
 import { describe, expect, it } from 'vitest'
 import {
+  createWorkspaceFs,
   readTool,
+  resolveWithinWorkspace,
   shellTool,
   strReplaceTool,
   deleteTool,
   writeTool,
-  resolveWithinWorkspace,
   type ToolContext,
 } from '@codex/tools'
 
 function createToolContext(root: string, mode: 'preview' | 'apply' = 'apply'): ToolContext {
+  const fs = createWorkspaceFs(root)
   return {
     workspaceRoot: root,
     sessionId: 'test-session',
     signal: new AbortController().signal,
     executeMode: mode,
-    resolvePath: (p) => resolveWithinWorkspace(root, p),
+    fs,
+    resolvePath: (p) => fs.resolve(p),
     getRelativePath: (p) => relative(root, p),
   }
 }

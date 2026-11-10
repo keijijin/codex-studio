@@ -1,5 +1,5 @@
 import { useAppStore } from '@renderer/store/app-store'
-import { isMarkdownFile } from '@renderer/utils/files'
+import { isMarkdownFile, isPdfFile } from '@renderer/utils/files'
 import { FileEditor } from './FileEditor'
 
 export function EditorArea() {
@@ -18,7 +18,8 @@ export function EditorArea() {
   const setActivePane = useAppStore((s) => s.setActivePane)
 
   const activeTab = tabs.find((t) => t.path === activeTabPath)
-  const showMdToggle = activeTab ? isMarkdownFile(activeTab.name) : false
+  const isPdf = activeTab ? activeTab.kind === 'pdf' || isPdfFile(activeTab.name) : false
+  const showMdToggle = activeTab ? !isPdf && isMarkdownFile(activeTab.name) : false
 
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface">
@@ -92,13 +93,15 @@ export function EditorArea() {
             >
               すべて閉じる
             </button>
-            <button
-              type="button"
-              className="px-3 text-xs text-text-secondary hover:text-text-primary"
-              onClick={() => void saveActiveFile()}
-            >
-              Save
-            </button>
+            {!isPdf && (
+              <button
+                type="button"
+                className="px-3 text-xs text-text-secondary hover:text-text-primary"
+                onClick={() => void saveActiveFile()}
+              >
+                Save
+              </button>
+            )}
           </div>
         </div>
       )}

@@ -91,6 +91,7 @@ packages/
 | β 安定性チェックリスト | [docs/beta-stability-checklist.md](./docs/beta-stability-checklist.md) |
 | リリース | [docs/release.md](./docs/release.md) / [Releases](https://github.com/keijijin/codex-studio/releases) |
 | セキュリティ | [docs/security-checklist.md](./docs/security-checklist.md) |
+| **セキュリティ改善（企画〜WBS）** | [24](./docs/24-セキュリティ改善企画書.md) · [25](./docs/25-セキュリティ改善プラン.md) · [26](./docs/26-セキュリティ改善設計書.md) · [27](./docs/27-セキュリティ改善-WBS-ToDo.md) · [28](./docs/28-audit-prod-triage.md) |
 | アーキテクチャ | [docs/03-アーキテクチャ定義書.md](./docs/03-アーキテクチャ定義書.md) |
 | エージェント拡張プラン | [docs/08-エージェント拡張プラン.md](./docs/08-エージェント拡張プラン.md) |
 | Phase D 設計ゲート | [docs/09-PhaseD-設計ゲート.md](./docs/09-PhaseD-設計ゲート.md) |

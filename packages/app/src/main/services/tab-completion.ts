@@ -1,4 +1,5 @@
 import { getProviderInstance } from '@codex/llm-adapters'
+import { isLocalLlmProvider } from '@codex/shared'
 import { settingsService } from './settings'
 import {
   getApiKeyForProvider,
@@ -29,6 +30,12 @@ export async function completeInline(
   }
 
   const provider = settings.models.defaultProvider
+  // Local servers typically serve one request at a time; Tab completion steals
+  // the slot from Agent/Ask and makes TTFT feel much worse.
+  if (isLocalLlmProvider(provider) && settings.tabCompletion.allowOnLocal !== true) {
+    return { text: '', skipped: 'paused-on-local-provider' }
+  }
+
   const apiKey = getApiKeyForProvider(provider, settings.models)
   if (!apiKey && provider !== 'ollama' && provider !== 'llamacpp') {
     return { text: '', skipped: 'no-api-key' }

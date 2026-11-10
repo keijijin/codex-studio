@@ -11,7 +11,12 @@ import {
   type LLMProviderId,
   type PermissionProfile,
 } from '@codex/shared'
-import { defaultToolRegistry, resolveWithinWorkspace, resolveAgentShellEnv } from '@codex/tools'
+import {
+  createWorkspaceFs,
+  defaultToolRegistry,
+  resolveWithinWorkspace,
+  resolveAgentShellEnv,
+} from '@codex/tools'
 import {
   collectSkills,
   formatSkillPrompt,
@@ -166,6 +171,11 @@ export async function runHeadlessAgent(
     showBuildOutputs: false,
   })
 
+  const workspaceFs = createWorkspaceFs(workspaceRoot)
+  const workspaceTrusted =
+    process.env.CODEX_TRUST_WORKSPACE === '1' ||
+    Boolean(process.env.CODEX_E2E_WORKSPACE) ||
+    process.env.CODEX_CLI_TRUST_WORKSPACE === '1'
   const ctx: AgentRunContext = {
     workspaceRoot,
     sessionId: `headless-${Date.now()}`,
@@ -175,9 +185,16 @@ export async function runHeadlessAgent(
     maxIterations: options.maxIterations ?? 50,
     enabledTools: ALL_TOOLS,
     yoloMode,
-    permissions,
+    permissions: workspaceTrusted
+      ? permissions
+      : {
+          ...permissions,
+          network: permissions.network === 'deny' ? 'deny' : 'ask',
+        },
+    secretReadPolicy: workspaceTrusted ? 'ask' : 'deny',
     signal,
-    resolvePath: (p) => resolveWithinWorkspace(workspaceRoot, p),
+    fs: workspaceFs,
+    resolvePath: (p) => workspaceFs.resolve(p),
     getRelativePath: (absolutePath) =>
       relative(workspaceRoot, absolutePath).replace(/\\/g, '/'),
     isIgnoredPath: (rel) => pathIgnore.ignores(rel),

@@ -1,25 +1,17 @@
-import { mkdir, readFile, appendFile, writeFile } from 'fs/promises'
-import { dirname, join } from 'path'
-import { resolveWithinWorkspace } from '@codex/tools'
+import { join } from 'path'
+import { createWorkspaceFs } from '@codex/tools'
 
 export function memoryFilePath(workspaceRoot: string): string {
   return join(workspaceRoot, '.codex', 'memory', 'MEMORY.md')
 }
 
-function resolvedMemoryPath(workspaceRoot: string): string {
-  return resolveWithinWorkspace(workspaceRoot, '.codex/memory/MEMORY.md')
-}
+const MEMORY_REL = '.codex/memory/MEMORY.md'
 
 /** Load project memory for system prompt injection. */
 export async function loadMemory(workspaceRoot: string): Promise<string> {
-  let path: string
+  const fs = createWorkspaceFs(workspaceRoot)
   try {
-    path = resolvedMemoryPath(workspaceRoot)
-  } catch {
-    return ''
-  }
-  try {
-    const raw = (await readFile(path, 'utf-8')).trim()
+    const raw = (await fs.readText(MEMORY_REL)).trim()
     if (!raw) return ''
     return `\n\n## Project memory\nDurable notes from previous sessions (from \`.codex/memory/MEMORY.md\`):\n\n${raw}`
   } catch {
@@ -31,15 +23,15 @@ export async function loadMemory(workspaceRoot: string): Promise<string> {
 export async function appendMemoryNote(workspaceRoot: string, note: string): Promise<void> {
   const trimmed = note.replace(/\s+/g, ' ').trim()
   if (!trimmed) return
-  const path = resolvedMemoryPath(workspaceRoot)
-  await mkdir(dirname(path), { recursive: true })
+  const fs = createWorkspaceFs(workspaceRoot)
   const date = new Date().toISOString().slice(0, 10)
   let existing = ''
   try {
-    existing = await readFile(path, 'utf-8')
+    existing = await fs.readText(MEMORY_REL)
   } catch {
-    existing = '# Project memory\n\nNotes appended by Codex Studio (opt-in Auto Memory or MemoryAppend tool).\n'
-    await writeFile(path, existing, 'utf-8')
+    existing =
+      '# Project memory\n\nNotes appended by Codex Studio (opt-in Auto Memory or MemoryAppend tool).\n'
+    await fs.writeText(MEMORY_REL, existing)
   }
-  await appendFile(path, `\n- [${date}] ${trimmed}\n`, 'utf-8')
+  await fs.appendText(MEMORY_REL, `\n- [${date}] ${trimmed}\n`)
 }

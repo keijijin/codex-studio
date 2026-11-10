@@ -1,16 +1,5 @@
 import { useEffect, useState } from 'react'
-import {
-  API_KEY_REDACTED,
-  DEFAULT_KEYBINDINGS,
-  DEFAULT_LANGFUSE,
-  IPC_CHANNELS,
-  isRedactedApiKey,
-  type KeybindingMap,
-  type LangfuseSettings,
-  type McpServerConfig,
-  type SemanticSearchSettings,
-  type TabCompletionSettings,
-} from '@codex/shared'
+import { API_KEY_REDACTED, DEFAULT_KEYBINDINGS, DEFAULT_LANGFUSE, isRedactedApiKey, type KeybindingMap, type LangfuseSettings, type McpServerConfig, type SemanticSearchSettings, type TabCompletionSettings } from '@codex/shared'
 import { useAppStore } from '@renderer/store/app-store'
 import { applyTheme } from '@renderer/theme'
 
@@ -21,8 +10,7 @@ const inputStyle: React.CSSProperties = {
   color: '#cccccc',
   backgroundColor: '#252526',
   border: '1px solid #3c3c3c',
-  borderRadius: 4,
-}
+  borderRadius: 4 }
 
 export function FeaturesSettings() {
   const settings = useAppStore((s) => s.settings)
@@ -31,14 +19,12 @@ export function FeaturesSettings() {
   const [tabCompletion, setTabCompletion] = useState<TabCompletionSettings>({
     enabled: true,
     debounceMs: 400,
-    maxTokens: 64,
-  })
+    maxTokens: 64 })
   const [semantic, setSemantic] = useState<SemanticSearchSettings>({
     enabled: false,
     preferSemantic: true,
     embeddingModel: 'text-embedding-3-small',
-    maxChunks: 24,
-  })
+    maxChunks: 24 })
   const [keybindings, setKeybindings] = useState<KeybindingMap>({ ...DEFAULT_KEYBINDINGS })
   const [mcpServers, setMcpServers] = useState<McpServerConfig[]>([])
   const [mcpStatus, setMcpStatus] = useState<string>('')
@@ -46,6 +32,23 @@ export function FeaturesSettings() {
   const [auditMsg, setAuditMsg] = useState('')
   const [langfuse, setLangfuse] = useState<LangfuseSettings>({ ...DEFAULT_LANGFUSE })
   const [saved, setSaved] = useState(false)
+  const workspace = useAppStore((s) => s.workspace)
+  const [trustStatus, setTrustStatus] = useState<{
+    root: string | null
+    trusted: boolean
+    trustedAt: string | null
+    contentChanged: boolean
+  } | null>(null)
+  const [trustMsg, setTrustMsg] = useState('')
+
+  const refreshTrust = async () => {
+    try {
+      const status = await window.codex.workspace.trustStatus()
+      setTrustStatus(status)
+    } catch {
+      setTrustStatus(null)
+    }
+  }
 
   useEffect(() => {
     if (!settings) return
@@ -57,15 +60,18 @@ export function FeaturesSettings() {
     setLangfuse({ ...DEFAULT_LANGFUSE, ...settings.langfuse })
   }, [settings])
 
+  useEffect(() => {
+    void refreshTrust()
+  }, [workspace?.id, workspace?.rootPaths])
+
   const save = async () => {
-    await window.codex.invoke(IPC_CHANNELS.SETTINGS_SET, {
+    await window.codex.settings.set({
       general: { ...settings!.general, theme },
       tabCompletion,
       semanticSearch: semantic,
       keybindings,
       mcpServers,
-      langfuse,
-    })
+      langfuse })
     applyTheme(theme)
     await loadSettings()
     setSaved(true)
@@ -74,6 +80,64 @@ export function FeaturesSettings() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <section>
+        <h3 style={{ margin: 0, fontSize: 14, color: '#fff' }}>ワークスペース信頼</h3>
+        {!workspace ? (
+          <p style={{ margin: '8px 0 0', fontSize: 12, color: '#858585' }}>
+            フォルダを開くと信頼状態を表示・変更できます。
+          </p>
+        ) : (
+          <>
+            <p style={{ margin: '8px 0 0', fontSize: 12, color: '#ccc' }}>
+              状態:{' '}
+              {trustStatus?.trusted
+                ? trustStatus.contentChanged
+                  ? '信頼済み（hooks / agent.env が変更されています — 再信頼を推奨）'
+                  : '信頼済み'
+                : '未信頼（制限モード）'}
+            </p>
+            {trustStatus?.trustedAt && (
+              <p style={{ margin: '4px 0 0', fontSize: 11, color: '#858585' }}>
+                信頼日時: {trustStatus.trustedAt}
+              </p>
+            )}
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <button
+                type="button"
+                style={{ ...inputStyle, width: 'auto', cursor: 'pointer' }}
+                onClick={async () => {
+                  const status = await window.codex.workspace.trust()
+                  setTrustStatus(status)
+                  setTrustMsg('このフォルダを信頼しました')
+                  setTimeout(() => setTrustMsg(''), 2000)
+                }}
+              >
+                信頼する
+              </button>
+              <button
+                type="button"
+                style={{ ...inputStyle, width: 'auto', cursor: 'pointer' }}
+                disabled={!trustStatus?.trusted}
+                onClick={async () => {
+                  const status = await window.codex.workspace.untrust()
+                  setTrustStatus(status)
+                  setTrustMsg('信頼を解除しました（Hooks / agent.env 無効）')
+                  setTimeout(() => setTrustMsg(''), 2000)
+                }}
+              >
+                信頼を解除
+              </button>
+            </div>
+            {trustMsg && (
+              <p style={{ margin: '6px 0 0', fontSize: 11, color: '#4ec9b0' }}>{trustMsg}</p>
+            )}
+            <p style={{ margin: '6px 0 0', fontSize: 11, color: '#858585' }}>
+              未信頼時は Hooks・agent.env・ワークスペース Rules/Skills/Teams/Personas が無効です。
+            </p>
+          </>
+        )}
+      </section>
+
       <section>
         <h3 style={{ margin: 0, fontSize: 14, color: '#fff' }}>テーマ</h3>
         <select
@@ -101,6 +165,19 @@ export function FeaturesSettings() {
           />
           インライン補完を有効化（Ghost text · Tab で確定）
         </label>
+        <label style={{ display: 'flex', gap: 8, marginTop: 8, fontSize: 12, color: '#ccc' }}>
+          <input
+            type="checkbox"
+            checked={tabCompletion.allowOnLocal === true}
+            onChange={(e) =>
+              setTabCompletion({ ...tabCompletion, allowOnLocal: e.target.checked })
+            }
+          />
+          ローカル LLM（Ollama / llama.cpp）利用時も補完する
+        </label>
+        <p style={{ margin: '6px 0 0', fontSize: 11, color: '#858585' }}>
+          オフ推奨。ローカルは同時リクエストに弱く、補完が Agent/Ask を遅くします。
+        </p>
       </section>
 
       <section>
@@ -118,7 +195,7 @@ export function FeaturesSettings() {
             type="button"
             style={{ ...inputStyle, width: 'auto', cursor: 'pointer' }}
             onClick={() => {
-              void window.codex.invoke(IPC_CHANNELS.SEMANTIC_STATS).then((s) => {
+              void window.codex.semantic.stats().then((s) => {
                 setSemanticStats(`${s.chunks} chunks · ${s.dbPath}`)
               })
             }}
@@ -130,8 +207,7 @@ export function FeaturesSettings() {
             style={{ ...inputStyle, width: 'auto', cursor: 'pointer' }}
             onClick={() => {
               setSemanticStats('再索引中…')
-              void window.codex
-                .invoke(IPC_CHANNELS.SEMANTIC_REINDEX, { limit: 80 })
+              void window.codex.semantic.reindex({ limit: 80 })
                 .then((r) => setSemanticStats(`再索引完了: ${r.indexed} files`))
                 .catch((err: unknown) =>
                   setSemanticStats(err instanceof Error ? err.message : '再索引失敗'),
@@ -158,8 +234,7 @@ export function FeaturesSettings() {
               border: '1px solid #3c3c3c',
               borderRadius: 4,
               padding: 8,
-              marginBottom: 8,
-            }}
+              marginBottom: 8 }}
           >
             <label style={{ display: 'flex', gap: 6, fontSize: 12, color: '#ccc' }}>
               <input
@@ -201,8 +276,7 @@ export function FeaturesSettings() {
                 const next = [...mcpServers]
                 next[i] = {
                   ...s,
-                  args: e.target.value.split(/\s+/).filter(Boolean),
-                }
+                  args: e.target.value.split(/\s+/).filter(Boolean) }
                 setMcpServers(next)
               }}
             />
@@ -226,8 +300,7 @@ export function FeaturesSettings() {
                 name: 'New MCP',
                 enabled: false,
                 command: 'npx',
-                args: ['-y', '@modelcontextprotocol/server-everything'],
-              },
+                args: ['-y', '@modelcontextprotocol/server-everything'] },
             ])
           }
         >
@@ -237,7 +310,7 @@ export function FeaturesSettings() {
           type="button"
           style={{ ...inputStyle, width: 'auto', marginLeft: 8, cursor: 'pointer' }}
           onClick={() => {
-            void window.codex.invoke(IPC_CHANNELS.MCP_SYNC).then((r) => {
+            void window.codex.mcp.sync().then((r) => {
               setMcpStatus(
                 `connected: ${r.connected.join(', ') || '(none)'}` +
                   (r.errors.length ? ` · errors: ${r.errors.map((e) => e.message).join('; ')}` : ''),
@@ -305,8 +378,7 @@ export function FeaturesSettings() {
                   e.target.value ||
                   (langfuse.secretKey && isRedactedApiKey(langfuse.secretKey)
                     ? API_KEY_REDACTED
-                    : ''),
-              })
+                    : '') })
             }
             placeholder="sk-lf-…"
             autoComplete="off"
@@ -329,7 +401,7 @@ export function FeaturesSettings() {
           type="button"
           style={{ ...inputStyle, width: 'auto', marginTop: 8, cursor: 'pointer' }}
           onClick={() => {
-            void window.codex.invoke(IPC_CHANNELS.AUDIT_EXPORT, { limit: 5000 }).then((r) => {
+            void window.codex.audit.export({ limit: 5000 }).then((r) => {
               setAuditMsg(`Exported ${r.lines} lines → ${r.path}`)
             })
           }}
@@ -352,8 +424,7 @@ export function FeaturesSettings() {
             backgroundColor: '#0078d4',
             border: 'none',
             borderRadius: 4,
-            cursor: 'pointer',
-          }}
+            cursor: 'pointer' }}
           onClick={() => void save()}
         >
           機能設定を保存

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
-import { IPC_CHANNELS, type PersonaFile, type PersonaSaveParams } from '@codex/shared'
+import { type PersonaFile, type PersonaSaveParams } from '@codex/shared'
 import { hasCodexApi } from './ErrorBoundary'
 
 const inputStyle: CSSProperties = {
@@ -11,15 +11,13 @@ const inputStyle: CSSProperties = {
   backgroundColor: '#1e1e1e',
   border: '1px solid #3c3c3c',
   borderRadius: 4,
-  boxSizing: 'border-box',
-}
+  boxSizing: 'border-box' }
 
 const labelStyle: CSSProperties = {
   display: 'block',
   fontSize: 12,
   color: '#858585',
-  marginTop: 12,
-}
+  marginTop: 12 }
 
 const btnPrimary: CSSProperties = {
   padding: '8px 16px',
@@ -28,8 +26,7 @@ const btnPrimary: CSSProperties = {
   backgroundColor: '#0078d4',
   border: 'none',
   borderRadius: 4,
-  cursor: 'pointer',
-}
+  cursor: 'pointer' }
 
 const btnSecondary: CSSProperties = {
   padding: '8px 16px',
@@ -38,21 +35,18 @@ const btnSecondary: CSSProperties = {
   backgroundColor: 'transparent',
   border: '1px solid #3c3c3c',
   borderRadius: 4,
-  cursor: 'pointer',
-}
+  cursor: 'pointer' }
 
 const btnDanger: CSSProperties = {
   ...btnSecondary,
   color: '#f87171',
-  borderColor: '#7f1d1d',
-}
+  borderColor: '#7f1d1d' }
 
 const emptyDraft = (): PersonaSaveParams & { absolutePath?: string } => ({
   name: '',
   description: '',
   content: '',
-  scope: 'workspace',
-})
+  scope: 'workspace' })
 
 export function PersonasSettings() {
   const [personas, setPersonas] = useState<PersonaFile[]>([])
@@ -67,7 +61,7 @@ export function PersonasSettings() {
     setLoading(true)
     setError(null)
     try {
-      const list = await window.codex.invoke(IPC_CHANNELS.PERSONAS_LIST)
+      const list = await window.codex.personas.list()
       setPersonas(list)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Personas の読み込みに失敗しました')
@@ -91,8 +85,7 @@ export function PersonasSettings() {
       description: persona.description,
       content: persona.body,
       scope: persona.scope,
-      absolutePath: persona.absolutePath,
-    })
+      absolutePath: persona.absolutePath })
     setEditing(true)
   }
 
@@ -104,13 +97,12 @@ export function PersonasSettings() {
     setSaving(true)
     setError(null)
     try {
-      await window.codex.invoke(IPC_CHANNELS.PERSONAS_SAVE, {
+      await window.codex.personas.save({
         name: draft.name.trim(),
         description: draft.description?.trim() || undefined,
         content: draft.content,
         scope: draft.scope,
-        absolutePath: draft.absolutePath,
-      })
+        absolutePath: draft.absolutePath })
       setEditing(false)
       await refresh()
     } catch (err: unknown) {
@@ -124,7 +116,7 @@ export function PersonasSettings() {
     if (!window.confirm(`Persona「${persona.name}」を削除しますか？`)) return
     setError(null)
     try {
-      await window.codex.invoke(IPC_CHANNELS.PERSONAS_DELETE, persona.absolutePath)
+      await window.codex.personas.delete(persona.absolutePath)
       await refresh()
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : '削除に失敗しました')
@@ -171,8 +163,7 @@ export function PersonasSettings() {
               onChange={(e) =>
                 setDraft((d) => ({
                   ...d,
-                  scope: e.target.value as PersonaSaveParams['scope'],
-                }))
+                  scope: e.target.value as PersonaSaveParams['scope'] }))
               }
             >
               <option value="workspace">ワークスペース（.codex/personas）</option>
@@ -229,8 +220,7 @@ export function PersonasSettings() {
                 border: '1px solid #3c3c3c',
                 borderRadius: 6,
                 padding: 12,
-                marginBottom: 8,
-              }}
+                marginBottom: 8 }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                 <div>

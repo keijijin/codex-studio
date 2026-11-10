@@ -66,7 +66,7 @@ export class ErrorBoundary extends Component<Props, State> {
 }
 
 function hasCodexApi(): boolean {
-  return typeof window !== 'undefined' && window.codex?.invoke != null
+  return typeof window !== 'undefined' && typeof window.codex?.workspace?.get === 'function'
 }
 
 export { hasCodexApi }

@@ -278,6 +278,38 @@ export class WorkspaceService {
     return readFile(resolved, 'utf-8')
   }
 
+  /** Read binary workspace file (e.g. PDF) as base64 for renderer preview. */
+  async readFileBinary(
+    path: string,
+    options?: { maxBytes?: number },
+  ): Promise<{ base64: string; mimeType: string; byteLength: number }> {
+    const resolved = this.resolveWithinWorkspace(path)
+    const maxBytes = options?.maxBytes ?? 50 * 1024 * 1024
+    const buf = await readFile(resolved)
+    if (buf.byteLength > maxBytes) {
+      throw new Error(
+        `File too large to preview (${Math.round(buf.byteLength / (1024 * 1024))}MB; max ${Math.round(maxBytes / (1024 * 1024))}MB)`,
+      )
+    }
+    const lower = resolved.toLowerCase()
+    const mimeType = lower.endsWith('.pdf')
+      ? 'application/pdf'
+      : lower.endsWith('.png')
+        ? 'image/png'
+        : lower.endsWith('.jpg') || lower.endsWith('.jpeg')
+          ? 'image/jpeg'
+          : lower.endsWith('.gif')
+            ? 'image/gif'
+            : lower.endsWith('.webp')
+              ? 'image/webp'
+              : 'application/octet-stream'
+    return {
+      base64: buf.toString('base64'),
+      mimeType,
+      byteLength: buf.byteLength,
+    }
+  }
+
   async writeFile(path: string, content: string): Promise<void> {
     const resolved = this.resolveWithinWorkspace(path)
     await writeFile(resolved, content, 'utf-8')

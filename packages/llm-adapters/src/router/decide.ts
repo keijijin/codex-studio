@@ -115,7 +115,8 @@ export function decideRouting(input: DecideRoutingInput): RoutingDecision {
     }
   }
 
-  // auto — cost-optimized cascade (do not force user's primary first)
+  // auto — Settings fallback chain is the preferred try order (UI: 上から順に試行).
+  // Catalog profile fills remaining slots for cost-tier escalation; primary is last.
   const classified = classifyTask({
     prompt: input.prompt ?? '',
     runMode: input.runMode,
@@ -126,7 +127,7 @@ export function decideRouting(input: DecideRoutingInput): RoutingDecision {
     input.profiles?.[taskKind] ??
     builtinProfileFor(taskKind, classified.tier, catalog)
 
-  const raw = dedupe([...profile, ...input.fallbackChain, input.primary])
+  const raw = dedupe([...input.fallbackChain, ...profile, input.primary])
   const queue = filterAvailable(raw, input.isAvailable).slice(0, maxAttempts)
   const selected = queue[0] ?? input.primary
 

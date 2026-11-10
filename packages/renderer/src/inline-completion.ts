@@ -1,5 +1,4 @@
 import type { IDisposable, IPosition, editor, languages } from 'monaco-editor'
-import { IPC_CHANNELS } from '@codex/shared'
 import { useAppStore } from '@renderer/store/app-store'
 
 let disposable: IDisposable | null = null
@@ -41,12 +40,11 @@ export function ensureInlineCompletionProvider(
         if (prefix.trim().length < 4) return null
 
         try {
-          const result = await window.codex.invoke(IPC_CHANNELS.COMPLETION_REQUEST, {
+          const result = await window.codex.completion.request({
             prefix,
             suffix,
             language: model.getLanguageId(),
-            path: model.uri.path,
-          })
+            path: model.uri.path })
           if (token.isCancellationRequested || mySeq !== seq) return null
           if (!result.text?.trim()) return null
 
@@ -59,14 +57,11 @@ export function ensureInlineCompletionProvider(
                   position.column,
                   position.lineNumber,
                   position.column,
-                ),
-              },
-            ],
-          }
+                ) },
+            ] }
         } catch {
           return null
         }
-      },
-    },
+      } },
   )
 }

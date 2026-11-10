@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Attachment, FileNode, PersonaFile, SkillFile } from '@codex/shared'
-import { IPC_CHANNELS } from '@codex/shared'
 import { useAppStore } from '@renderer/store/app-store'
 
 interface ChatInputProps {
@@ -45,12 +44,10 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
       setPersonas([])
       return
     }
-    void window.codex
-      .invoke(IPC_CHANNELS.SKILLS_LIST)
+    void window.codex.skills.list()
       .then(setSkills)
       .catch(() => setSkills([]))
-    void window.codex
-      .invoke(IPC_CHANNELS.PERSONAS_LIST)
+    void window.codex.personas.list()
       .then(setPersonas)
       .catch(() => setPersonas([]))
   }, [workspace])
@@ -69,8 +66,7 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
         relativePath: '',
         body: '',
         scope: 'workspace',
-        editable: false,
-      }
+        editable: false }
       const hits = personas.filter(
         (p) =>
           !query ||
@@ -102,8 +98,7 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
             description: 'Persona を適用（/persona <name>）',
             absolutePath: '',
             relativePath: '',
-            body: '',
-          },
+            body: '' },
           ...skillHits,
         ].slice(0, 8))
       } else {
@@ -156,8 +151,7 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
       const attachment: Attachment = {
         type: 'codebase',
         path: 'codebase',
-        name: 'codebase',
-      }
+        name: 'codebase' }
       setAttachments((prev) => [
         ...prev.filter((a) => !(a.type === 'codebase' && a.path === 'codebase')),
         attachment,
@@ -172,8 +166,7 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
       const attachment: Attachment = {
         type: 'folder',
         path: item.node.path,
-        name: item.node.name,
-      }
+        name: item.node.name }
       setAttachments((prev) => [...prev.filter((a) => a.path !== item.node.path), attachment])
       setText(text.replace(/@\S*$/, `@${item.node.name}/ `))
       setSuggestions([])
@@ -181,13 +174,12 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
       return
     }
 
-    const content = await window.codex.invoke(IPC_CHANNELS.FILE_READ, item.node.path)
+    const content = await window.codex.file.read(item.node.path)
     const attachment: Attachment = {
       type: 'file',
       path: item.node.path,
       name: item.node.name,
-      content,
-    }
+      content }
     setAttachments((prev) => [...prev.filter((a) => a.path !== item.node.path), attachment])
     setText(text.replace(/@\S*$/, `@${item.node.name} `))
     setSuggestions([])
@@ -240,8 +232,7 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
           path: `image:${file.name}:${Date.now()}`,
           name: file.name,
           mimeType: file.type || 'image/png',
-          content,
-        }
+          content }
         setAttachments((prev) => [...prev, attachment])
       }
       reader.readAsDataURL(file)

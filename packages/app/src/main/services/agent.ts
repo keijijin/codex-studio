@@ -2,7 +2,7 @@ import { BrowserWindow } from 'electron'
 import { AgentOrchestrator } from '@codex/agent-core'
 import type { AgentMessage } from '@codex/llm-adapters'
 import { getProviderInstance, isConnectionError, isRetryableError } from '@codex/llm-adapters'
-import { defaultToolRegistry } from '@codex/tools'
+import { createWorkspaceFs, defaultToolRegistry } from '@codex/tools'
 import type { WebContents } from 'electron'
 import {
   IPC_EVENTS,
@@ -20,6 +20,8 @@ import { agentEnvService } from './agent-env-service'
 import { createE2eMockAgentProvider } from './e2e-mock-agent'
 import {
   effectiveCompactTokenBudget,
+  effectiveMaxOutputTokens,
+  effectiveMaxSubagents,
   formatLlmConnectionError,
   missingApiKeyMessage,
   noteProviderConnectionFailure,
@@ -43,6 +45,7 @@ import { hooksService } from './hooks-service'
 import { fileWatcherService } from './file-watcher'
 import { sessionService, settingsService } from './settings'
 import { workspaceService } from './workspace'
+import { workspaceTrustService } from './workspace-trust'
 import { pathIgnoreService } from './path-ignore-service'
 import { assertUnderDailyBudget, recordLlmTurn } from './usage-helpers'
 import { formatAttachments, materializeAttachments } from './attachment-context'
@@ -352,13 +355,25 @@ export class AgentService {
       ...attachments.map((a) => a.path),
     ]
     const rulesPrompt = await rulesService.buildPrompt(contextPaths)
-    const permissions = isPlan
+    const trusted = workspaceTrustService.isTrusted(root)
+    // U-1 / U-2: untrusted → secret Read deny, network never allow (ask unless already deny)
+    const secretReadPolicy = trusted ? ('ask' as const) : ('deny' as const)
+    const basePermissions = isPlan
       ? { ...PLAN_PERMISSIONS }
       : {
           ...DEFAULT_AGENT_PERMISSIONS,
           ...settings.agent.permissions,
         }
-    const runLimited = createConcurrencyLimiter(settings.agent.maxSubagents ?? 3)
+    const permissions = isPlan
+      ? basePermissions
+      : {
+          ...basePermissions,
+          network: trusted
+            ? basePermissions.network
+            : basePermissions.network === 'deny'
+              ? 'deny'
+              : 'ask',
+        }
     const userPromptForMemory = content
 
     let lastError = ''
@@ -395,6 +410,9 @@ export class AgentService {
           })
         }
 
+        const runLimited = createConcurrencyLimiter(
+          effectiveMaxSubagents(settings, runtime.provider),
+        )
         const outcome = await this.runOrchestratorAttempt({
           webContents,
           sessionId,
@@ -409,6 +427,7 @@ export class AgentService {
           skillPrompt,
           personaPrompt,
           permissions,
+          secretReadPolicy,
           enabledTools: isPlan ? [...PLAN_TOOLS] : ALL_AGENT_TOOLS,
           planMode: isPlan,
           runLimited,
@@ -506,6 +525,7 @@ export class AgentService {
     skillPrompt: string | undefined
     personaPrompt: string | undefined
     permissions: typeof DEFAULT_AGENT_PERMISSIONS
+    secretReadPolicy?: 'allow' | 'ask' | 'deny'
     enabledTools: string[]
     planMode?: boolean
     runLimited: ReturnType<typeof createConcurrencyLimiter>
@@ -535,6 +555,7 @@ export class AgentService {
       skillPrompt,
       personaPrompt,
       permissions,
+      secretReadPolicy,
       enabledTools,
       planMode,
       runLimited,
@@ -570,15 +591,17 @@ export class AgentService {
         enabledTools,
         yoloMode: isE2eMock || planMode ? false : settings.agent.yoloMode,
         permissions,
+        secretReadPolicy: secretReadPolicy ?? 'ask',
         planMode: Boolean(planMode),
         compactTokenThreshold: effectiveCompactTokenBudget(
           settings,
           runtime.provider,
           'agent',
         ),
-        maxTokens: settings.cost?.maxOutputTokensAgent ?? 8192,
+        maxTokens: effectiveMaxOutputTokens(settings, runtime.provider, 'agent'),
         enablePromptCache: settings.cost?.enablePromptCache !== false,
         signal: abortController.signal,
+        fs: createWorkspaceFs(workspaceService.getRoots()),
         resolvePath: (p) => workspaceService.resolveWithinWorkspace(p),
         getRelativePath: (p) => workspaceService.getRelativePath(p),
         isIgnoredPath: (rel) => pathIgnoreService.getRules().ignores(rel),

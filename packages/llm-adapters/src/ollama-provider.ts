@@ -70,6 +70,8 @@ export class OllamaProvider implements LLMProvider {
         })),
         tool_choice: 'auto',
         stream: true,
+        // Without this, local decode can run unbounded and starve later turns.
+        ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
       }, { signal: options.signal })
 
       const pending: Record<number, { id: string; name: string; arguments: string }> = {}

@@ -49,6 +49,15 @@ export const safeStorage = {
   decryptString(buf: Buffer): string {
     return buf.toString('utf-8')
   },
+  async isAsyncEncryptionAvailable(): Promise<boolean> {
+    return false
+  },
+  async encryptStringAsync(plain: string): Promise<Buffer> {
+    return Buffer.from(plain, 'utf-8')
+  },
+  async decryptStringAsync(buf: Buffer): Promise<{ result: string; shouldReEncrypt: boolean }> {
+    return { result: buf.toString('utf-8'), shouldReEncrypt: false }
+  },
 }
 
 export const BrowserWindow = {

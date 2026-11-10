@@ -1,5 +1,5 @@
-import { mkdir, writeFile, readFile } from 'fs/promises'
-import { dirname, join } from 'path'
+import { join } from 'path'
+import { createWorkspaceFs } from '@codex/tools'
 import { randomUUID } from 'crypto'
 import type { LLMProvider } from '@codex/llm-adapters'
 import type {
@@ -83,15 +83,25 @@ function boardAbsolutePath(
   return join(workspaceRoot, team.boardRelativePath)
 }
 
-async function appendBoard(boardPath: string, section: string): Promise<void> {
-  await mkdir(dirname(boardPath), { recursive: true })
+async function appendBoard(
+  workspaceRoot: string,
+  boardRelativeOrAbs: string,
+  section: string,
+  resolvePath?: (path: string) => string,
+): Promise<string> {
+  const fs = createWorkspaceFs(workspaceRoot)
+  const boardPath = resolvePath
+    ? resolvePath(boardRelativeOrAbs)
+    : fs.resolve(boardRelativeOrAbs)
   let existing = ''
   try {
-    existing = await readFile(boardPath, 'utf-8')
+    existing = await fs.readText(boardPath)
   } catch {
     existing = `# Team board\n\nShared findings for this team run.\n`
   }
-  await writeFile(boardPath, `${existing.trimEnd()}\n\n${section.trim()}\n`, 'utf-8')
+  const next = `${existing.trimEnd()}\n\n${section.trim()}\n`
+  await fs.writeText(boardPath, next)
+  return boardPath
 }
 
 function roleTools(role: TeamRole): string[] {
@@ -231,6 +241,7 @@ Reply in the user's language.`,
  */
 export async function runTeam(options: RunTeamOptions): Promise<TeamRunResult> {
   const { workspaceRoot, team, task, signal } = options
+  const boardFs = createWorkspaceFs(workspaceRoot)
   const boardPath = boardAbsolutePath(workspaceRoot, team, options.resolvePath)
   const runLimited = createConcurrencyLimiter(options.maxConcurrency ?? 3)
   const stagesCompleted: TeamPipelineStage[] = []
@@ -274,7 +285,7 @@ export async function runTeam(options: RunTeamOptions): Promise<TeamRunResult> {
   }
 
   const pushBoard = async (section: string) => {
-    await appendBoard(boardPath, section)
+    await appendBoard(workspaceRoot, team.boardRelativePath, section, options.resolvePath)
     options.onFileChanged?.(boardPath)
   }
 
@@ -332,7 +343,7 @@ export async function runTeam(options: RunTeamOptions): Promise<TeamRunResult> {
 
   let boardContent = ''
   try {
-    boardContent = await readFile(boardPath, 'utf-8')
+    boardContent = await boardFs.readText(boardPath)
   } catch {
     boardContent = '(empty board)'
   }
@@ -511,7 +522,7 @@ Reply in the user's language.`,
   if (shouldExecute && !signal.aborted) {
     emitStage('execute', executors.map((e) => e.name).join(', '))
     try {
-      boardContent = await readFile(boardPath, 'utf-8')
+      boardContent = await boardFs.readText(boardPath)
     } catch {
       /* keep */
     }

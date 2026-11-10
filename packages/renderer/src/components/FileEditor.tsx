@@ -1,7 +1,8 @@
 import { useAppStore } from '@renderer/store/app-store'
-import { isMarkdownFile } from '@renderer/utils/files'
+import { isMarkdownFile, isPdfFile } from '@renderer/utils/files'
 import { MarkdownPreview } from './MarkdownPreview'
 import { MonacoEditor } from './MonacoEditor'
+import { PdfViewer } from './PdfViewer'
 
 export function FileEditor({
   tabPath,
@@ -40,7 +41,19 @@ export function FileEditor({
         if (pane) setActivePane(pane)
       }}
     >
-      {isMarkdownFile(activeTab.name) && (activeTab.mdViewMode ?? 'preview') === 'preview' ? (
+      {activeTab.kind === 'pdf' || isPdfFile(activeTab.name) ? (
+        activeTab.binaryBase64 ? (
+          <PdfViewer
+            base64={activeTab.binaryBase64}
+            mimeType={activeTab.mimeType ?? 'application/pdf'}
+            fileName={activeTab.name}
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center text-sm text-text-secondary">
+            PDF を読み込み中…
+          </div>
+        )
+      ) : isMarkdownFile(activeTab.name) && (activeTab.mdViewMode ?? 'preview') === 'preview' ? (
         <MarkdownPreview content={activeTab.content} baseFilePath={activeTab.path} />
       ) : (
         <MonacoEditor tabPath={activeTab.path} />

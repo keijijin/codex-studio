@@ -4,13 +4,7 @@ import { ChatInput } from './ChatInput'
 import { MessageList } from './MessageList'
 import { ToolLogPanel } from './ToolLogPanel'
 import { useSettingsDialog } from './SettingsDialog'
-import {
-  IPC_CHANNELS,
-  isRedactedApiKey,
-  type PersonaFile,
-  type RoutingMode,
-  type SessionMode,
-} from '@codex/shared'
+import { isRedactedApiKey, type PersonaFile, type RoutingMode, type SessionMode } from '@codex/shared'
 
 const ROUTING_QUICK: { id: RoutingMode; label: string; title: string }[] = [
   { id: 'fixed', label: 'Fixed', title: '既定モデルのみ（固定）' },
@@ -59,8 +53,7 @@ export function AIPanel() {
       setPersonas([])
       return
     }
-    void window.codex
-      .invoke(IPC_CHANNELS.PERSONAS_LIST)
+    void window.codex.personas.list()
       .then(setPersonas)
       .catch(() => setPersonas([]))
   }, [workspace])
@@ -75,39 +68,36 @@ export function AIPanel() {
           ? hasConfiguredKey(settings?.models.xaiApiKey)
           : hasConfiguredKey(settings?.models.openaiApiKey)
 
-  const providerLabel =
-    routingInfo?.provider === 'anthropic'
-      ? 'Anthropic'
-      : routingInfo?.provider === 'ollama'
-        ? 'Ollama'
-        : routingInfo?.provider === 'llamacpp'
-          ? 'llama.cpp'
-          : routingInfo?.provider === 'xai'
-            ? 'xAI'
-            : routingInfo?.provider === 'openai'
-              ? 'OpenAI'
-              : settings?.models.defaultProvider === 'anthropic'
-                ? 'Anthropic'
-                : settings?.models.defaultProvider === 'ollama'
-                  ? 'Ollama'
-                  : settings?.models.defaultProvider === 'llamacpp'
-                    ? 'llama.cpp'
-                    : settings?.models.defaultProvider === 'xai'
-                      ? 'xAI'
-                      : 'OpenAI'
-  const modelLabel =
-    routingInfo?.model ??
-    (sessionMode === 'agent' || sessionMode === 'plan'
-      ? settings?.models.defaultAgentModel ?? settings?.models.defaultChatModel
-      : settings?.models.defaultChatModel)
   const routingMode = settings?.routing?.mode ?? 'fixed'
+  const configuredModel =
+    sessionMode === 'agent' || sessionMode === 'plan'
+      ? settings?.models.defaultAgentModel ?? settings?.models.defaultChatModel
+      : settings?.models.defaultChatModel
+  // Fixed+idle: always show settings. Overlay only while streaming, or in Auto/FB modes.
+  const useRoutingOverlay =
+    Boolean(routingInfo) && (isStreaming || routingMode !== 'fixed')
+  const displayProvider = useRoutingOverlay
+    ? routingInfo!.provider
+    : settings?.models.defaultProvider
+  const providerLabel =
+    displayProvider === 'anthropic'
+      ? 'Anthropic'
+      : displayProvider === 'ollama'
+        ? 'Ollama'
+        : displayProvider === 'llamacpp'
+          ? 'llama.cpp'
+          : displayProvider === 'xai'
+            ? 'xAI'
+            : 'OpenAI'
+  const modelLabel = useRoutingOverlay ? routingInfo!.model : configuredModel
   const routingHint =
-    routingInfo?.reason ??
-    (routingMode === 'fixed'
-      ? null
-      : routingMode === 'auto'
-        ? 'Auto ルーティング'
-        : 'フォールバック有効')
+    useRoutingOverlay
+      ? routingInfo?.reason ?? null
+      : routingMode === 'fixed'
+        ? null
+        : routingMode === 'auto'
+          ? 'Auto ルーティング'
+          : 'フォールバック有効'
 
   const sortedSessions = [...sessions].sort(
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
@@ -154,8 +144,7 @@ export function AIPanel() {
               backgroundColor: 'transparent',
               border: '1px solid #3c3c3c',
               borderRadius: 4,
-              cursor: 'pointer',
-            }}
+              cursor: 'pointer' }}
             onClick={(e) => {
               e.stopPropagation()
               openSettings()
@@ -374,8 +363,7 @@ export function AIPanel() {
               model: routingInfo?.model ?? lastTrace?.model ?? modelLabel,
               provider: routingInfo?.provider ?? lastTrace?.provider,
               toolCount: lastTrace?.toolCount ?? sessionToolLog.length,
-              estimatedCostUsd: lastUsage?.estimatedCostUsd,
-            }}
+              estimatedCostUsd: lastUsage?.estimatedCostUsd }}
           />
         </div>
       )}

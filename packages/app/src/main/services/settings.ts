@@ -154,6 +154,48 @@ function clampMaxIterations(value: unknown): number {
 }
 
 export class SettingsService {
+  /** In-memory overlay so get() stays sync after async safeStorage init (Electron 45+). */
+  private secretBag: SecretBag = {}
+  private secretEncryptionAvailable = false
+  private secretsInitialized = false
+  private secretsInitPromise: Promise<void> | null = null
+
+  /**
+   * Must run once after `app.whenReady()` before relying on encrypted API keys.
+   * Loads / migrates secrets via async safeStorage (sync APIs are deprecated in Electron 45).
+   */
+  async initSecrets(): Promise<void> {
+    if (this.secretsInitialized) return
+    if (this.secretsInitPromise) return this.secretsInitPromise
+    this.secretsInitPromise = this.runSecretsInit()
+    await this.secretsInitPromise
+  }
+
+  private async runSecretsInit(): Promise<void> {
+    this.secretEncryptionAvailable = await isSecretEncryptionAvailable()
+    if (!this.secretEncryptionAvailable) {
+      this.secretsInitialized = true
+      return
+    }
+
+    const stored = store.get('settings')
+    const base = { ...DEFAULT_SETTINGS, ...stored } as AppSettings
+    if (hasPlaintextSecrets(base)) {
+      const migration = await migratePlaintextSecrets(base)
+      if (migration.migrated) {
+        store.set('settings', stripSecretsForDisk(migration.settings))
+        store.set('migratedSecretsToSafeStorage', true)
+        console.info('[settings] migrated API keys into OS secret store (safeStorage)')
+        this.secretBag = extractSecretsFromSettings(migration.settings)
+        this.secretsInitialized = true
+        return
+      }
+    }
+
+    this.secretBag = await loadPlainSecrets()
+    this.secretsInitialized = true
+  }
+
   get(): AppSettings {
     const stored = store.get('settings')
     const agent = { ...DEFAULT_SETTINGS.agent, ...stored.agent }
@@ -309,30 +351,11 @@ export class SettingsService {
       },
     }
 
-    return this.hydrateSecrets(result)
-  }
-
-  /** Overlay OS-encrypted secrets; migrate plaintext keys once when possible. */
-  private hydrateSecrets(settings: AppSettings): AppSettings {
-    if (!isSecretEncryptionAvailable()) {
-      return settings
-    }
-
-    if (hasPlaintextSecrets(settings)) {
-      const migration = migratePlaintextSecrets(settings)
-      if (migration.migrated) {
-        store.set('settings', stripSecretsForDisk(migration.settings))
-        store.set('migratedSecretsToSafeStorage', true)
-        console.info('[settings] migrated API keys into OS secret store (safeStorage)')
-        return migration.settings
-      }
-    }
-
-    return applySecretsToSettings(settings, loadPlainSecrets())
+    return applySecretsToSettings(result, this.secretBag)
   }
 
   private persistSettings(settings: AppSettings): void {
-    if (isSecretEncryptionAvailable()) {
+    if (this.secretEncryptionAvailable) {
       const secrets = extractSecretsFromSettings(settings)
       const toSave: SecretBag = {}
       for (const key of [
@@ -346,14 +369,21 @@ export class SettingsService {
           toSave[key] = secrets[key]
         }
       }
-      try {
-        savePlainSecrets(toSave)
-        store.set('settings', stripSecretsForDisk(settings))
-        store.set('migratedSecretsToSafeStorage', true)
-      } catch (err) {
-        console.warn('[settings] failed to persist secrets; keeping plaintext fallback', err)
-        store.set('settings', settings)
+      this.secretBag = { ...this.secretBag, ...toSave }
+      for (const [k, v] of Object.entries(toSave)) {
+        if (v === '') delete this.secretBag[k as SecretKeyName]
       }
+      void savePlainSecrets(toSave)
+        .then(() => {
+          store.set('settings', stripSecretsForDisk(settings))
+          store.set('migratedSecretsToSafeStorage', true)
+        })
+        .catch((err: unknown) => {
+          console.warn('[settings] failed to persist secrets; keeping plaintext fallback', err)
+          store.set('settings', settings)
+        })
+      // Optimistic disk write without secrets so UI settings don't wait on Keychain.
+      store.set('settings', stripSecretsForDisk(settings))
       return
     }
     store.set('settings', settings)

@@ -1,3 +1,5 @@
+import type { WorkspaceFs } from './workspace-fs'
+
 export interface JSONSchema {
   type: 'object'
   properties: Record<string, { type: string; description?: string }>
@@ -12,6 +14,8 @@ export interface ToolContext {
   sessionId: string
   signal: AbortSignal
   executeMode: ToolExecuteMode
+  /** Sandboxed file I/O — prefer this over raw fs. */
+  fs: WorkspaceFs
   resolvePath: (path: string) => string
   getRelativePath: (absolutePath: string) => string
   /** When set, Glob (and similar) skip paths matching .gitignore / build outputs. */
@@ -47,6 +51,11 @@ export interface ToolContext {
     presentation: import('@codex/shared').PresentationSettings
     openaiApiKey?: string
   }
+  /**
+   * Default policy for secret paths (`.env`, keys, etc.).
+   * Trusted workspaces: `ask`. Untrusted: `deny`. Always-deny paths ignore this.
+   */
+  secretReadPolicy?: import('./utils/secret-paths').SecretReadPolicy
 }
 
 export interface ToolResult {
@@ -69,5 +78,12 @@ export interface ToolDefinition {
 }
 
 export interface Tool extends ToolDefinition {
+  /**
+   * Legacy entry. Prefer `preview` / `apply` when present — registry routes by executeMode.
+   */
   execute(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolResult>
+  /** Side-effect free path used before approval when permission is `ask`. */
+  preview?(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolResult>
+  /** Mutating path used after approval or when permission is `allow`. */
+  apply?(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolResult>
 }

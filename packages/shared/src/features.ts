@@ -16,6 +16,11 @@ export interface TabCompletionSettings {
   debounceMs: number
   /** Max completion tokens */
   maxTokens: number
+  /**
+   * When false (default), skip Tab completion if the default provider is
+   * Ollama / llama.cpp so Agent/Ask is not starved on a single local slot.
+   */
+  allowOnLocal?: boolean
 }
 
 export interface SemanticSearchSettings {
@@ -50,6 +55,7 @@ export const DEFAULT_TAB_COMPLETION: TabCompletionSettings = {
   enabled: true,
   debounceMs: 400,
   maxTokens: 64,
+  allowOnLocal: false,
 }
 
 export const DEFAULT_SEMANTIC_SEARCH: SemanticSearchSettings = {

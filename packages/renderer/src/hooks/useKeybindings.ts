@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { DEFAULT_KEYBINDINGS, IPC_CHANNELS, type KeybindingMap } from '@codex/shared'
+import { DEFAULT_KEYBINDINGS, type KeybindingMap } from '@codex/shared'
 import { useAppStore } from '@renderer/store/app-store'
 
 function parseBinding(binding: string): { mod: boolean; shift: boolean; key: string } {
@@ -8,8 +8,7 @@ function parseBinding(binding: string): { mod: boolean; shift: boolean; key: str
   return {
     mod: parts.some((p) => p === 'Mod' || p === 'Cmd' || p === 'Ctrl'),
     shift: parts.some((p) => p === 'Shift'),
-    key: key === '`' ? '`' : key,
-  }
+    key: key === '`' ? '`' : key }
 }
 
 function matchEvent(e: KeyboardEvent, binding: string): boolean {
@@ -33,8 +32,7 @@ export function useKeybindings(): void {
   useEffect(() => {
     const map: KeybindingMap = {
       ...DEFAULT_KEYBINDINGS,
-      ...settings?.keybindings,
-    }
+      ...settings?.keybindings }
 
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null
@@ -65,7 +63,7 @@ export function useKeybindings(): void {
         void compactChat()
       } else if (matchEvent(e, map.checkUpdates)) {
         e.preventDefault()
-        void window.codex.invoke(IPC_CHANNELS.UPDATER_CHECK)
+        void window.codex.updater.check()
       }
     }
 

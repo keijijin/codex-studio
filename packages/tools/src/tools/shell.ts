@@ -17,51 +17,42 @@ const DENY_PATTERNS = [
   /dd\s+if=.*of=\/dev/,
 ]
 
-export const shellTool: Tool = {
-  name: 'Shell',
-  description:
-    'Run a shell command in the workspace. Use for build, test, or git commands. ' +
-    'Login/profile files (e.g. ~/.bash_profile, ~/.zshrc) are sourced automatically — do not prepend source yourself. ' +
-    'Extra env comes from `.codex/agent.env` and any environment synced from the integrated Terminal.',
-  requiresApproval: true,
-  parameters: {
-    type: 'object',
-    properties: {
-      command: { type: 'string', description: 'Shell command to run' },
-      cwd: { type: 'string', description: 'Working directory (relative to workspace)' },
-      timeout: { type: 'integer', description: 'Timeout in milliseconds (default 30000)' },
-    },
-    required: ['command'],
-  },
-  async execute(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolResult> {
-    const command = String(args.command ?? '').trim()
-    if (!command) return { success: false, output: 'Error: command is required' }
+async function runShell(
+  ctx: ToolContext,
+  args: Record<string, unknown>,
+  mode: 'preview' | 'apply',
+): Promise<ToolResult> {
+  const command = String(args.command ?? '').trim()
+  if (!command) return { success: false, output: 'Error: command is required' }
 
-    for (const pattern of DENY_PATTERNS) {
-      if (pattern.test(command)) {
-        return { success: false, output: `Error: command blocked by security policy` }
-      }
+  for (const pattern of DENY_PATTERNS) {
+    if (pattern.test(command)) {
+      return { success: false, output: `Error: command blocked by security policy` }
     }
+  }
 
-    const cwd = args.cwd
-      ? ctx.resolvePath(String(args.cwd))
-      : ctx.workspaceRoot
-    const requestedTimeout = Number(args.timeout) || DEFAULT_TIMEOUT
-    const timeout = Math.min(Math.max(1_000, requestedTimeout), MAX_TIMEOUT)
-    const wrapped = wrapShellCommand(command)
+  const cwd = args.cwd ? ctx.resolvePath(String(args.cwd)) : ctx.workspaceRoot
+  const requestedTimeout = Number(args.timeout) || DEFAULT_TIMEOUT
+  const timeout = Math.min(Math.max(1_000, requestedTimeout), MAX_TIMEOUT)
+  const wrapped = wrapShellCommand(command)
 
-    if (ctx.executeMode === 'preview') {
-      const profileNote = wrapped.bootstrap
-        ? `\n(profile: ${wrapped.bootstrap})`
-        : ''
-      return {
-        success: true,
-        output: `Preview: run command in ${ctx.getRelativePath(cwd) || '.'}\n$ ${command}${profileNote}`,
-        metadata: { command, cwd, action: 'shell', bootstrap: wrapped.bootstrap },
-      }
+  if (mode === 'preview') {
+    const profileNote = wrapped.bootstrap ? `\n(profile: ${wrapped.bootstrap})` : ''
+    return {
+      success: true,
+      output: `Preview: run command in ${ctx.getRelativePath(cwd) || '.'}\n$ ${command}${profileNote}`,
+      metadata: {
+        path: cwd,
+        relativePath: ctx.getRelativePath(cwd) || '.',
+        command,
+        cwd,
+        action: 'shell',
+        bootstrap: wrapped.bootstrap,
+      },
     }
+  }
 
-    return new Promise((resolve) => {
+  return new Promise((resolve) => {
       const env = ctx.getShellEnv?.() ?? process.env
       const proc = spawn(wrapped.file, wrapped.args, {
         cwd,
@@ -152,5 +143,25 @@ export const shellTool: Tool = {
         resolve({ success: false, output: `Error: ${err.message}` })
       })
     })
+}
+
+export const shellTool: Tool = {
+  name: 'Shell',
+  description:
+    'Run a shell command in the workspace. Use for build, test, or git commands. ' +
+    'Login/profile files (e.g. ~/.bash_profile, ~/.zshrc) are sourced automatically — do not prepend source yourself. ' +
+    'Extra env comes from `.codex/agent.env` and any environment synced from the integrated Terminal.',
+  requiresApproval: true,
+  parameters: {
+    type: 'object',
+    properties: {
+      command: { type: 'string', description: 'Shell command to run' },
+      cwd: { type: 'string', description: 'Working directory (relative to workspace)' },
+      timeout: { type: 'integer', description: 'Timeout in milliseconds (default 30000)' },
+    },
+    required: ['command'],
   },
+  preview: (ctx, args) => runShell(ctx, args, 'preview'),
+  apply: (ctx, args) => runShell(ctx, args, 'apply'),
+  execute: (ctx, args) => runShell(ctx, args, ctx.executeMode),
 }

@@ -7,7 +7,7 @@ import {
   toBackupRelativePath,
 } from '../packages/tools/src/utils/backup'
 import {
-  resolveWithinWorkspace,
+  createWorkspaceFs,
   strReplaceTool,
   writeTool,
   type ToolContext,
@@ -84,12 +84,14 @@ describe('backupFile on Windows-style absolute paths', () => {
 
 describe('Write / StrReplace with existing file (backup path)', () => {
   function createToolContext(root: string): ToolContext {
+    const fs = createWorkspaceFs(root)
     return {
       workspaceRoot: root,
       sessionId: `write-backup-${Date.now()}`,
       signal: new AbortController().signal,
       executeMode: 'apply',
-      resolvePath: (p) => resolveWithinWorkspace(root, p),
+      fs,
+      resolvePath: (p) => fs.resolve(p),
       getRelativePath: (p) => relative(root, p),
     }
   }

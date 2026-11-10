@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { IPC_CHANNELS } from '@codex/shared'
 import type { SearchResult } from '@codex/shared'
 import { useAppStore } from '@renderer/store/app-store'
 
@@ -40,7 +39,7 @@ export function SearchPanel() {
     setReplaceMsg(null)
     setSearched(true)
     try {
-      const hits = await window.codex.invoke(IPC_CHANNELS.INDEX_SEARCH, query.trim())
+      const hits = await window.codex.index.search(query.trim())
       setResults(hits)
       setSelectedPaths(new Set(hits.map((h) => h.path)))
     } catch (err: unknown) {
@@ -62,11 +61,10 @@ export function SearchPanel() {
     setSearchError(null)
     setReplaceMsg(null)
     try {
-      const result = await window.codex.invoke(IPC_CHANNELS.INDEX_REPLACE, {
+      const result = await window.codex.index.replace({
         query: query.trim(),
         replacement,
-        paths: [...selectedPaths],
-      })
+        paths: [...selectedPaths] })
       setReplaceMsg(
         `${result.filesChanged} ファイル / ${result.occurrences} 箇所を置換` +
           (result.errors.length ? `（エラー ${result.errors.length}）` : ''),

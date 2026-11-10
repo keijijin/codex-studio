@@ -115,7 +115,7 @@ app.whenReady().then(async () => {
         responseHeaders: {
           ...details.responseHeaders,
           'Content-Security-Policy': [
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https: http://localhost:* ws://localhost:*",
+            "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' https: http://localhost:* ws://localhost:*",
           ],
         },
       })
@@ -125,8 +125,8 @@ app.whenReady().then(async () => {
   registerIpcHandlers()
   setupApplicationMenu()
 
-  // Migrate API keys into OS secret store on first settings read (safeStorage).
-  void settingsService.get()
+  // Electron 45+: async safeStorage must finish before get() overlays API keys.
+  await settingsService.initSecrets()
 
   const { initAutoUpdater } = await import('./services/updater')
   initAutoUpdater()

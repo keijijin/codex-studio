@@ -44,9 +44,10 @@ function writeFile(data: SecretsFile): void {
   writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`, 'utf-8')
 }
 
-export function isSecretEncryptionAvailable(): boolean {
+/** Electron 45+: sync safeStorage is deprecated; use async OSCrypt backend. */
+export async function isSecretEncryptionAvailable(): Promise<boolean> {
   try {
-    return safeStorage.isEncryptionAvailable()
+    return await safeStorage.isAsyncEncryptionAvailable()
   } catch {
     return false
   }
@@ -57,25 +58,34 @@ export function secretsFileExists(): boolean {
 }
 
 /** Decrypt all stored secrets (empty if encryption unavailable). */
-export function loadPlainSecrets(): SecretBag {
-  if (!isSecretEncryptionAvailable()) return {}
+export async function loadPlainSecrets(): Promise<SecretBag> {
+  if (!(await isSecretEncryptionAvailable())) return {}
   const file = readFile()
   const out: SecretBag = {}
+  let needsReEncrypt = false
   for (const [name, b64] of Object.entries(file.keys)) {
     if (!b64) continue
     try {
-      const plain = safeStorage.decryptString(Buffer.from(b64, 'base64'))
-      if (plain) out[name as SecretKeyName] = plain
+      const { result: plain, shouldReEncrypt } = await safeStorage.decryptStringAsync(
+        Buffer.from(b64, 'base64'),
+      )
+      if (plain) {
+        out[name as SecretKeyName] = plain
+        if (shouldReEncrypt) needsReEncrypt = true
+      }
     } catch {
       console.warn(`[secret-store] failed to decrypt ${name}`)
     }
+  }
+  if (needsReEncrypt && Object.keys(out).length > 0) {
+    await savePlainSecrets(out)
   }
   return out
 }
 
 /** Merge and encrypt secrets. Pass empty string to delete a key. */
-export function savePlainSecrets(partial: SecretBag): void {
-  if (!isSecretEncryptionAvailable()) {
+export async function savePlainSecrets(partial: SecretBag): Promise<void> {
+  if (!(await isSecretEncryptionAvailable())) {
     throw new Error('OS secret encryption is not available')
   }
   const file = readFile()
@@ -85,7 +95,7 @@ export function savePlainSecrets(partial: SecretBag): void {
       delete file.keys[name]
       continue
     }
-    const buf = safeStorage.encryptString(value)
+    const buf = await safeStorage.encryptStringAsync(value)
     file.keys[name] = Buffer.from(buf).toString('base64')
   }
   writeFile(file)
@@ -157,18 +167,18 @@ export function hasPlaintextSecrets(settings: AppSettings): boolean {
  * One-shot: move plaintext keys from settings into OS-backed encrypted file.
  * Returns settings with secrets still populated in memory.
  */
-export function migratePlaintextSecrets(settings: AppSettings): {
+export async function migratePlaintextSecrets(settings: AppSettings): Promise<{
   settings: AppSettings
   migrated: boolean
-} {
-  if (!isSecretEncryptionAvailable()) {
+}> {
+  if (!(await isSecretEncryptionAvailable())) {
     return { settings, migrated: false }
   }
   if (!hasPlaintextSecrets(settings)) {
     return { settings, migrated: false }
   }
   const fromSettings = extractSecretsFromSettings(settings)
-  const existing = loadPlainSecrets()
+  const existing = await loadPlainSecrets()
   const toSave: SecretBag = { ...existing }
   for (const key of [
     'openaiApiKey',
@@ -180,7 +190,7 @@ export function migratePlaintextSecrets(settings: AppSettings): {
     const v = fromSettings[key]
     if (v && v.length > 0) toSave[key] = v
   }
-  savePlainSecrets(toSave)
-  const merged = applySecretsToSettings(stripSecretsForDisk(settings), loadPlainSecrets())
+  await savePlainSecrets(toSave)
+  const merged = applySecretsToSettings(stripSecretsForDisk(settings), await loadPlainSecrets())
   return { settings: merged, migrated: true }
 }

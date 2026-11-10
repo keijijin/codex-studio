@@ -41,6 +41,41 @@ test('welcome screen is shown on launch', async () => {
   await closeApp(app, userDataDir)
 })
 
+/**
+ * S-E2E-01: preload must expose window.codex (sandbox + CJS preload).
+ * Fails loudly if ESM preload + sandbox:true regresses.
+ */
+test('exposes window.codex from sandboxed preload', async () => {
+  const { app, userDataDir } = await launchApp()
+  try {
+    const page = await app.firstWindow()
+    await expect(page.getByText('Codex Studio')).toBeVisible()
+    const apiShape = await page.evaluate(() => {
+      const api = window.codex as unknown as {
+        invoke?: unknown
+        workspace?: { open?: unknown; trustStatus?: unknown }
+        settings?: { get?: unknown }
+      }
+      return {
+        hasInvoke: typeof api?.invoke === 'function',
+        workspaceOpen: typeof api?.workspace?.open === 'function',
+        workspaceTrustStatus: typeof api?.workspace?.trustStatus === 'function',
+        settingsGet: typeof api?.settings?.get === 'function',
+      }
+    })
+    expect(apiShape.hasInvoke).toBe(false)
+    expect(apiShape.workspaceOpen).toBe(true)
+    expect(apiShape.workspaceTrustStatus).toBe(true)
+    expect(apiShape.settingsGet).toBe(true)
+  } finally {
+    await closeApp(app, userDataDir)
+  }
+})
+
+/**
+ * Fixture auto-open via CODEX_E2E_WORKSPACE (skips the Open Folder dialog).
+ * Trust: CODEX_E2E_WORKSPACE also auto-trusts in workspace-trust ensureTrusted.
+ */
 test('opens fixture workspace and shows layout', async () => {
   const fixturePath = join(process.cwd(), 'e2e/fixtures/sample-workspace')
   const { app, userDataDir } = await launchApp({
@@ -51,6 +86,39 @@ test('opens fixture workspace and shows layout', async () => {
   await expect(page.getByRole('contentinfo').getByText('sample-workspace')).toBeVisible({ timeout: 15_000 })
   await expect(page.getByText('AI Chat')).toBeVisible()
   await closeApp(app, userDataDir)
+})
+
+/**
+ * S-E2E-02: real workspace:open IPC path (not env auto-open).
+ * CODEX_TRUST_WORKSPACE=1 auto-accepts the trust dialog so headless CI can proceed.
+ */
+test('opens workspace via workspace:open IPC', async () => {
+  const fixturePath = join(process.cwd(), 'e2e/fixtures/sample-workspace')
+  const { app, userDataDir } = await launchApp({
+    CODEX_TRUST_WORKSPACE: '1',
+  })
+  try {
+    const page = await app.firstWindow()
+    await expect(page.getByRole('button', { name: 'Open Folder' })).toBeVisible()
+
+    const opened = await page.evaluate(async (targetPath) => {
+      const api = window.codex
+      if (!api?.workspace?.open) return { ok: false, error: 'window.codex.workspace.open missing' }
+      try {
+        const ws = await api.workspace.open(targetPath)
+        return { ok: true, name: ws?.name, roots: ws?.rootPaths?.length ?? 0 }
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    }, fixturePath)
+
+    expect(opened.ok, `workspace:open failed: ${opened.error}`).toBe(true)
+    expect(opened.roots).toBeGreaterThan(0)
+    // IPC success is the regression gate (trust + electron-store). UI store sync
+    // from evaluate() is optional; layout open is covered by the fixture-env test.
+  } finally {
+    await closeApp(app, userDataDir)
+  }
 })
 
 test('sends chat message with E2E mock provider', async () => {

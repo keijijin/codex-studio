@@ -2,8 +2,9 @@ import type { LLMProvider, AgentMessage, ToolCall, LlmUsage } from '@codex/llm-a
 import { addUsage, emptyUsage } from '@codex/llm-adapters'
 import type { AgentPermissions, ApprovalRequest } from '@codex/shared'
 import { DEFAULT_AGENT_PERMISSIONS, isToolEnabled, permissionForTool } from '@codex/shared'
-import type { ToolRegistry, ToolResult } from '@codex/tools'
+import type { ToolRegistry, ToolResult, WorkspaceFs } from '@codex/tools'
 import type { ToolContext } from '@codex/tools'
+import { createWorkspaceFs, secretReadDecision } from '@codex/tools'
 import { estimateMessagesTokens, trimAgentHistory } from './context-builder'
 import { loadProjectContext } from './project-context'
 import { loadRules } from './rules-loader'
@@ -29,6 +30,13 @@ export interface AgentRunContext {
   signal: AbortSignal
   resolvePath: (path: string) => string
   getRelativePath: (absolutePath: string) => string
+  /** Preferred over creating from workspaceRoot alone (supports multi-root). */
+  fs?: WorkspaceFs
+  /**
+   * Secret-path Read policy (S3 / U-1).
+   * Trusted: `ask`. Untrusted: `deny`. Always-deny paths ignore YOLO.
+   */
+  secretReadPolicy?: ToolContext['secretReadPolicy']
   /** Skip gitignored / build-output paths in Glob etc. */
   isIgnoredPath?: (relativePath: string) => boolean
   onFileChanged?: (absolutePath: string) => void
@@ -167,6 +175,35 @@ function resolvePermission(
   return permissionForTool(toolName, permissions)
 }
 
+function isReadTool(name: string): boolean {
+  return name === 'Read' || name.toLowerCase() === 'read'
+}
+
+/** Secret paths can force ask/deny even when category `read` is allow / YOLO. */
+function resolveToolPermission(
+  toolName: string,
+  call: ToolCall,
+  ctx: AgentRunContext,
+  baseToolCtx: Omit<ToolContext, 'executeMode'>,
+  permissions: AgentPermissions,
+): 'allow' | 'ask' | 'deny' {
+  if (isReadTool(toolName)) {
+    const pathArg = String(call.arguments?.path ?? '')
+    if (pathArg) {
+      try {
+        const resolved = baseToolCtx.fs.resolve(pathArg)
+        const rel = baseToolCtx.getRelativePath(resolved)
+        const secret = secretReadDecision(rel, ctx.secretReadPolicy ?? 'ask')
+        if (secret === 'deny') return 'deny'
+        if (secret === 'ask' && !ctx.yoloMode) return 'ask'
+      } catch {
+        // Path resolution errors are handled by the tool itself.
+      }
+    }
+  }
+  return resolvePermission(toolName, ctx.yoloMode, permissions)
+}
+
 function isTaskTool(name: string): boolean {
   return name === 'Task' || name.toLowerCase() === 'task'
 }
@@ -213,10 +250,12 @@ export class AgentOrchestrator {
     ]
 
     const tools = this.registry.list(ctx.enabledTools)
+    const fs = ctx.fs ?? createWorkspaceFs(ctx.workspaceRoot)
     const baseToolCtx: Omit<ToolContext, 'executeMode'> = {
       workspaceRoot: ctx.workspaceRoot,
       sessionId: ctx.sessionId,
       signal: ctx.signal,
+      fs,
       resolvePath: ctx.resolvePath,
       getRelativePath: ctx.getRelativePath,
       isIgnoredPath: ctx.isIgnoredPath,
@@ -228,6 +267,7 @@ export class AgentOrchestrator {
       getShellEnv: ctx.getShellEnv,
       getVideoConfig: ctx.getVideoConfig,
       getPresentationConfig: ctx.getPresentationConfig,
+      secretReadPolicy: ctx.secretReadPolicy ?? 'ask',
     }
 
     const budget =
@@ -451,19 +491,24 @@ export class AgentOrchestrator {
       }
     }
 
-    const perm = resolvePermission(canonicalName, ctx.yoloMode, permissions)
+    const perm = resolveToolPermission(canonicalName, call, ctx, baseToolCtx, permissions)
 
     if (perm === 'deny') {
+      const secretHint =
+        isReadTool(canonicalName) && call.arguments?.path
+          ? ' Secret paths (.env, keys, agent-env.captured) may be denied by workspace trust policy.'
+          : ''
       return {
         success: false,
         output:
-          `Error: tool "${canonicalName}" is denied by permission policy. ` +
+          `Error: tool "${canonicalName}" is denied by permission policy.${secretHint} ` +
           `Open Settings → Agent → set permission preset to coding (or yolo), ` +
           `and ensure edit is not deny.`,
       }
     }
 
-    if (perm === 'ask' && tool?.requiresApproval) {
+    // Permission `ask` always requires preview + human approval (do not AND with requiresApproval).
+    if (perm === 'ask') {
       const preview = await this.registry.execute(canonicalName, call.arguments, {
         ...baseToolCtx,
         executeMode: 'preview',

@@ -23,7 +23,7 @@ import type { LlmUsageRecord } from './usage'
 import type { GitCommitResult, GitStatusSnapshot } from './git'
 import type { UpdaterStatus } from './updater'
 
-/** IPC channel names (invoke) */
+/** IPC channel names (main process handlers). Renderer uses typed CodexApi methods. */
 export const IPC_CHANNELS = {
   WORKSPACE_OPEN: 'workspace:open',
   WORKSPACE_CLOSE: 'workspace:close',
@@ -31,6 +31,7 @@ export const IPC_CHANNELS = {
   WORKSPACE_GET_TREE: 'workspace:getTree',
   WORKSPACE_RECENT_LIST: 'workspace:recentList',
   FILE_READ: 'file:read',
+  FILE_READ_BINARY: 'file:readBinary',
   FILE_WRITE: 'file:write',
   FILE_RESOLVE: 'file:resolve',
   SETTINGS_GET: 'settings:get',
@@ -81,6 +82,9 @@ export const IPC_CHANNELS = {
   MCP_SYNC: 'mcp:sync',
   COMPLETION_REQUEST: 'completion:request',
   WORKSPACE_ADD_ROOT: 'workspace:addRoot',
+  WORKSPACE_TRUST_STATUS: 'workspace:trustStatus',
+  WORKSPACE_TRUST: 'workspace:trust',
+  WORKSPACE_UNTRUST: 'workspace:untrust',
   AUDIT_EXPORT: 'audit:export',
   SEMANTIC_STATS: 'semantic:stats',
   SEMANTIC_REINDEX: 'semantic:reindex',
@@ -111,6 +115,10 @@ export interface IpcInvokeMap {
   [IPC_CHANNELS.WORKSPACE_GET_TREE]: { args: []; result: FileNode[] }
   [IPC_CHANNELS.WORKSPACE_RECENT_LIST]: { args: []; result: string[] }
   [IPC_CHANNELS.FILE_READ]: { args: [path: string]; result: string }
+  [IPC_CHANNELS.FILE_READ_BINARY]: {
+    args: [path: string]
+    result: { base64: string; mimeType: string; byteLength: number }
+  }
   [IPC_CHANNELS.FILE_WRITE]: { args: [path: string, content: string]; result: void }
   [IPC_CHANNELS.FILE_RESOLVE]: { args: [href: string, baseFilePath?: string]; result: string }
   [IPC_CHANNELS.SETTINGS_GET]: { args: []; result: AppSettings }
@@ -158,7 +166,10 @@ export interface IpcInvokeMap {
     args: [sessionId: string, personaName: string | null | undefined]
     result: Session
   }
-  [IPC_CHANNELS.AGENT_APPROVAL_RESPOND]: { args: [sessionId: string, toolCallId: string, approved: boolean]; result: void }
+  [IPC_CHANNELS.AGENT_APPROVAL_RESPOND]: {
+    args: [sessionId: string, toolCallId: string, approved: boolean]
+    result: void
+  }
   [IPC_CHANNELS.CEO_APPROVAL_RESPOND]: {
     args: [sessionId: string, approvalId: string, response: CeoApprovalResponse]
     result: void
@@ -190,13 +201,19 @@ export interface IpcInvokeMap {
   [IPC_CHANNELS.PERSONAS_DELETE]: { args: [absolutePath: string]; result: void }
   [IPC_CHANNELS.CHAT_COMPACT]: { args: [sessionId: string]; result: Message[] }
   [IPC_CHANNELS.USAGE_RECENT]: { args: [limit?: number]; result: LlmUsageRecord[] }
-  [IPC_CHANNELS.USAGE_DAILY]: { args: []; result: { date: string; estimatedCostUsd: number; calls: number } }
+  [IPC_CHANNELS.USAGE_DAILY]: {
+    args: []
+    result: { date: string; estimatedCostUsd: number; calls: number }
+  }
   [IPC_CHANNELS.GIT_STATUS]: { args: []; result: GitStatusSnapshot }
   [IPC_CHANNELS.GIT_STAGE]: { args: [paths: string[]]; result: void }
   [IPC_CHANNELS.GIT_UNSTAGE]: { args: [paths: string[]]; result: void }
   [IPC_CHANNELS.GIT_COMMIT]: { args: [message: string]; result: GitCommitResult }
   [IPC_CHANNELS.GIT_BRANCHES]: { args: []; result: string[] }
-  [IPC_CHANNELS.GIT_CHECKOUT]: { args: [branch: string]; result: { success: boolean; message: string } }
+  [IPC_CHANNELS.GIT_CHECKOUT]: {
+    args: [branch: string]
+    result: { success: boolean; message: string }
+  }
   [IPC_CHANNELS.UPDATER_CHECK]: { args: []; result: UpdaterStatus }
   [IPC_CHANNELS.UPDATER_STATUS_GET]: { args: []; result: UpdaterStatus }
   [IPC_CHANNELS.MCP_STATUS]: {
@@ -215,6 +232,33 @@ export interface IpcInvokeMap {
     result: { text: string; skipped?: string }
   }
   [IPC_CHANNELS.WORKSPACE_ADD_ROOT]: { args: [path: string]; result: Workspace }
+  [IPC_CHANNELS.WORKSPACE_TRUST_STATUS]: {
+    args: []
+    result: {
+      root: string | null
+      trusted: boolean
+      trustedAt: string | null
+      contentChanged: boolean
+    }
+  }
+  [IPC_CHANNELS.WORKSPACE_TRUST]: {
+    args: []
+    result: {
+      root: string | null
+      trusted: boolean
+      trustedAt: string | null
+      contentChanged: boolean
+    }
+  }
+  [IPC_CHANNELS.WORKSPACE_UNTRUST]: {
+    args: []
+    result: {
+      root: string | null
+      trusted: boolean
+      trustedAt: string | null
+      contentChanged: boolean
+    }
+  }
   [IPC_CHANNELS.AUDIT_EXPORT]: {
     args: [opts?: { limit?: number }]
     result: { path: string; lines: number }
@@ -245,16 +289,130 @@ export interface IpcEventMap {
 export type IpcArgs<C extends keyof IpcInvokeMap> = IpcInvokeMap[C]['args']
 export type IpcResult<C extends keyof IpcInvokeMap> = IpcInvokeMap[C]['result']
 
-/** Renderer-facing API exposed via contextBridge */
+export type WorkspaceTrustStatusResult = IpcResult<typeof IPC_CHANNELS.WORKSPACE_TRUST_STATUS>
+export type ModelCatalogResult = IpcResult<typeof IPC_CHANNELS.MODEL_CATALOG_GET>
+
+/** Renderer-facing API exposed via contextBridge (typed only — no generic invoke). */
 export interface CodexApi {
-  invoke<C extends keyof IpcInvokeMap>(
-    channel: C,
-    ...args: IpcArgs<C>
-  ): Promise<IpcResult<C>>
   on<E extends keyof IpcEventMap>(
     channel: E,
     listener: (payload: IpcEventMap[E]) => void,
   ): () => void
+  workspace: {
+    open: (path: string) => Promise<Workspace>
+    close: () => Promise<void>
+    get: () => Promise<Workspace | null>
+    getTree: () => Promise<FileNode[]>
+    recentList: () => Promise<string[]>
+    addRoot: (path: string) => Promise<Workspace>
+    trustStatus: () => Promise<WorkspaceTrustStatusResult>
+    trust: () => Promise<WorkspaceTrustStatusResult>
+    untrust: () => Promise<WorkspaceTrustStatusResult>
+  }
+  file: {
+    read: (path: string) => Promise<string>
+    readBinary: (
+      path: string,
+    ) => Promise<{ base64: string; mimeType: string; byteLength: number }>
+    write: (path: string, content: string) => Promise<void>
+    resolve: (href: string, baseFilePath?: string) => Promise<string>
+  }
+  dialog: {
+    openDirectory: () => Promise<string | null>
+  }
+  settings: {
+    get: () => Promise<AppSettings>
+    set: (partial: Partial<AppSettings>) => Promise<AppSettings>
+  }
+  session: {
+    list: () => Promise<Session[]>
+    create: () => Promise<Session>
+    select: (sessionId: string) => Promise<Message[]>
+    getMessages: (sessionId: string) => Promise<Message[]>
+    setMode: (sessionId: string, mode: SessionMode) => Promise<Session>
+    setPersona: (sessionId: string, personaName: string | null | undefined) => Promise<Session>
+  }
+  index: {
+    status: () => Promise<IndexStatus>
+    search: (query: string) => Promise<SearchResult[]>
+    replace: (params: WorkspaceReplaceParams) => Promise<WorkspaceReplaceResult>
+  }
+  chat: {
+    send: (params: ChatSendParams) => Promise<void>
+    cancel: (sessionId: string) => Promise<void>
+    compact: (sessionId: string) => Promise<Message[]>
+  }
+  models: {
+    list: (provider: LLMProviderId) => Promise<ModelInfo[]>
+    catalogGet: () => Promise<ModelCatalogResult>
+    catalogRefresh: () => Promise<ModelCatalogResult>
+  }
+  agent: {
+    approvalRespond: (sessionId: string, toolCallId: string, approved: boolean) => Promise<void>
+  }
+  ceo: {
+    approvalRespond: (
+      sessionId: string,
+      approvalId: string,
+      response: CeoApprovalResponse,
+    ) => Promise<void>
+  }
+  terminal: {
+    create: (cwd?: string) => Promise<{ id: string }>
+    write: (id: string, data: string) => Promise<void>
+    resize: (id: string, cols: number, rows: number) => Promise<void>
+    destroy: (id: string) => Promise<void>
+    captureEnv: (id: string) => Promise<{ keyCount: number; capturedAt: string }>
+  }
+  agentEnv: {
+    status: () => Promise<IpcResult<typeof IPC_CHANNELS.AGENT_ENV_STATUS>>
+    clear: () => Promise<void>
+  }
+  rules: {
+    list: () => Promise<RuleFile[]>
+    save: (params: RuleSaveParams) => Promise<RuleFile>
+    delete: (absolutePath: string) => Promise<void>
+  }
+  skills: {
+    list: () => Promise<SkillFile[]>
+  }
+  personas: {
+    list: () => Promise<PersonaFile[]>
+    save: (params: PersonaSaveParams) => Promise<PersonaFile>
+    delete: (absolutePath: string) => Promise<void>
+  }
+  usage: {
+    recent: (limit?: number) => Promise<LlmUsageRecord[]>
+    daily: () => Promise<IpcResult<typeof IPC_CHANNELS.USAGE_DAILY>>
+  }
+  git: {
+    status: () => Promise<GitStatusSnapshot>
+    stage: (paths: string[]) => Promise<void>
+    unstage: (paths: string[]) => Promise<void>
+    commit: (message: string) => Promise<GitCommitResult>
+    branches: () => Promise<string[]>
+    checkout: (branch: string) => Promise<{ success: boolean; message: string }>
+  }
+  updater: {
+    check: () => Promise<UpdaterStatus>
+    statusGet: () => Promise<UpdaterStatus>
+  }
+  mcp: {
+    status: () => Promise<IpcResult<typeof IPC_CHANNELS.MCP_STATUS>>
+    sync: () => Promise<IpcResult<typeof IPC_CHANNELS.MCP_SYNC>>
+  }
+  completion: {
+    request: (
+      req: IpcArgs<typeof IPC_CHANNELS.COMPLETION_REQUEST>[0],
+    ) => Promise<IpcResult<typeof IPC_CHANNELS.COMPLETION_REQUEST>>
+  }
+  audit: {
+    export: (opts?: { limit?: number }) => Promise<{ path: string; lines: number }>
+  }
+  semantic: {
+    stats: () => Promise<{ chunks: number; dbPath: string }>
+    reindex: (opts?: { limit?: number }) => Promise<{ indexed: number }>
+  }
 }
 
 declare global {
