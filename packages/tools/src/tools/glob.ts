@@ -1,9 +1,10 @@
 import { readdir, stat } from 'fs/promises'
 import { join, relative } from 'path'
+import { createDefaultPathIgnore } from '@codex/shared'
 import type { Tool, ToolContext, ToolResult } from '../types'
 
 const MAX_RESULTS = 200
-const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', 'out', 'release', '.codex-studio'])
+const fallbackIgnore = createDefaultPathIgnore({ showBuildOutputs: false })
 
 function globToRegExp(pattern: string): RegExp {
   const normalized = pattern.replace(/\\/g, '/')
@@ -34,6 +35,7 @@ async function walkFiles(
   dir: string,
   depth: number,
   results: string[],
+  isIgnored: (rel: string) => boolean,
 ): Promise<void> {
   if (depth > 256 || results.length >= MAX_RESULTS * 2) return
 
@@ -47,6 +49,9 @@ async function walkFiles(
   for (const entry of entries) {
     if (results.length >= MAX_RESULTS * 2) break
     const fullPath = join(dir, entry)
+    const rel = relative(root, fullPath)
+    if (isIgnored(rel)) continue
+
     let entryStat
     try {
       entryStat = await stat(fullPath)
@@ -55,8 +60,7 @@ async function walkFiles(
     }
 
     if (entryStat.isDirectory()) {
-      if (IGNORED_DIRS.has(entry)) continue
-      await walkFiles(root, fullPath, depth + 1, results)
+      await walkFiles(root, fullPath, depth + 1, results, isIgnored)
     } else if (entryStat.isFile()) {
       results.push(fullPath)
     }
@@ -83,7 +87,9 @@ export const globTool: Tool = {
     try {
       const regex = globToRegExp(pattern.replace(/^\*\*\//, ''))
       const allFiles: string[] = []
-      await walkFiles(ctx.workspaceRoot, ctx.workspaceRoot, 0, allFiles)
+      const isIgnored =
+        ctx.isIgnoredPath ?? ((rel: string) => fallbackIgnore.ignores(rel))
+      await walkFiles(ctx.workspaceRoot, ctx.workspaceRoot, 0, allFiles, isIgnored)
 
       const matched = allFiles
         .map((abs) => relative(ctx.workspaceRoot, abs))

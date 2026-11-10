@@ -27,5 +27,8 @@ describe('path-sandbox', () => {
 
   it('rejects sibling prefix matches', () => {
     expect(isPathInsideRoot('/tmp/workspace', '/tmp/workspace-evil/x')).toBe(false)
+    expect(isPathInsideRoot('/tmp/workspace/personas', '/tmp/workspace/personas-evil/x')).toBe(
+      false,
+    )
   })
 })

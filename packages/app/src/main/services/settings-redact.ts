@@ -19,6 +19,10 @@ export function redactSettingsForRenderer(settings: AppSettings): AppSettings {
       ...settings.video,
       runwayApiKey: settings.video?.runwayApiKey ? API_KEY_REDACTED : '',
     },
+    langfuse: {
+      ...settings.langfuse,
+      secretKey: settings.langfuse?.secretKey ? API_KEY_REDACTED : '',
+    },
   }
 }
 
@@ -69,6 +73,13 @@ export function mergeSettingsPartial(
       ...current.video,
       ...partial.video,
       runwayApiKey: keepOrReplaceKey(current.video?.runwayApiKey, partial.video?.runwayApiKey),
+    },
+    langfuse: {
+      ...DEFAULT_SETTINGS.langfuse,
+      ...current.langfuse,
+      ...partial.langfuse,
+      secretKey:
+        keepOrReplaceKey(current.langfuse?.secretKey, partial.langfuse?.secretKey) ?? '',
     },
     presentation: {
       ...DEFAULT_SETTINGS.presentation,

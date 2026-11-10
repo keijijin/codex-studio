@@ -18,7 +18,10 @@ export interface ModelCandidate {
 
 export interface RoutingSettings {
   mode: RoutingMode
-  /** Tried after the primary model on failure (and as auto profile base). */
+  /**
+   * Tried after the settings primary model.
+   * Auto / Fallback / Fixed(on primary failure): primary → fallbackChain → (Auto only) catalog.
+   */
   fallbackChain: ModelCandidate[]
   /** Optional per-task overrides for auto mode. */
   profiles?: Partial<Record<TaskKind, ModelCandidate[]>>
@@ -46,7 +49,7 @@ export function migrateModelId(modelId: string): string {
 
 /** Cost-aware default cascade: Grok first, then mid coding / premium / lite / local */
 export const DEFAULT_FALLBACK_CHAIN: ModelCandidate[] = [
-  { provider: 'xai', model: 'grok-4.3' },
+  { provider: 'xai', model: 'grok-4.7' },
   { provider: 'openai', model: 'gpt-5.4-mini' },
   { provider: 'anthropic', model: DEFAULT_ANTHROPIC_SONNET },
   { provider: 'xai', model: 'grok-4.5' },
@@ -83,7 +86,8 @@ export function normalizeRoutingSettings(
             (c.provider === 'openai' ||
               c.provider === 'anthropic' ||
               c.provider === 'ollama' ||
-              c.provider === 'xai') &&
+              c.provider === 'xai' ||
+              c.provider === 'llamacpp') &&
             typeof c.model === 'string' &&
             c.model.length > 0,
         )

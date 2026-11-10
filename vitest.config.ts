@@ -5,6 +5,8 @@ export default defineConfig({
   test: {
     globals: false,
     environment: 'node',
+    // Login-shell bootstrap for Shell/Hooks can exceed 5s under parallel load.
+    testTimeout: 15_000,
     exclude: ['**/node_modules/**', '**/e2e/**', '**/release/**', '**/out/**'],
     coverage: {
       provider: 'v8',
@@ -51,6 +53,10 @@ export default defineConfig({
       '@codex/agent-core': resolve(__dirname, 'packages/agent-core/src/index.ts'),
       '@codex/indexer': resolve(__dirname, 'packages/indexer/src/index.ts'),
       '@codex/media': resolve(__dirname, 'packages/media/src/index.ts'),
+      // Node 20 (vitest/CI) lacks built-in node:sqlite; Electron 35+ has it.
+      'node:sqlite': resolve(__dirname, 'tests/shims/node-sqlite.ts'),
+      // Outside Electron the `electron` package is just a binary path string.
+      electron: resolve(__dirname, 'tests/shims/electron.ts'),
     },
   },
 })

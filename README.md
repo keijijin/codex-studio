@@ -61,8 +61,8 @@ pnpm typecheck
 
 | プロバイダ | 設定方法 |
 |-----------|----------|
-| OpenAI | 設定画面で API キー |
-| Anthropic | 設定画面で API キー |
+| OpenAI | 設定画面で API キー（OS 秘密ストアへ保存） |
+| Anthropic | 設定画面で API キー（同上） |
 | xAI (Grok) | 設定画面で API キー（環境変数 `XAI_API_KEY` も可） |
 | Ollama | Base URL（既定 `http://localhost:11434`）+ ローカルモデル |
 
@@ -88,12 +88,15 @@ packages/
 | **操作マニュアル（拡張込み）** | [docs/user/操作マニュアル.md](./docs/user/操作マニュアル.md) |
 | **シェル環境・細かい機能メモ** | [docs/11-シェル環境と細かい機能メモ.md](./docs/11-シェル環境と細かい機能メモ.md) |
 | α テスト計画 | [docs/alpha-test-plan.md](./docs/alpha-test-plan.md) |
+| β 安定性チェックリスト | [docs/beta-stability-checklist.md](./docs/beta-stability-checklist.md) |
 | リリース | [docs/release.md](./docs/release.md) / [Releases](https://github.com/keijijin/codex-studio/releases) |
 | セキュリティ | [docs/security-checklist.md](./docs/security-checklist.md) |
+| **セキュリティ改善（企画〜WBS）** | [24](./docs/24-セキュリティ改善企画書.md) · [25](./docs/25-セキュリティ改善プラン.md) · [26](./docs/26-セキュリティ改善設計書.md) · [27](./docs/27-セキュリティ改善-WBS-ToDo.md) · [28](./docs/28-audit-prod-triage.md) |
 | アーキテクチャ | [docs/03-アーキテクチャ定義書.md](./docs/03-アーキテクチャ定義書.md) |
 | エージェント拡張プラン | [docs/08-エージェント拡張プラン.md](./docs/08-エージェント拡張プラン.md) |
 | Phase D 設計ゲート | [docs/09-PhaseD-設計ゲート.md](./docs/09-PhaseD-設計ゲート.md) |
 | マルチモデルルーティング | [docs/10-マルチモデルルーティングプラン.md](./docs/10-マルチモデルルーティングプラン.md) |
+| **Must / Nice 開発プラン** | [docs/21-Must-Nice開発プラン.md](./docs/21-Must-Nice開発プラン.md) |
 | ToDo | [docs/07-TODOリスト.md](./docs/07-TODOリスト.md) |
 
 ## 技術スタック

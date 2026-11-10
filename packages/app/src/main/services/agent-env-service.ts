@@ -4,11 +4,14 @@ import {
   agentEnvCapturedPath,
   agentEnvFilePath,
   loadEnvFile,
-  loadWorkspaceAgentEnv,
   mergeShellEnv,
   parseEnvFile,
+  scrubAgentEnvFile,
+  scrubLoaderEnv,
 } from '@codex/tools'
+import { ensureUtf8LocaleEnv } from '@codex/shared'
 import { workspaceService } from './workspace'
+import { workspaceTrustService } from './workspace-trust'
 
 export interface AgentEnvStatus {
   capturedKeyCount: number
@@ -27,17 +30,20 @@ class AgentEnvService {
 
   /** Apply a captured env map and persist under `.codex/.agent-env.captured`. */
   setCaptured(env: Record<string, string>, workspaceRoot?: string): void {
-    this.overlay = { ...env }
+    // Terminal sync may include PATH (venv etc.); only strip loader hijacks.
+    this.overlay = scrubLoaderEnv(env)
     this.capturedAt = new Date().toISOString()
     const root = workspaceRoot ?? workspaceService.getRoot()
     if (!root) return
+    if (!workspaceTrustService.isTrusted(root)) return
     const path = agentEnvCapturedPath(root)
     try {
       mkdirSync(dirname(path), { recursive: true })
+      // Mode 0600 — avoid world-readable secrets in captured env dumps.
       const body = Object.entries(this.overlay)
         .map(([k, v]) => `${k}=${v}`)
         .join('\n')
-      writeFileSync(path, `${body}\n`, 'utf-8')
+      writeFileSync(path, `${body}\n`, { encoding: 'utf-8', mode: 0o600 })
     } catch {
       // persistence is best-effort; in-memory overlay still applies
     }
@@ -45,7 +51,12 @@ class AgentEnvService {
 
   /** Load previously captured file into memory (e.g. after workspace open). */
   hydrateFromWorkspace(workspaceRoot: string): void {
-    const fromFile = loadEnvFile(agentEnvCapturedPath(workspaceRoot))
+    if (!workspaceTrustService.isTrusted(workspaceRoot)) {
+      this.overlay = {}
+      this.capturedAt = null
+      return
+    }
+    const fromFile = scrubLoaderEnv(loadEnvFile(agentEnvCapturedPath(workspaceRoot)))
     if (Object.keys(fromFile).length === 0) return
     this.overlay = fromFile
     if (!this.capturedAt) {
@@ -73,10 +84,16 @@ class AgentEnvService {
 
   resolve(workspaceRoot?: string | null): NodeJS.ProcessEnv {
     const root = workspaceRoot ?? workspaceService.getRoot()
-    if (!root) {
-      return mergeShellEnv(process.env, this.overlay)
+    const base = ensureUtf8LocaleEnv(process.env)
+    if (!root || !workspaceTrustService.isTrusted(root)) {
+      return mergeShellEnv(base)
     }
-    return mergeShellEnv(process.env, loadWorkspaceAgentEnv(root), this.overlay)
+    return mergeShellEnv(
+      base,
+      scrubAgentEnvFile(loadEnvFile(agentEnvFilePath(root))),
+      scrubLoaderEnv(loadEnvFile(agentEnvCapturedPath(root))),
+      scrubLoaderEnv(this.overlay),
+    )
   }
 
   status(workspaceRoot?: string | null): AgentEnvStatus {

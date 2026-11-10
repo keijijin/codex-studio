@@ -1,13 +1,54 @@
 import { createPortal } from 'react-dom'
 import type { ApprovalRequest } from '@codex/shared'
+import { isMarkdownFile } from '@renderer/utils/files'
 import { FileDiffView, guessLanguageFromPath } from './DiffEditor'
+import { MarkdownRenderer } from './MarkdownRenderer'
 
 interface ApprovalDialogProps {
   request: ApprovalRequest & { sessionId: string }
   onRespond: (approved: boolean) => void
 }
 
-function ContentPreview({ content, label }: { content: string; label?: string }) {
+function MarkdownContentPreview({
+  content,
+  label,
+  baseFilePath,
+}: {
+  content: string
+  label?: string
+  baseFilePath?: string
+}) {
+  return (
+    <div>
+      {label && (
+        <p style={{ margin: '0 0 6px', fontSize: 11, color: '#858585' }}>{label}</p>
+      )}
+      <div
+        className="markdown-body"
+        style={{
+          margin: 0,
+          maxHeight: 360,
+          overflow: 'auto',
+          padding: 12,
+          fontSize: 13,
+          lineHeight: 1.55,
+          backgroundColor: '#1e1e1e',
+          border: '1px solid #3c3c3c',
+          borderRadius: 4,
+          color: '#cccccc',
+        }}
+      >
+        <MarkdownRenderer
+          content={content || '(空)'}
+          baseFilePath={baseFilePath}
+          enableMermaid={false}
+        />
+      </div>
+    </div>
+  )
+}
+
+function PlainContentPreview({ content, label }: { content: string; label?: string }) {
   return (
     <div>
       {label && (
@@ -38,6 +79,8 @@ export function ApprovalDialog({ request, onRespond }: ApprovalDialogProps) {
   const isShell = request.action === 'shell' || request.tool === 'Shell'
   const isCreate = request.action === 'create'
   const showPlainPreview = isCreate || (request.action === 'overwrite' && !request.oldContent)
+  const pathName = request.relativePath || request.path || ''
+  const isMd = isMarkdownFile(pathName)
 
   return createPortal(
     <div
@@ -94,13 +137,32 @@ export function ApprovalDialog({ request, onRespond }: ApprovalDialogProps) {
             このファイルを削除します: {request.relativePath}
           </p>
         ) : showPlainPreview ? (
-          <ContentPreview content={request.newContent} label="作成する内容" />
+          isMd ? (
+            <MarkdownContentPreview
+              content={request.newContent}
+              label="作成する内容（プレビュー）"
+              baseFilePath={request.path}
+            />
+          ) : (
+            <PlainContentPreview content={request.newContent} label="作成する内容" />
+          )
         ) : (
-          <FileDiffView
-            oldContent={request.oldContent}
-            newContent={request.newContent}
-            language={guessLanguageFromPath(request.relativePath)}
-          />
+          <div>
+            <FileDiffView
+              oldContent={request.oldContent}
+              newContent={request.newContent}
+              language={guessLanguageFromPath(request.relativePath)}
+            />
+            {isMd && (
+              <div style={{ marginTop: 12 }}>
+                <MarkdownContentPreview
+                  content={request.newContent}
+                  label="変更後プレビュー（Markdown）"
+                  baseFilePath={request.path}
+                />
+              </div>
+            )}
+          </div>
         )}
 
         <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>

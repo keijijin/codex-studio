@@ -8,11 +8,25 @@ export interface SearchResult {
   text: string
 }
 
+export interface WorkspaceReplaceParams {
+  query: string
+  replacement: string
+  /** Absolute paths to modify. Omit or empty = all matches for query. */
+  paths?: string[]
+}
+
+export interface WorkspaceReplaceResult {
+  filesChanged: number
+  occurrences: number
+  files: string[]
+  errors: string[]
+}
+
 export interface ChatSendParams {
   sessionId: string
   content: string
   attachments?: Attachment[]
-  mode?: 'ask' | 'agent'
+  mode?: 'ask' | 'agent' | 'plan'
   /** Open editor paths for Rules glob matching */
   contextPaths?: string[]
 }
@@ -28,6 +42,21 @@ export type ChatStreamEvent =
       model: string
       reason: string
       mode: 'fixed' | 'auto' | 'fallback-only'
+    }
+  | {
+      type: 'persona_applied'
+      personaId: string
+      personaName: string
+    }
+  | {
+      type: 'team_stage'
+      stage: import('./ceo-approval').TeamPipelineStage
+      teamId: string
+      detail?: string
+    }
+  | {
+      type: 'ceo_approval_required'
+      request: import('./ceo-approval').CeoApprovalRequest
     }
   | {
       type: 'retrying'
@@ -46,5 +75,6 @@ export type ChatStreamEvent =
         latencyMs: number
         estimatedCostUsd: number
       }
+      trace?: import('./personas').TurnTrace
     }
   | { type: 'error'; message: string }

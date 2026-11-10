@@ -33,6 +33,63 @@ export async function findFfmpeg(envPath?: string): Promise<string | null> {
   return null
 }
 
+/** Probe media duration in seconds via ffprobe (same prefix as ffmpeg when possible). */
+export async function probeMediaDurationSec(
+  ffmpegBin: string,
+  mediaPath: string,
+  signal?: AbortSignal,
+): Promise<number | null> {
+  const ffprobe = ffmpegBin.replace(/ffmpeg(\.exe)?$/i, (_m, exe) =>
+    exe ? 'ffprobe.exe' : 'ffprobe',
+  )
+  const candidates = [ffprobe, 'ffprobe', '/opt/homebrew/bin/ffprobe', '/usr/local/bin/ffprobe']
+  for (const bin of candidates) {
+    try {
+      const duration = await new Promise<number | null>((resolve) => {
+        const child = spawn(
+          bin,
+          [
+            '-v',
+            'error',
+            '-show_entries',
+            'format=duration',
+            '-of',
+            'default=noprint_wrappers=1:nokey=1',
+            mediaPath,
+          ],
+          { stdio: ['ignore', 'pipe', 'ignore'] },
+        )
+        let out = ''
+        child.stdout?.on('data', (d) => {
+          out += String(d)
+        })
+        const onAbort = () => {
+          child.kill('SIGTERM')
+          resolve(null)
+        }
+        signal?.addEventListener('abort', onAbort, { once: true })
+        child.on('error', () => {
+          signal?.removeEventListener('abort', onAbort)
+          resolve(null)
+        })
+        child.on('exit', (code) => {
+          signal?.removeEventListener('abort', onAbort)
+          if (code !== 0) {
+            resolve(null)
+            return
+          }
+          const n = Number.parseFloat(out.trim())
+          resolve(Number.isFinite(n) && n > 0 ? n : null)
+        })
+      })
+      if (duration != null) return duration
+    } catch {
+      // try next
+    }
+  }
+  return null
+}
+
 function run(
   bin: string,
   args: string[],
@@ -246,6 +303,6 @@ export async function concatClips(options: {
   )
 }
 
-export function videoWorkDir(workspaceRoot: string, slug: string, outputDirRel = '.codex/video'): string {
+export function videoWorkDir(workspaceRoot: string, slug: string, outputDirRel = 'videos'): string {
   return join(workspaceRoot, outputDirRel, slug)
 }

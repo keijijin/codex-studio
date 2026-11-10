@@ -1,5 +1,10 @@
 import { resolve } from 'node:path'
-import type { LLMProviderId, PermissionProfile, RoutingMode } from '@codex/shared'
+import {
+  normalizePermissionProfile,
+  type LLMProviderId,
+  type PermissionProfile,
+  type RoutingMode,
+} from '@codex/shared'
 
 export type CliCommand = 'agent' | 'team-list' | 'team-run' | 'help'
 
@@ -21,6 +26,7 @@ export interface CliArgs {
 function defaultModel(provider: LLMProviderId): string {
   if (provider === 'anthropic') return 'claude-sonnet-4-6'
   if (provider === 'ollama') return 'llama3.2'
+  if (provider === 'llamacpp') return 'Qwen-AgentWorld-35B-A3B-UD-Q4_K_M.gguf'
   if (provider === 'xai') return 'grok-4.5'
   return 'gpt-4o'
 }
@@ -61,7 +67,13 @@ function parseSharedOptions(args: string[]): Omit<CliArgs, 'command' | 'prompt' 
       workspace = resolve(args.shift() ?? process.cwd())
     } else if (token === '-p' || token === '--provider') {
       const p = (args.shift() ?? 'openai') as LLMProviderId
-      if (p !== 'openai' && p !== 'anthropic' && p !== 'ollama' && p !== 'xai') {
+      if (
+        p !== 'openai' &&
+        p !== 'anthropic' &&
+        p !== 'ollama' &&
+        p !== 'llamacpp' &&
+        p !== 'xai'
+      ) {
         throw new Error(`Unknown provider: ${p}`)
       }
       provider = p
@@ -69,10 +81,11 @@ function parseSharedOptions(args: string[]): Omit<CliArgs, 'command' | 'prompt' 
       model = args.shift() ?? ''
     } else if (token === '--profile') {
       const name = args.shift() ?? 'readonly'
-      if (name !== 'readonly' && name !== 'ask' && name !== 'allow') {
-        throw new Error(`Unknown profile: ${name}`)
+      const normalized = normalizePermissionProfile(name)
+      if (!normalized) {
+        throw new Error(`Unknown profile: ${name}. Use readonly | coding | yolo`)
       }
-      profile = name
+      profile = normalized
     } else if (token === '--routing') {
       const mode = (args.shift() ?? 'fixed') as RoutingMode
       if (mode !== 'fixed' && mode !== 'auto' && mode !== 'fallback-only') {
@@ -98,7 +111,7 @@ function parseSharedOptions(args: string[]): Omit<CliArgs, 'command' | 'prompt' 
     workspace,
     provider,
     model: model || defaultModel(provider),
-    profile: yolo ? 'allow' : profile,
+    profile: yolo ? 'yolo' : profile,
     yolo,
     maxIterations,
     json,

@@ -4,7 +4,17 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { AgentOrchestrator } from '@codex/agent-core'
 import type { AgentStreamChunk, LLMProvider } from '@codex/llm-adapters'
-import { ToolRegistry, readTool, grepTool, globTool, writeTool, strReplaceTool, deleteTool, shellTool } from '@codex/tools'
+import {
+  ToolRegistry,
+  createWorkspaceFs,
+  readTool,
+  grepTool,
+  globTool,
+  writeTool,
+  strReplaceTool,
+  deleteTool,
+  shellTool,
+} from '@codex/tools'
 import { AGENT_BENCHMARK_CASES } from '../benchmarks/agent-cases'
 
 function buildProviderForCase(
@@ -72,6 +82,7 @@ describe('Agent benchmark (20 cases, mock LLM)', () => {
       const events: string[] = []
       const toolsUsed: string[] = []
 
+      const fs = createWorkspaceFs(workspaceRoot)
       for await (const event of orchestrator.run(
         [{ role: 'user', content: benchmark.prompt }],
         {
@@ -83,7 +94,8 @@ describe('Agent benchmark (20 cases, mock LLM)', () => {
           enabledTools: ['Read', 'Grep', 'Glob', 'Write', 'StrReplace', 'Delete', 'Shell'],
           yoloMode: true,
           signal: new AbortController().signal,
-          resolvePath: (p) => join(workspaceRoot, p),
+          fs,
+          resolvePath: (p) => fs.resolve(p),
           getRelativePath: (p) => p.replace(`${workspaceRoot}/`, '').replace(`${workspaceRoot}\\`, ''),
         },
       )) {

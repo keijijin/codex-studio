@@ -12,7 +12,7 @@ Output ONLY valid JSON (no markdown fences).
 Schema: { "title": string, "themeId": "midnight"|"paper"|"forest"|"coral", "slides": Slide[] }
 Slide: {
   "id": "01",
-  "layout": "title"|"section"|"bullets"|"two_column"|"code"|"quote"|"closing",
+  "layout": "title"|"section"|"bullets"|"two_column"|"code"|"diagram"|"quote"|"closing",
   "title": string,
   "subtitle"?: string,
   "bullets"?: string[],
@@ -29,7 +29,8 @@ Slide: {
 Craft rules:
 - One message per slide. Max 5 bullets preferred (hard max 7). Each bullet ≤ 40 chars when possible.
 - Vary layouts: use section for chapter breaks, two_column for contrasts, quote for a key insight, code for real snippets.
-- code layout: copy code ONLY from the source markdown fences (never invent).
+- code layout: copy code ONLY from the source markdown fences (never invent). Use for sql/ts/js/etc.
+- diagram layout: REQUIRED for \`\`\`mermaid fences. Put the mermaid source in "code" and set "codeLanguage":"mermaid". Never paste mermaid as plain code text on a code slide.
 - Always start with title and end with closing (next steps / CTA).
 - Speaker notes: what to say aloud (1–3 sentences), not a paste of bullets.
 - Language: Japanese if source is Japanese, else English.

@@ -9,6 +9,7 @@ import type {
   StreamChunk,
   ToolCall,
 } from './types'
+import type OpenAI from 'openai'
 import { parseToolArguments } from './types'
 import { toOpenAIMessages } from './openai-messages'
 import { createOpenAIClient } from './create-clients'
@@ -22,9 +23,27 @@ export class OpenAIProvider implements LLMProvider {
     const client = createOpenAIClient({ apiKey: options.apiKey })
 
     try {
+      const mapped: OpenAI.Chat.ChatCompletionMessageParam[] = messages.map((m) => {
+        if (m.role === 'system') {
+          return {
+            role: 'system',
+            content: typeof m.content === 'string' ? m.content : m.content.map((p) => (p.type === 'text' ? p.text : '')).join('\n'),
+          }
+        }
+        if (m.role === 'assistant') {
+          return {
+            role: 'assistant',
+            content: typeof m.content === 'string' ? m.content : m.content.map((p) => (p.type === 'text' ? p.text : '')).join('\n'),
+          }
+        }
+        return {
+          role: 'user',
+          content: m.content,
+        }
+      })
       const stream = await client.chat.completions.create({
         model: options.model,
-        messages: messages.map((m) => ({ role: m.role, content: m.content })),
+        messages: mapped,
         stream: true,
         stream_options: { include_usage: true },
         ...openAiMaxOutputParams(options.maxTokens),

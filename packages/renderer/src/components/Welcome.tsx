@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { IPC_CHANNELS } from '@codex/shared'
 import { useAppStore } from '@renderer/store/app-store'
 import { SettingsForm } from './SettingsDialog'
 import { hasCodexApi } from './ErrorBoundary'
@@ -14,7 +13,7 @@ export function Welcome() {
 
   useEffect(() => {
     if (!ipcReady) return
-    void window.codex.invoke(IPC_CHANNELS.WORKSPACE_RECENT_LIST).then(setRecentWorkspaces)
+    void window.codex.workspace.recentList().then(setRecentWorkspaces)
   }, [ipcReady])
 
   return (
@@ -26,8 +25,7 @@ export function Welcome() {
         backgroundColor: '#1e1e1e',
         color: '#cccccc',
         padding: '48px 24px',
-        boxSizing: 'border-box',
-      }}
+        boxSizing: 'border-box' }}
     >
       <div style={{ maxWidth: 520, margin: '0 auto' }}>
         <div style={{ textAlign: 'center' }}>
@@ -45,8 +43,7 @@ export function Welcome() {
                 color: '#fca5a5',
                 backgroundColor: '#450a0a',
                 borderRadius: 6,
-                border: '1px solid #991b1b',
-              }}
+                border: '1px solid #991b1b' }}
             >
               バックエンドとの接続に失敗しました。ターミナルで Ctrl+C → pnpm dev を再実行してください。
             </p>
@@ -66,8 +63,7 @@ export function Welcome() {
               border: 'none',
               borderRadius: 8,
               cursor: isLoading ? 'wait' : 'pointer',
-              opacity: isLoading ? 0.6 : 1,
-            }}
+              opacity: isLoading ? 0.6 : 1 }}
           >
             {isLoading ? 'Opening...' : 'Open Folder'}
           </button>
@@ -94,8 +90,7 @@ export function Welcome() {
                         textAlign: 'left',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
+                        whiteSpace: 'nowrap' }}
                       title={path}
                     >
                       {path}
@@ -117,8 +112,7 @@ export function Welcome() {
                 backgroundColor: 'transparent',
                 border: '1px solid #3c3c3c',
                 borderRadius: 6,
-                cursor: 'pointer',
-              }}
+                cursor: 'pointer' }}
             >
               {showSettings ? '▲ API キー設定を閉じる' : '▼ API キー設定を開く'}
             </button>

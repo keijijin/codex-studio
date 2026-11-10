@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { ToolRegistry, readTool } from '@codex/tools'
-import { resolveWithinWorkspace, type ToolContext } from '@codex/tools'
+import { ToolRegistry, createWorkspaceFs, readTool, type ToolContext } from '@codex/tools'
 
 function createCtx(root: string): ToolContext {
+  const fs = createWorkspaceFs(root)
   return {
     workspaceRoot: root,
     sessionId: 'test',
     signal: new AbortController().signal,
     executeMode: 'apply',
-    resolvePath: (p) => resolveWithinWorkspace(root, p),
+    fs,
+    resolvePath: (p) => fs.resolve(p),
     getRelativePath: (p) => p.replace(`${root}/`, ''),
   }
 }

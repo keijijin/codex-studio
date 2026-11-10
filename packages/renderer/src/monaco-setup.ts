@@ -8,6 +8,7 @@ import htmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker'
 import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
 
 export const CODEX_EDITOR_THEME = 'codex-dark'
+export const CODEX_EDITOR_THEME_LIGHT = 'codex-light'
 
 self.MonacoEnvironment = {
   getWorker(_: unknown, label: string) {
@@ -74,5 +75,30 @@ monaco.editor.defineTheme(CODEX_EDITOR_THEME, {
     'editorIndentGuide.activeBackground': '#707070',
     'editorBracketMatch.background': '#00640080',
     'editorBracketMatch.border': '#888888',
+  },
+})
+
+monaco.editor.defineTheme(CODEX_EDITOR_THEME_LIGHT, {
+  base: 'vs',
+  inherit: true,
+  rules: [
+    { token: 'tag', foreground: '267F99', fontStyle: 'bold' },
+    { token: 'attribute.name', foreground: '0451A5' },
+    { token: 'attribute.value', foreground: 'A31515' },
+    { token: 'keyword', foreground: '0000FF', fontStyle: 'bold' },
+    { token: 'string', foreground: 'A31515' },
+    { token: 'comment', foreground: '008000', fontStyle: 'italic' },
+    { token: 'number', foreground: '098658' },
+  ],
+  colors: {
+    'editor.background': '#ffffff',
+    'editorLineNumber.foreground': '#237893',
+    'editorLineNumber.activeForeground': '#0b216f',
+    'editorCursor.foreground': '#000000',
+    'editor.selectionBackground': '#add6ff',
+    'editor.inactiveSelectionBackground': '#e5ebf1',
+    'editor.lineHighlightBackground': '#f3f3f3',
+    'editorIndentGuide.background': '#d3d3d3',
+    'editorIndentGuide.activeBackground': '#939393',
   },
 })

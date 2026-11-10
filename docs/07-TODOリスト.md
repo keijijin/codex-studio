@@ -2,11 +2,15 @@
 
 | 項目 | 内容 |
 |------|------|
-| 版 | 1.0 |
+| 版 | 1.2 |
 | 作成日 | 2026-07-15 |
-| 更新日 | 2026-07-18（Shell 環境同期・細かい機能メモ追加） |
+| 更新日 | 2026-11-09（セキュリティ改善イニシアチブ文書への参照を追加） |
 
 > ステータス: `[ ]` 未着手 / `[~]` 進行中 / `[x]` 完了 / `[-]` キャンセル
+
+> **セキュリティ・品質改善（2026-11〜）の ToDo / WBS 正本:**  
+> [27-セキュリティ改善-WBS-ToDo](./27-セキュリティ改善-WBS-ToDo.md)  
+> 関連: [24-企画](./24-セキュリティ改善企画書.md) · [25-プラン](./25-セキュリティ改善プラン.md) · [26-設計](./26-セキュリティ改善設計書.md)
 
 ---
 
@@ -410,10 +414,125 @@
 
 ---
 
+## Phase L: LINE × K8s（将来）
+
+詳細: [14-LINE-K8sエージェント将来プラン.md](./14-LINE-K8sエージェント将来プラン.md) / [15](./15-Personas-トレース-権限プリセット.md) / [18 L1](./18-L1-LINE通知設計.md) / [19 L2](./19-L2-K8s-Headless設計.md)
+
+- [x] L0: Personas V1 + ターン単位トレース + 権限プリセット（readonly / coding / yolo）
+- [x] Personas AI V1.1: セッション sticky / ピッカー / CRUD / clear — [16](./16-PersonasAIプラン.md)
+- [x] バーチャル会社: 多段パイプライン + 社長承認 UI + 実装実行 — [17](./17-バーチャル会社.md)
+- [ ] L1: LINE 通知（onAgentComplete → Push） — [18](./18-L1-LINE通知設計.md)
+- [ ] L2: K8s Headless — [19](./19-L2-K8s-Headless設計.md)
+- [ ] L3: LINE フル Agent（承認付き）
+- [ ] L4: 硬化（監査・キルスイッチ・コスト）
+
+---
+
+## Phase M: Must Have（IDE 基盤・配布・安全）
+
+詳細: [21-Must-Nice開発プラン.md](./21-Must-Nice開発プラン.md)  
+目標: β（日常 dogfood + 安全な配布）。目安 8〜12 週。
+
+### M0 — 安定化と `.gitignore`
+
+- [x] M0-1: 索引 / Explorer / Watcher / Glob が `.gitignore` を尊重（ビルド成果物は既定除外＋表示トグル）
+- [x] M0-2: 重いディレクトリ浅走査（`.app` / build outputs）+ PathIgnore テスト
+- [x] M0-3: ストリーム中はプレーンテキスト（Markdown/Mermaid 再描画回避）— 既存対応を維持
+- [x] M0-4: 承認ダイアログを Layout 常時マウント — 既存対応を維持
+
+### M1 — Git / 検索置換 / 分割ペイン
+
+- [x] M1-A1: Source Control サイドバー（変更一覧）— Diff ビューは後続
+- [x] M1-A2: ステージ / アンステージ / コミット（エラーメッセージ表示）
+- [x] M1-A3: StatusBar ブランチ表示・切替（確認付き）
+- [x] M1-A4: Agent 向け Git コンテキスト（`GitStatus` Tool）
+- [x] M1-A5: 危険 Git 操作のガード（checkout の不正引数拒否）— force/hard は未提供
+- [x] M1-B1: ファイル内 Find / Replace（Monaco Cmd/Ctrl+F / H）
+- [x] M1-B2: ワークスペース検索 UI 強化（プレビュー・件数・ファイル単位）
+- [x] M1-B3: ワークスペース Replace（確認付き・gitignore 尊重）
+- [x] M1-C1: エディタ左右 2 ペイン分割
+- [x] M1-C2: アクティブペインと Open 連携（Diff 適用先の明示は後続）
+
+### M2 — コンテキスト・Plan・永続化
+
+- [x] M2-1: `@folder` 添付（トークン上限付き）
+- [x] M2-2: `@codebase` キーワード版（ripgrep / 索引）
+- [x] M2-3: Plan モード（読取寄り → 承認後 Agent）
+- [x] M2-4: セッション / メッセージの SQLite 移行＋移行スクリプト（`node:sqlite` / sessions.db）
+- [x] M2-5: 履歴コンパクション強化（巨大 tool result トリム + UI「履歴を圧縮」）
+
+### M3 — 配布・更新・秘密情報
+
+- [x] M3-1: API キーの OS Keychain / Credential 保存＋移行（`safeStorage`）
+- [x] M3-2: electron-updater（GitHub Releases）
+- [x] M3-3: macOS 公証・staple（CI で Secrets があるとき `notarize=true`）
+- [x] M3-4: [release.md](./release.md) に公証・updater 手順追記
+- [x] M3-5: α→β 安定性チェックリスト（[beta-stability-checklist.md](./beta-stability-checklist.md)）
+
+**マイルストーン**
+
+- [x] β-1: M0 + M1 完了（Git 付きで本リポジトリを日常開発）
+- [x] β-2: M2 + M3 完了（Keychain + 自動更新 + 公証手順）
+
+---
+
+## Phase N: Nice to Have（差別化・拡張）
+
+詳細: [21-Must-Nice開発プラン.md](./21-Must-Nice開発プラン.md)  
+Must（Phase M）完了後または需要に応じて並行。
+
+### N1 — MCP
+
+- [x] N1-1: `packages/mcp-client`（stdio）
+- [x] N1-2: MCP ツール → Tool Registry＋権限
+- [x] N1-3: MCP 設定 UI
+- [ ] N1-4: （任意）SSE / HTTP トランスポート
+
+### N2 — Tab 補完 + LSP
+
+- [x] N2-1: Inline completion Provider（デバウンス・キャンセル・上限）
+- [x] N2-2: Ghost text UI（Tab / Esc）
+- [x] N2-3: LSP 基礎（例: TypeScript 定義ジャンプ・診断）— Monaco 内蔵 TS/JS worker（外部 tsserver は将来）
+- [x] N2-4: Agent ストリームとのフォーカス競合ルール
+
+### N3 — セマンティック検索
+
+- [x] N3-1: チャンク＋ Embedding（gitignore 尊重・増分）
+- [x] N3-2: ローカルベクトルストア
+- [x] N3-3: `@codebase` semantic モード（M2-2 と切替）
+- [x] N3-4: 初回索引 UX（進捗・キャンセル・容量）— 統計 / 再索引（最大80）ボタン
+
+### N4 — UX ポリッシュ
+
+- [x] N4-1: ライトテーマ
+- [x] N4-2: キーバインドカスタマイズ
+- [x] N4-3: マルチルートワークスペース
+- [x] N4-4: チャット画像添付（ビジョンモデル時）
+- [ ] N4-5: メディア V2（進捗 UI 等）— [12](./12-動画生成プラン.md) / [13](./13-プレゼン生成プラン.md)
+
+### N5 — エンタープライズ種まき
+
+- [x] N5-1: 監査ログエクスポート強化
+- [x] N5-2: SSO / OIDC 設計書（実装は需要ゲート後）— [22](./22-SSO-OIDC設計.md)
+- [x] N5-3: チーム Rules 共有設計 — [23](./23-チームRules共有設計.md)
+- [ ] N5-4: クラウド Agent — [09](./09-PhaseD-設計ゲート.md)
+- [ ] N5-5: LINE / K8s — Phase L に委譲
+
+**マイルストーン**
+
+- [x] γ: N1 + N2（MCP + Tab で体験の一段引き上げ）
+
+---
+
 ## メモ・決定事項
 
 | 日付 | 内容 |
 |------|------|
+| **2026-08-08** | **Phase N 実装**（MCP / Tab 補完 / セマンティック検索 / ライトテーマ / マルチルート / 画像 / 監査エクスポート / SSO・チームRules設計）。残: N1-4 SSE、N4-5 メディア V2、N5-4/5 |
+| **2026-08-07** | **Must/Nice 開発プラン策定**（[21](./21-Must-Nice開発プラン.md)）。Phase M（IDE・配布・安全）→ Phase N（MCP/Tab/意味検索等）。LINE/メディア V2/Cloud は既存プランへ委譲 |
+| **2026-08-03** | **バーチャル会社**: 営業・法務・技術→社長判断（プラン 17） |
+| **2026-08-03** | **Personas AI V1.1**: sticky・ピッカー・設定 CRUD（プラン 16） |
+| **2026-08-03** | **L0 完了**: Personas / ターン単位トレース / 権限プリセット（プラン 14・15） |
 | **2026-07-30** | **メディア品質改善**（resvg・日本語タイポ・Director・heuristic 多様化） |
 | **2026-07-29** | **プレゼン生成 V1 実装**（PPTX / GeneratePresentation / 4 テーマ） |
 | **2026-07-29** | **プレゼンは Agent-native Deck。Canva/Gamma API 外注は本線にしない**（プラン 13） |
@@ -438,3 +557,8 @@
 | | **順序: R1 フォールバック → R2 ヒューリスティック → R3 UI → R4 高度化** |
 | **2026-07-18** | **Agent Shell のログインプロファイル自動読込を実装** |
 | | **ターミナル環境同期 + `.codex/agent.env`（文書: [11](./11-シェル環境と細かい機能メモ.md)）** |
+| **2026-11-09** | **セキュリティ改善イニシアチブ文書を追加（24〜27）** |
+| | **再発防止（WorkspaceFs / E2E / preview-apply）を配布前の主軸とする** |
+| **2026-11-09** | **S1 着手完了**: `tests/security`、E2E `window.codex` / `workspace:open`、PR テンプレ |
+| | **WorkspaceFs スケルトン**、audit 分類（28）、ローカル LLM 性能最適化を実装 |
+| | **正本 ToDo**: [27-セキュリティ改善-WBS-ToDo](./27-セキュリティ改善-WBS-ToDo.md) |

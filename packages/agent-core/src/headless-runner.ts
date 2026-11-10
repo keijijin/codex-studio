@@ -1,20 +1,35 @@
-import { relative, resolve } from 'path'
+import { readFileSync } from 'fs'
+import { homedir } from 'os'
+import { join, relative, resolve } from 'path'
 import type { AgentMessage, LLMProvider } from '@codex/llm-adapters'
 import { getProviderInstance } from '@codex/llm-adapters'
 import {
   DEFAULT_AGENT_PERMISSIONS,
   PERMISSION_PROFILES,
+  createDefaultPathIgnore,
   type AgentPermissions,
   type LLMProviderId,
   type PermissionProfile,
 } from '@codex/shared'
-import { defaultToolRegistry, resolveWithinWorkspace, resolveAgentShellEnv } from '@codex/tools'
+import {
+  createWorkspaceFs,
+  defaultToolRegistry,
+  resolveWithinWorkspace,
+  resolveAgentShellEnv,
+} from '@codex/tools'
 import {
   collectSkills,
   formatSkillPrompt,
   formatSkillUserMessage,
   parseSkillInvocation,
 } from './skills-loader'
+import {
+  collectPersonas,
+  findPersona,
+  formatPersonaPrompt,
+  formatPersonaUserMessage,
+  parsePersonaInvocation,
+} from './personas-loader'
 import { loadProjectContext } from './project-context'
 import { loadRules } from './rules-loader'
 import { loadMemory, appendMemoryNote } from './memory'
@@ -34,6 +49,7 @@ const ALL_TOOLS = [
   'Read',
   'Grep',
   'Glob',
+  'GitStatus',
   'Write',
   'StrReplace',
   'Delete',
@@ -67,6 +83,8 @@ export interface HeadlessAgentOptions {
   runwayApiKey?: string
   /** Presentation generation settings (GeneratePresentation) */
   presentation?: import('@codex/shared').PresentationSettings
+  /** Default persona when prompt has no `/persona` */
+  defaultPersona?: string
   signal?: AbortSignal
   onEvent?: (event: AgentOrchestratorEvent) => void
   /** Inject LLM for tests */
@@ -109,6 +127,20 @@ export async function runHeadlessAgent(
 
   let prompt = options.prompt
   let skillPrompt: string | undefined
+  let personaPrompt: string | undefined
+
+  const globalPersonas = join(homedir(), '.codex-studio', 'personas')
+  const personas = await collectPersonas(workspaceRoot, {
+    globalPersonasDir: globalPersonas,
+  })
+  const personaMatch = parsePersonaInvocation(prompt, personas)
+  if (personaMatch) {
+    personaPrompt = formatPersonaPrompt(personaMatch.persona)
+    prompt = personaMatch.args || formatPersonaUserMessage(personaMatch.persona, '')
+  } else if (options.defaultPersona) {
+    const persona = findPersona(personas, options.defaultPersona)
+    if (persona) personaPrompt = formatPersonaPrompt(persona)
+  }
 
   const skills = await collectSkills(workspaceRoot)
   const skillMatch = parseSkillInvocation(prompt, skills)
@@ -128,6 +160,22 @@ export async function runHeadlessAgent(
   const events: AgentOrchestratorEvent[] = []
   let text = ''
 
+  let gitignoreContent = ''
+  try {
+    gitignoreContent = readFileSync(join(workspaceRoot, '.gitignore'), 'utf-8')
+  } catch {
+    gitignoreContent = ''
+  }
+  const pathIgnore = createDefaultPathIgnore({
+    gitignoreContent,
+    showBuildOutputs: false,
+  })
+
+  const workspaceFs = createWorkspaceFs(workspaceRoot)
+  const workspaceTrusted =
+    process.env.CODEX_TRUST_WORKSPACE === '1' ||
+    Boolean(process.env.CODEX_E2E_WORKSPACE) ||
+    process.env.CODEX_CLI_TRUST_WORKSPACE === '1'
   const ctx: AgentRunContext = {
     workspaceRoot,
     sessionId: `headless-${Date.now()}`,
@@ -137,15 +185,34 @@ export async function runHeadlessAgent(
     maxIterations: options.maxIterations ?? 50,
     enabledTools: ALL_TOOLS,
     yoloMode,
-    permissions,
+    permissions: workspaceTrusted
+      ? permissions
+      : {
+          ...permissions,
+          network: permissions.network === 'deny' ? 'deny' : 'ask',
+        },
+    secretReadPolicy: workspaceTrusted ? 'ask' : 'deny',
     signal,
-    resolvePath: (p) => resolveWithinWorkspace(workspaceRoot, p),
+    fs: workspaceFs,
+    resolvePath: (p) => workspaceFs.resolve(p),
     getRelativePath: (absolutePath) =>
       relative(workspaceRoot, absolutePath).replace(/\\/g, '/'),
+    isIgnoredPath: (rel) => pathIgnore.ignores(rel),
     rulesPrompt,
     skillPrompt,
+    personaPrompt,
     subagentDepth: 0,
-    getShellEnv: () => resolveAgentShellEnv(workspaceRoot),
+    getShellEnv: () => {
+      // CLI/headless has no trust dialog — only apply workspace overlays when explicitly trusted.
+      if (
+        process.env.CODEX_TRUST_WORKSPACE === '1' ||
+        process.env.CODEX_E2E_WORKSPACE ||
+        process.env.CODEX_CLI_TRUST_WORKSPACE === '1'
+      ) {
+        return resolveAgentShellEnv(workspaceRoot)
+      }
+      return { ...process.env }
+    },
     getVideoConfig: () => ({
       video: options.video ?? {
         enabled: true,
@@ -155,7 +222,7 @@ export async function runHeadlessAgent(
         ttsVoice: 'alloy',
         maxShots: 12,
         maxGenerativeShots: 4,
-        outputDir: '.codex/video',
+        outputDir: 'videos',
         runwayApiKey: options.runwayApiKey,
       },
       openaiApiKey: options.apiKey || process.env.OPENAI_API_KEY,
@@ -170,7 +237,7 @@ export async function runHeadlessAgent(
         themeId: 'midnight' as const,
         maxSlides: 16,
         includeNotes: true,
-        outputDir: '.codex/presentation',
+        outputDir: 'presentations',
       },
       openaiApiKey: options.apiKey || process.env.OPENAI_API_KEY,
     }),
@@ -201,10 +268,19 @@ export async function runHeadlessAgent(
       }
     },
     runTeam: async ({ teamId, prompt: teamPrompt }) => {
-      const teams = await collectTeams(workspaceRoot)
+      const teams = await collectTeams(workspaceRoot, {
+        extraTeamsDirs: [
+          join(homedir(), '.codex-studio', 'teams'),
+          join(process.cwd(), '.codex', 'teams'),
+        ],
+      })
       const team = findTeam(teams, teamId)
       if (!team) {
-        return { success: false, output: `Error: unknown team "${teamId}"` }
+        const available = teams.map((t) => t.id).join(', ') || '(none)'
+        return {
+          success: false,
+          output: `Error: unknown team "${teamId}". Available: ${available}`,
+        }
       }
       const result = await runTeam({
         workspaceRoot,
@@ -221,6 +297,7 @@ export async function runHeadlessAgent(
           relative(workspaceRoot, absolutePath).replace(/\\/g, '/'),
         rulesPrompt,
         maxConcurrency: options.maxSubagents ?? 3,
+        globalPersonasDir: globalPersonas,
       })
       return {
         success: result.success,

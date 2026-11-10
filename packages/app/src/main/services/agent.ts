@@ -2,7 +2,7 @@ import { BrowserWindow } from 'electron'
 import { AgentOrchestrator } from '@codex/agent-core'
 import type { AgentMessage } from '@codex/llm-adapters'
 import { getProviderInstance, isConnectionError, isRetryableError } from '@codex/llm-adapters'
-import { defaultToolRegistry } from '@codex/tools'
+import { createWorkspaceFs, defaultToolRegistry } from '@codex/tools'
 import type { WebContents } from 'electron'
 import {
   IPC_EVENTS,
@@ -13,10 +13,15 @@ import {
   type Message,
   type ToolCallRecord,
 } from '@codex/shared'
+import { langfuseService } from './langfuse-service'
 import { approvalService } from './approval'
+import { ceoApprovalService } from './ceo-approval'
 import { agentEnvService } from './agent-env-service'
 import { createE2eMockAgentProvider } from './e2e-mock-agent'
 import {
+  effectiveCompactTokenBudget,
+  effectiveMaxOutputTokens,
+  effectiveMaxSubagents,
   formatLlmConnectionError,
   missingApiKeyMessage,
   noteProviderConnectionFailure,
@@ -28,25 +33,29 @@ import { formatSkillPrompt, formatSkillUserMessage } from '@codex/agent-core'
 import {
   appendMemoryNote,
   createConcurrencyLimiter,
-  findTeam,
-  collectTeams,
   runSubagentTask,
-  runTeam,
   sanitizeToolMessagePairs,
 } from '@codex/agent-core'
-import { DEFAULT_AGENT_PERMISSIONS } from '@codex/shared'
+import { DEFAULT_AGENT_PERMISSIONS, type TurnTrace } from '@codex/shared'
 import { skillsService } from './skills-service'
+import { personasService } from './personas-service'
 import { teamsService } from './teams-service'
 import { rulesService } from './rules-service'
 import { hooksService } from './hooks-service'
+import { fileWatcherService } from './file-watcher'
 import { sessionService, settingsService } from './settings'
 import { workspaceService } from './workspace'
+import { workspaceTrustService } from './workspace-trust'
+import { pathIgnoreService } from './path-ignore-service'
 import { assertUnderDailyBudget, recordLlmTurn } from './usage-helpers'
+import { formatAttachments, materializeAttachments } from './attachment-context'
+import { mcpService } from './mcp-service'
 
 const ALL_AGENT_TOOLS = [
   'Read',
   'Grep',
   'Glob',
+  'GitStatus',
   'Write',
   'StrReplace',
   'Delete',
@@ -57,7 +66,19 @@ const ALL_AGENT_TOOLS = [
   'MemoryAppend',
   'GenerateVideo',
   'GeneratePresentation',
+  '*mcp*',
 ]
+
+const PLAN_TOOLS = ['Read', 'Grep', 'Glob', 'GitStatus'] as const
+
+const PLAN_PERMISSIONS = {
+  read: 'allow' as const,
+  edit: 'deny' as const,
+  shell: 'deny' as const,
+  network: 'deny' as const,
+  media: 'deny' as const,
+  mcp: 'deny' as const,
+}
 
 export class AgentService {
   private abortControllers = new Map<string, AbortController>()
@@ -67,17 +88,37 @@ export class AgentService {
     this.abortControllers.get(sessionId)?.abort()
     this.abortControllers.delete(sessionId)
     approvalService.cancelAll(sessionId)
+    ceoApprovalService.cancelAll(sessionId)
   }
 
   respondApproval(sessionId: string, toolCallId: string, approved: boolean): void {
     approvalService.respond(sessionId, toolCallId, approved)
   }
 
+  respondCeoApproval(
+    sessionId: string,
+    approvalId: string,
+    response: import('@codex/shared').CeoApprovalResponse,
+  ): void {
+    teamsService.respondCeoApproval(sessionId, approvalId, response)
+  }
+
   async run(params: ChatSendParams, webContents: WebContents): Promise<void> {
-    const { sessionId, attachments = [] } = params
+    const { sessionId } = params
     let content = params.content
+    const isPlan = params.mode === 'plan'
+    const attachments = await materializeAttachments(params.attachments ?? [], content)
     const settings = settingsService.get()
     const root = workspaceService.getRoot()
+
+    // Refresh MCP tools (best-effort; failures surface in MCP status)
+    if (!isPlan && (settings.mcpServers?.length ?? 0) > 0) {
+      try {
+        await mcpService.syncFromSettings(settings.mcpServers)
+      } catch (err) {
+        console.warn('[agent] MCP sync failed', err)
+      }
+    }
 
     if (!root) {
       this.emit(webContents, sessionId, {
@@ -93,13 +134,62 @@ export class AgentService {
       return
     }
 
-    const skillMatch = await skillsService.matchInvocation(content)
+    let personaPrompt: string | undefined
+    let activePersona: { id: string; name: string } | undefined
+    const session = sessionService.getSession(sessionId)
+    const personaMatch = await personasService.matchInvocation(content)
+    if (personaMatch?.clear) {
+      sessionService.setPersona(sessionId, undefined)
+      if (!personaMatch.args) {
+        sessionService.addMessage(sessionId, {
+          sessionId,
+          role: 'user',
+          content: '/persona clear',
+        })
+        const saved = sessionService.addMessage(sessionId, {
+          sessionId,
+          role: 'assistant',
+          content: 'このセッションの Persona を解除しました。',
+        })
+        this.emit(webContents, sessionId, { type: 'done', messageId: saved.id })
+        return
+      }
+      content = personaMatch.args
+    } else if (personaMatch) {
+      personaPrompt = personasService.formatPrompt(personaMatch.persona)
+      activePersona = { id: personaMatch.persona.id, name: personaMatch.persona.name }
+      sessionService.setPersona(sessionId, personaMatch.persona.name)
+      content = personaMatch.args || personasService.formatUserMessage(personaMatch.persona, '')
+    } else {
+      const stickyOrDefault =
+        (await personasService.resolveDefault(session?.personaName)) ??
+        (await personasService.resolveDefault(settings.agent.defaultPersona))
+      if (stickyOrDefault) {
+        personaPrompt = personasService.formatPrompt(stickyOrDefault)
+        activePersona = { id: stickyOrDefault.id, name: stickyOrDefault.name }
+      }
+    }
+
+    // Prefer explicit /team, then skill names that alias a team (e.g. /virtual-company).
+    // Plan mode is read-only planning — skip Team execution.
+    let teamMatch = isPlan ? null : await teamsService.matchInvocation(content)
     let skillPrompt: string | undefined
-    const teamMatch = skillMatch ? null : await teamsService.matchInvocation(content)
-    if (skillMatch) {
-      skillPrompt = formatSkillPrompt(skillMatch.skill, skillMatch.args)
-      content = formatSkillUserMessage(skillMatch.skill, skillMatch.args)
-    } else if (teamMatch) {
+    if (!teamMatch && !isPlan) {
+      const skillMatch = await skillsService.matchInvocation(content)
+      if (skillMatch) {
+        const asTeam = await teamsService.matchSkillAsTeam(
+          skillMatch.skill.name,
+          skillMatch.args,
+        )
+        if (asTeam) {
+          teamMatch = asTeam
+        } else {
+          skillPrompt = formatSkillPrompt(skillMatch.skill, skillMatch.args)
+          content = formatSkillUserMessage(skillMatch.skill, skillMatch.args)
+        }
+      }
+    }
+    if (teamMatch) {
       content = teamMatch.args
         ? `/team ${teamMatch.team.id} ${teamMatch.args}`
         : `/team ${teamMatch.team.id}`
@@ -145,10 +235,56 @@ export class AgentService {
           tool: 'Team',
           args: { team: teamMatch.team.id, prompt: teamMatch.args || content },
         })
+        const notifyFileChanged = (absolutePath: string) => {
+          fileWatcherService.notifyTreeChanged()
+          for (const win of BrowserWindow.getAllWindows()) {
+            win.webContents.send(IPC_EVENTS.FILE_CHANGED, {
+              path: absolutePath,
+              relativePath: workspaceService.getRelativePath(absolutePath),
+            })
+          }
+        }
+        const notifyWorkspaceChanged = () => {
+          fileWatcherService.notifyTreeChanged()
+        }
         const result = await teamsService.run(
           teamMatch.team.id,
           teamMatch.args || 'Review this workspace',
           abortController.signal,
+          {
+            sessionId,
+            emit: (event) => {
+              if (event.type === 'team_stage') {
+                this.emit(webContents, sessionId, {
+                  type: 'team_stage',
+                  stage: event.stage as import('@codex/shared').TeamPipelineStage,
+                  teamId: String(event.teamId),
+                  detail: typeof event.detail === 'string' ? event.detail : undefined,
+                })
+              } else if (event.type === 'ceo_approval_required') {
+                this.emit(webContents, sessionId, {
+                  type: 'ceo_approval_required',
+                  request: event.request as import('@codex/shared').CeoApprovalRequest,
+                })
+              }
+            },
+            onFileChanged: notifyFileChanged,
+            onWorkspaceChanged: notifyWorkspaceChanged,
+            requestToolApproval: async (request) => {
+              this.emit(webContents, sessionId, {
+                type: 'approval_required',
+                toolCallId: request.toolCallId,
+                tool: request.tool,
+                path: request.path,
+                relativePath: request.relativePath,
+                oldContent: request.oldContent,
+                newContent: request.newContent,
+                summary: request.summary,
+                action: request.action,
+              })
+              return approvalService.waitForApproval(sessionId, request.toolCallId)
+            },
+          },
         )
         this.emit(webContents, sessionId, {
           type: 'tool_call_result',
@@ -177,7 +313,9 @@ export class AgentService {
         const message = err instanceof Error ? err.message : 'Team failed'
         this.emit(webContents, sessionId, { type: 'error', message })
       } finally {
-        this.abortControllers.delete(sessionId)
+        if (this.abortControllers.get(sessionId) === abortController) {
+          this.abortControllers.delete(sessionId)
+        }
       }
       return
     }
@@ -189,10 +327,18 @@ export class AgentService {
       reason: decision.reason,
       mode: decision.mode,
     })
+    if (activePersona) {
+      this.emit(webContents, sessionId, {
+        type: 'persona_applied',
+        personaId: activePersona.id,
+        personaName: activePersona.name,
+      })
+    }
 
     const history = this.buildAgentHistory(sessionService.getMessages(sessionId), attachments)
 
     const notifyFileChanged = (absolutePath: string) => {
+      fileWatcherService.notifyTreeChanged()
       for (const win of BrowserWindow.getAllWindows()) {
         win.webContents.send(IPC_EVENTS.FILE_CHANGED, {
           path: absolutePath,
@@ -200,17 +346,34 @@ export class AgentService {
         })
       }
     }
+    const notifyWorkspaceChanged = () => {
+      fileWatcherService.notifyTreeChanged()
+    }
 
     const contextPaths = [
       ...(params.contextPaths ?? []),
       ...attachments.map((a) => a.path),
     ]
     const rulesPrompt = await rulesService.buildPrompt(contextPaths)
-    const permissions = {
-      ...DEFAULT_AGENT_PERMISSIONS,
-      ...settings.agent.permissions,
-    }
-    const runLimited = createConcurrencyLimiter(settings.agent.maxSubagents ?? 3)
+    const trusted = workspaceTrustService.isTrusted(root)
+    // U-1 / U-2: untrusted → secret Read deny, network never allow (ask unless already deny)
+    const secretReadPolicy = trusted ? ('ask' as const) : ('deny' as const)
+    const basePermissions = isPlan
+      ? { ...PLAN_PERMISSIONS }
+      : {
+          ...DEFAULT_AGENT_PERMISSIONS,
+          ...settings.agent.permissions,
+        }
+    const permissions = isPlan
+      ? basePermissions
+      : {
+          ...basePermissions,
+          network: trusted
+            ? basePermissions.network
+            : basePermissions.network === 'deny'
+              ? 'deny'
+              : 'ask',
+        }
     const userPromptForMemory = content
 
     let lastError = ''
@@ -247,20 +410,29 @@ export class AgentService {
           })
         }
 
+        const runLimited = createConcurrencyLimiter(
+          effectiveMaxSubagents(settings, runtime.provider),
+        )
         const outcome = await this.runOrchestratorAttempt({
           webContents,
           sessionId,
           root,
           history,
+          userInput: content,
           runtime,
           isE2eMock,
           settings,
           abortController,
           rulesPrompt,
           skillPrompt,
+          personaPrompt,
           permissions,
+          secretReadPolicy,
+          enabledTools: isPlan ? [...PLAN_TOOLS] : ALL_AGENT_TOOLS,
+          planMode: isPlan,
           runLimited,
           notifyFileChanged,
+          notifyWorkspaceChanged,
         })
 
         if (outcome.status === 'ok') {
@@ -273,16 +445,27 @@ export class AgentService {
             latencyMs: outcome.latencyMs,
             usage: outcome.usage,
           })
+          const trace: TurnTrace = {
+            personaId: activePersona?.id,
+            personaName: activePersona?.name,
+            provider: runtime.provider,
+            model: runtime.model,
+            routeReason: decision.reason,
+            usage: usagePayload,
+            toolCount: outcome.toolCalls.length,
+          }
           const saved = sessionService.addMessage(sessionId, {
             sessionId,
             role: 'assistant',
             content: outcome.assistantContent,
             toolCalls: outcome.toolCalls.length > 0 ? outcome.toolCalls : undefined,
+            trace,
           })
           this.emit(webContents, sessionId, {
             type: 'done',
             messageId: saved.id,
             usage: usagePayload,
+            trace,
           })
           void hooksService.onAgentComplete(sessionId)
 
@@ -321,7 +504,10 @@ export class AgentService {
       const message = formatLlmConnectionError(provider, err)
       this.emit(webContents, sessionId, { type: 'error', message })
     } finally {
-      this.abortControllers.delete(sessionId)
+      // Only clear if we still own the slot (a newer run may have replaced us).
+      if (this.abortControllers.get(sessionId) === abortController) {
+        this.abortControllers.delete(sessionId)
+      }
     }
   }
 
@@ -330,15 +516,21 @@ export class AgentService {
     sessionId: string
     root: string
     history: AgentMessage[]
+    userInput: string
     runtime: LlmRuntimeConfig
     isE2eMock: boolean
     settings: ReturnType<typeof settingsService.get>
     abortController: AbortController
     rulesPrompt: string
     skillPrompt: string | undefined
+    personaPrompt: string | undefined
     permissions: typeof DEFAULT_AGENT_PERMISSIONS
+    secretReadPolicy?: 'allow' | 'ask' | 'deny'
+    enabledTools: string[]
+    planMode?: boolean
     runLimited: ReturnType<typeof createConcurrencyLimiter>
     notifyFileChanged: (absolutePath: string) => void
+    notifyWorkspaceChanged: () => void
   }): Promise<
     | {
         status: 'ok'
@@ -354,15 +546,21 @@ export class AgentService {
       sessionId,
       root,
       history,
+      userInput,
       runtime,
       isE2eMock,
       settings,
       abortController,
       rulesPrompt,
       skillPrompt,
+      personaPrompt,
       permissions,
+      secretReadPolicy,
+      enabledTools,
+      planMode,
       runLimited,
       notifyFileChanged,
+      notifyWorkspaceChanged,
     } = opts
 
     const llm = isE2eMock ? createE2eMockAgentProvider() : getProviderInstance(runtime.provider)
@@ -373,6 +571,14 @@ export class AgentService {
     let toolsStarted = false
     let usage: { inputTokens: number; outputTokens: number; cachedInputTokens: number } | undefined
     const startedAt = Date.now()
+    const agentTrace = langfuseService.startAgentTrace({
+      sessionId,
+      input: userInput,
+      provider: runtime.provider,
+      model: runtime.model,
+      planMode: Boolean(planMode),
+      settings,
+    })
 
     try {
       for await (const event of this.orchestrator.run(history, {
@@ -382,18 +588,29 @@ export class AgentService {
         apiKey: runtime.apiKey,
         baseUrl: runtime.baseUrl,
         maxIterations: settings.agent.maxIterations,
-        enabledTools: ALL_AGENT_TOOLS,
-        yoloMode: isE2eMock ? false : settings.agent.yoloMode,
+        enabledTools,
+        yoloMode: isE2eMock || planMode ? false : settings.agent.yoloMode,
         permissions,
-        compactTokenThreshold: settings.agent.compactTokenThreshold,
-        maxTokens: settings.cost?.maxOutputTokensAgent ?? 8192,
+        secretReadPolicy: secretReadPolicy ?? 'ask',
+        planMode: Boolean(planMode),
+        compactTokenThreshold: effectiveCompactTokenBudget(
+          settings,
+          runtime.provider,
+          'agent',
+        ),
+        maxTokens: effectiveMaxOutputTokens(settings, runtime.provider, 'agent'),
         enablePromptCache: settings.cost?.enablePromptCache !== false,
         signal: abortController.signal,
+        fs: createWorkspaceFs(workspaceService.getRoots()),
         resolvePath: (p) => workspaceService.resolveWithinWorkspace(p),
         getRelativePath: (p) => workspaceService.getRelativePath(p),
+        isIgnoredPath: (rel) => pathIgnoreService.getRules().ignores(rel),
         onFileChanged: notifyFileChanged,
+        onWorkspaceChanged: notifyWorkspaceChanged,
         rulesPrompt,
         skillPrompt,
+        personaPrompt,
+        observability: agentTrace?.hooks,
         subagentDepth: 0,
         runSubagent: async ({ prompt, description }) => {
           const result = await runLimited(() =>
@@ -421,30 +638,49 @@ export class AgentService {
           }
         },
         runTeam: async ({ teamId, prompt }) => {
-          const teams = await collectTeams(root)
-          const team = findTeam(teams, teamId)
-          if (!team) {
-            return { success: false, output: `Error: unknown team "${teamId}"` }
-          }
-          const result = await runTeam({
-            workspaceRoot: root,
-            team,
-            task: prompt,
-            modelId: runtime.model,
-            apiKey: runtime.apiKey,
-            baseUrl: runtime.baseUrl,
-            signal: abortController.signal,
-            llm,
-            registry: defaultToolRegistry,
-            resolvePath: (p) => workspaceService.resolveWithinWorkspace(p),
-            getRelativePath: (p) => workspaceService.getRelativePath(p),
-            rulesPrompt,
-            maxConcurrency: settings.agent.maxSubagents ?? 3,
+          const result = await teamsService.run(teamId, prompt, abortController.signal, {
+            sessionId,
+            emit: (event) => {
+              if (event.type === 'team_stage') {
+                this.emit(webContents, sessionId, {
+                  type: 'team_stage',
+                  stage: event.stage as import('@codex/shared').TeamPipelineStage,
+                  teamId: String(event.teamId),
+                  detail: typeof event.detail === 'string' ? event.detail : undefined,
+                })
+              } else if (event.type === 'ceo_approval_required') {
+                this.emit(webContents, sessionId, {
+                  type: 'ceo_approval_required',
+                  request: event.request as import('@codex/shared').CeoApprovalRequest,
+                })
+              }
+            },
+            onFileChanged: notifyFileChanged,
+            onWorkspaceChanged: notifyWorkspaceChanged,
+            requestToolApproval: async (request) => {
+              this.emit(webContents, sessionId, {
+                type: 'approval_required',
+                toolCallId: request.toolCallId,
+                tool: request.tool,
+                path: request.path,
+                relativePath: request.relativePath,
+                oldContent: request.oldContent,
+                newContent: request.newContent,
+                summary: request.summary,
+                action: request.action,
+              })
+              return approvalService.waitForApproval(sessionId, request.toolCallId)
+            },
           })
           return {
             success: result.success,
             output: `${result.synthesis}\n\n(Board: ${result.boardPath})`,
-            metadata: { teamId: result.teamId, boardPath: result.boardPath },
+            metadata: {
+              teamId: result.teamId,
+              boardPath: result.boardPath,
+              ceoDecision: result.ceoDecision,
+              stages: result.stagesCompleted,
+            },
           }
         },
         getShellEnv: () => agentEnvService.resolve(root),
@@ -514,6 +750,14 @@ export class AgentService {
             filePath: typeof event.filePath === 'string' ? event.filePath : undefined,
           })
         } else if (event.type === 'error') {
+          agentTrace?.end({
+            output: assistantContent,
+            model: runtime.model,
+            provider: runtime.provider,
+            usage,
+            error: event.message,
+            toolCount: toolCalls.length,
+          })
           return { status: 'error', error: event.message, toolsStarted }
         } else if (event.type === 'done') {
           usage = event.usage
@@ -521,6 +765,13 @@ export class AgentService {
         }
       }
 
+      agentTrace?.end({
+        output: assistantContent,
+        model: runtime.model,
+        provider: runtime.provider,
+        usage,
+        toolCount: toolCalls.length,
+      })
       return {
         status: 'ok',
         assistantContent,
@@ -530,6 +781,14 @@ export class AgentService {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Agent failed'
+      agentTrace?.end({
+        output: assistantContent,
+        model: runtime.model,
+        provider: runtime.provider,
+        usage,
+        error: message,
+        toolCount: toolCalls.length,
+      })
       return { status: 'error', error: message, toolsStarted }
     }
   }
@@ -541,10 +800,7 @@ export class AgentService {
       if (msg.role === 'user') {
         let content = msg.content
         if (msg.attachments?.length) {
-          const attachmentText = msg.attachments
-            .filter((a) => a.content)
-            .map((a) => `\n\n--- Attached file: ${a.name} (${a.path}) ---\n${a.content}\n--- End ---`)
-            .join('')
+          const attachmentText = formatAttachments(msg.attachments)
           if (attachmentText) content += attachmentText
         }
         agentMessages.push({ role: 'user', content })
@@ -577,10 +833,7 @@ export class AgentService {
     if (latestAttachments.length > 0) {
       const last = agentMessages[agentMessages.length - 1]
       if (last?.role === 'user') {
-        const extra = latestAttachments
-          .filter((a) => a.content)
-          .map((a) => `\n\n--- Attached file: ${a.name} (${a.path}) ---\n${a.content}\n--- End ---`)
-          .join('')
+        const extra = formatAttachments(latestAttachments)
         if (extra && !last.content.includes(extra)) {
           last.content += extra
         }

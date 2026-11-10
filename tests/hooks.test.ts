@@ -1,8 +1,9 @@
+import { existsSync } from 'fs'
 import { mkdir, mkdtemp, writeFile, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { describe, expect, it } from 'vitest'
-import { loadHooksConfig, HooksRuntime } from '@codex/agent-core'
+import { expandHookCommand, loadHooksConfig, HooksRuntime } from '@codex/agent-core'
 
 describe('hooks-loader', () => {
   it('returns empty config when hooks.json is missing', async () => {
@@ -51,6 +52,51 @@ describe('hooks-loader', () => {
   })
 })
 
+describe('expandHookCommand', () => {
+  it('maps placeholders without embedding values', () => {
+    expect(expandHookCommand('echo ${file}')).toBe('echo "$CODEX_FILE"')
+    expect(expandHookCommand('echo "${file}"')).toBe('echo "$CODEX_FILE"')
+    expect(expandHookCommand("echo '${file}'")).toBe('echo "$CODEX_FILE"')
+    expect(expandHookCommand('printf "%s" "src/${relativePath}"')).toBe(
+      'printf "%s" "src/$CODEX_RELATIVE_PATH"',
+    )
+    expect(expandHookCommand("echo 'src/${relativePath}'")).toBe(
+      'echo "src/$CODEX_RELATIVE_PATH"',
+    )
+  })
+
+  it('uses PowerShell env syntax when requested', () => {
+    expect(expandHookCommand('echo ${file}', true)).toBe('echo $env:CODEX_FILE')
+    expect(expandHookCommand('echo "${relativePath}"', true)).toBe('echo "$env:CODEX_RELATIVE_PATH"')
+    expect(expandHookCommand("pwsh -NoLogo -Command 'echo ${file}'", true)).toBe(
+      "pwsh -NoLogo -Command 'echo $env:CODEX_FILE'",
+    )
+    expect(expandHookCommand('pwsh -c "echo ${file}"', true)).toBe(
+      'pwsh -c "echo `$env:CODEX_FILE"',
+    )
+  })
+
+  it('tracks quotes so apostrophes inside double quotes stay literal', () => {
+    expect(expandHookCommand(`echo "it's \${relativePath} it's"`)).toBe(
+      `echo "it's $CODEX_RELATIVE_PATH it's"`,
+    )
+  })
+
+  it('keeps single-quoted literals literal when moving them into double quotes', () => {
+    expect(expandHookCommand("echo '$HOME ${file}'")).toBe('echo "\\$HOME $CODEX_FILE"')
+  })
+
+  it('leaves expansion to the inner shell for nested commands', () => {
+    expect(expandHookCommand("bash -c 'echo ${file}'")).toBe(`bash -c 'echo "$CODEX_FILE"'`)
+    expect(expandHookCommand('bash -c "echo ${file}"')).toBe('bash -c "echo \\"\\$CODEX_FILE\\""')
+    expect(expandHookCommand('/bin/sh -ec "echo \\"${file}\\""')).toBe(
+      '/bin/sh -ec "echo \\"\\$CODEX_FILE\\""',
+    )
+    expect(expandHookCommand('eval "echo ${file}"')).toBe('eval "echo \\"\\$CODEX_FILE\\""')
+    expect(expandHookCommand("bash -lc 'echo \"${file}\"'")).toBe(`bash -lc 'echo "$CODEX_FILE"'`)
+  })
+})
+
 describe('HooksRuntime', () => {
   it('runs matching shell hooks and expands variables', async () => {
     const root = await mkdtemp(join(tmpdir(), 'codex-hooks-rt-'))
@@ -81,6 +127,38 @@ describe('HooksRuntime', () => {
       expect(results[0].success).toBe(true)
       if (results[0].type === 'shell') {
         expect(results[0].output).toBe('src/a.ts')
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it.each([
+    ["bash -c 'echo ${file}'"],
+    ['bash -c "echo ${file}"'],
+    ['bash -c "echo \\"${file}\\""'],
+    [`bash -c "echo '\${file}'"`],
+    ['eval "echo ${file}"'],
+  ])('does not run commands from file names in nested shells: %s', async (command) => {
+    const root = await mkdtemp(join(tmpdir(), 'codex-hooks-nested-'))
+    const filePath = join(root, 'a$(touch pwned).ts')
+    try {
+      const runtime = new HooksRuntime({
+        loadConfig: async () => ({
+          hooks: [{ event: 'onFileSave', action: { type: 'shell', command }, cooldownMs: 0 }],
+        }),
+        getShellEnv: () => process.env,
+      })
+
+      const results = await runtime.dispatch('onFileSave', {
+        workspaceRoot: root,
+        filePath,
+        relativePath: 'a$(touch pwned).ts',
+      })
+
+      expect(existsSync(join(root, 'pwned'))).toBe(false)
+      if (results[0]?.type === 'shell') {
+        expect(results[0].output).toContain('a$(touch pwned).ts')
       }
     } finally {
       await rm(root, { recursive: true, force: true })

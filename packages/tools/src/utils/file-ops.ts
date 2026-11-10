@@ -1,13 +1,14 @@
-import { readFile, writeFile, unlink, mkdir } from 'fs/promises'
-import { dirname } from 'path'
 import type { ToolContext } from '../types'
 import { backupFile } from './backup'
 
-export async function readTextFile(ctx: ToolContext, pathArg: string): Promise<{ resolved: string; content: string }> {
-  const resolved = ctx.resolvePath(pathArg)
+export async function readTextFile(
+  ctx: ToolContext,
+  pathArg: string,
+): Promise<{ resolved: string; content: string }> {
+  const resolved = ctx.fs.resolve(pathArg)
   let content = ''
   try {
-    content = await readFile(resolved, 'utf-8')
+    content = await ctx.fs.readText(pathArg)
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
   }
@@ -23,15 +24,18 @@ export async function applyWrite(
   if (oldContent !== '') {
     await backupFile(ctx.sessionId, resolved, oldContent)
   }
-  await mkdir(dirname(resolved), { recursive: true })
-  await writeFile(resolved, newContent, 'utf-8')
+  await ctx.fs.writeText(resolved, newContent)
   ctx.onFileChanged?.(resolved)
 }
 
-export async function applyDelete(ctx: ToolContext, resolved: string, oldContent: string): Promise<void> {
+export async function applyDelete(
+  ctx: ToolContext,
+  resolved: string,
+  oldContent: string,
+): Promise<void> {
   if (oldContent !== '') {
     await backupFile(ctx.sessionId, resolved, oldContent)
   }
-  await unlink(resolved)
+  await ctx.fs.unlink(resolved)
   ctx.onFileChanged?.(resolved)
 }

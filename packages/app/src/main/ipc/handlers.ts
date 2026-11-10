@@ -12,12 +12,39 @@ import { agentEnvService } from '../services/agent-env-service'
 import { modelCatalogService } from '../services/model-catalog-service'
 import { rulesService } from '../services/rules-service'
 import { skillsService } from '../services/skills-service'
+import { personasService } from '../services/personas-service'
 import { hooksService } from '../services/hooks-service'
 import { assertFilePath, assertNonEmptyString, assertSessionId, assertTerminalId } from '../utils/validate-ipc'
+import { assertTrustedIpcSender } from '../utils/ipc-guard'
 import { redactSettingsForRenderer } from '../services/settings-redact'
+import { workspaceTrustService } from '../services/workspace-trust'
 import { getDailyUsageSummary, listRecentUsage } from '../services/usage-log'
+import { pathIgnoreService } from '../services/path-ignore-service'
+import { gitService } from '../services/git-service'
+import { replaceInWorkspace } from '../services/workspace-replace'
+import { checkForUpdates, getUpdaterStatus } from '../services/updater'
+import { mcpService } from '../services/mcp-service'
+import { completeInline } from '../services/tab-completion'
+import { exportAuditLog } from '../services/audit-log'
+import { reindexSemanticWorkspace, semanticIndexStats } from '../services/semantic-index'
+
+async function applyIgnoreRules(root: string): Promise<void> {
+  await pathIgnoreService.reload(root)
+  const indexRules = await pathIgnoreService.reloadForIndexing(root)
+  indexService.setIgnoreRules(indexRules)
+  await fileWatcherService.reloadIgnoreRules()
+}
 
 export function registerIpcHandlers(): void {
+  // Wrap all invoke handlers so navigated-away documents cannot call IPC.
+  const originalHandle = ipcMain.handle.bind(ipcMain)
+  ipcMain.handle = ((channel: string, listener: (...args: unknown[]) => unknown) => {
+    return originalHandle(channel, (event, ...args) => {
+      assertTrustedIpcSender(event)
+      return listener(event, ...args)
+    })
+  }) as typeof ipcMain.handle
+
   indexService.setProgressCallback((status: IndexStatus) => {
     for (const win of BrowserWindow.getAllWindows()) {
       win.webContents.send(IPC_EVENTS.INDEX_PROGRESS, status)
@@ -28,9 +55,15 @@ export function registerIpcHandlers(): void {
     const target = assertFilePath(path)
     const workspace = await workspaceService.open(target)
     const root = workspace.rootPaths[0]
+    const trusted = await workspaceTrustService.ensureTrusted(root)
     settingsService.addRecentWorkspace(root)
     sessionService.rememberWorkspaceId(root, workspace.id)
-    agentEnvService.hydrateFromWorkspace(root)
+    if (trusted) {
+      agentEnvService.hydrateFromWorkspace(root)
+    } else {
+      agentEnvService.clearMemory()
+    }
+    await applyIgnoreRules(root)
     fileWatcherService.start(root)
     void indexService.scan(root)
     return workspace
@@ -48,6 +81,28 @@ export function registerIpcHandlers(): void {
     return workspaceService.get()
   })
 
+  ipcMain.handle(IPC_CHANNELS.WORKSPACE_TRUST_STATUS, () => {
+    return workspaceTrustService.status(workspaceService.getRoot())
+  })
+
+  ipcMain.handle(IPC_CHANNELS.WORKSPACE_TRUST, () => {
+    const root = workspaceService.getRoot()
+    if (!root) return workspaceTrustService.status(null)
+    workspaceTrustService.trust(root)
+    agentEnvService.hydrateFromWorkspace(root)
+    void auditLog('workspace:trust', { root })
+    return workspaceTrustService.status(root)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.WORKSPACE_UNTRUST, () => {
+    const root = workspaceService.getRoot()
+    if (!root) return workspaceTrustService.status(null)
+    workspaceTrustService.untrust(root)
+    agentEnvService.clearMemory()
+    void auditLog('workspace:untrust', { root })
+    return workspaceTrustService.status(root)
+  })
+
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_GET_TREE, async () => {
     return workspaceService.getFileTree()
   })
@@ -58,6 +113,10 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.FILE_READ, async (_event, path: string) => {
     return workspaceService.readFile(assertFilePath(path))
+  })
+
+  ipcMain.handle(IPC_CHANNELS.FILE_READ_BINARY, async (_event, path: string) => {
+    return workspaceService.readFileBinary(assertFilePath(path))
   })
 
   ipcMain.handle(IPC_CHANNELS.FILE_RESOLVE, (_event, href: string, baseFilePath?: string) => {
@@ -72,7 +131,9 @@ export function registerIpcHandlers(): void {
       throw new Error('Invalid file content')
     }
     await workspaceService.writeFile(target, content)
+    // Avoid editor echo-reload; still push Explorer tree refresh.
     fileWatcherService.markInternalWrite(target)
+    fileWatcherService.notifyTreeChanged()
     void auditLog('file:write', { path: target, bytes: content.length })
     void hooksService.onFileSave(target)
   })
@@ -81,8 +142,24 @@ export function registerIpcHandlers(): void {
     return redactSettingsForRenderer(settingsService.get())
   })
 
-  ipcMain.handle(IPC_CHANNELS.SETTINGS_SET, (_event, partial) => {
-    return redactSettingsForRenderer(settingsService.set(partial))
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_SET, async (_event, partial) => {
+    const before = settingsService.get().general.showBuildOutputs
+    const updated = settingsService.set(partial)
+    const after = updated.general.showBuildOutputs
+    if (before !== after) {
+      const root = workspaceService.getRoot()
+      if (root) {
+        await applyIgnoreRules(root)
+        void indexService.scan(root)
+        fileWatcherService.notifyTreeChanged()
+      }
+    }
+    if (partial && typeof partial === 'object' && 'mcpServers' in partial) {
+      void mcpService.syncFromSettings(updated.mcpServers).catch((err) => {
+        console.warn('[mcp] sync after settings failed', err)
+      })
+    }
+    return redactSettingsForRenderer(updated)
   })
 
   ipcMain.handle(IPC_CHANNELS.SESSION_LIST, () => {
@@ -115,6 +192,25 @@ export function registerIpcHandlers(): void {
     return indexService.search(query)
   })
 
+  ipcMain.handle(IPC_CHANNELS.INDEX_REPLACE, async (_event, params) => {
+    if (!params || typeof params !== 'object') {
+      throw new Error('Invalid replace params')
+    }
+    const query = assertNonEmptyString(String((params as { query?: string }).query ?? ''), 'query')
+    const replacement = String((params as { replacement?: string }).replacement ?? '')
+    const rawPaths = (params as { paths?: unknown }).paths
+    const paths = Array.isArray(rawPaths)
+      ? rawPaths.filter((p): p is string => typeof p === 'string').map((p) => assertFilePath(p))
+      : undefined
+    const result = await replaceInWorkspace({ query, replacement, paths })
+    void auditLog('index:replace', {
+      query,
+      filesChanged: result.filesChanged,
+      occurrences: result.occurrences,
+    })
+    return result
+  })
+
   ipcMain.handle(IPC_CHANNELS.CHAT_SEND, async (event, params) => {
     await chatService.send(params, event.sender)
   })
@@ -140,12 +236,32 @@ export function registerIpcHandlers(): void {
     return sessionService.setMode(assertSessionId(sessionId), mode)
   })
 
+  ipcMain.handle(
+    IPC_CHANNELS.SESSION_SET_PERSONA,
+    (_event, sessionId: string, personaName: string | null | undefined) => {
+      return sessionService.setPersona(
+        assertSessionId(sessionId),
+        personaName == null || personaName === '' ? undefined : String(personaName),
+      )
+    },
+  )
+
   ipcMain.handle(IPC_CHANNELS.AGENT_APPROVAL_RESPOND, (_event, sessionId: string, toolCallId: string, approved: boolean) => {
     const sid = assertSessionId(sessionId)
     const tid = assertNonEmptyString(toolCallId, 'toolCallId')
     agentService.respondApproval(sid, tid, approved)
     void auditLog('agent:approval', { sessionId: sid, toolCallId: tid, approved })
   })
+
+  ipcMain.handle(
+    IPC_CHANNELS.CEO_APPROVAL_RESPOND,
+    (_event, sessionId: string, approvalId: string, response) => {
+      const sid = assertSessionId(sessionId)
+      const aid = assertNonEmptyString(approvalId, 'approvalId')
+      agentService.respondCeoApproval(sid, aid, response)
+      void auditLog('ceo:approval', { sessionId: sid, approvalId: aid, response })
+    },
+  )
 
   ipcMain.handle(IPC_CHANNELS.TERMINAL_CREATE, (event, cwd?: string) => {
     if (cwd !== undefined && typeof cwd !== 'string') {
@@ -204,6 +320,18 @@ export function registerIpcHandlers(): void {
     return skillsService.list()
   })
 
+  ipcMain.handle(IPC_CHANNELS.PERSONAS_LIST, async () => {
+    return personasService.list()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PERSONAS_SAVE, async (_event, params) => {
+    return personasService.save(params)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PERSONAS_DELETE, async (_event, absolutePath: string) => {
+    await personasService.remove(assertFilePath(absolutePath))
+  })
+
   ipcMain.handle(IPC_CHANNELS.CHAT_COMPACT, async (_event, sessionId: string) => {
     return chatService.compactSession(assertSessionId(sessionId))
   })
@@ -214,5 +342,81 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.USAGE_DAILY, async () => {
     return getDailyUsageSummary()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.GIT_STATUS, async () => {
+    return gitService.status()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.GIT_STAGE, async (_event, paths: string[]) => {
+    if (!Array.isArray(paths) || paths.some((p) => typeof p !== 'string')) {
+      throw new Error('Invalid paths')
+    }
+    await gitService.stage(paths.map((p) => assertFilePath(p)))
+  })
+
+  ipcMain.handle(IPC_CHANNELS.GIT_UNSTAGE, async (_event, paths: string[]) => {
+    if (!Array.isArray(paths) || paths.some((p) => typeof p !== 'string')) {
+      throw new Error('Invalid paths')
+    }
+    await gitService.unstage(paths.map((p) => assertFilePath(p)))
+  })
+
+  ipcMain.handle(IPC_CHANNELS.GIT_COMMIT, async (_event, message: string) => {
+    return gitService.commit(assertNonEmptyString(message, 'message'))
+  })
+
+  ipcMain.handle(IPC_CHANNELS.GIT_BRANCHES, async () => {
+    return gitService.listBranches()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.GIT_CHECKOUT, async (_event, branch: string) => {
+    return gitService.checkout(assertNonEmptyString(branch, 'branch'))
+  })
+
+  ipcMain.handle(IPC_CHANNELS.UPDATER_CHECK, async () => {
+    return checkForUpdates({ manual: true })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.UPDATER_STATUS_GET, () => {
+    return getUpdaterStatus()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.MCP_STATUS, () => mcpService.getStatus())
+
+  ipcMain.handle(IPC_CHANNELS.MCP_SYNC, async () => {
+    return mcpService.syncFromSettings()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.COMPLETION_REQUEST, async (_event, req) => {
+    return completeInline({
+      prefix: String(req?.prefix ?? ''),
+      suffix: req?.suffix != null ? String(req.suffix) : undefined,
+      language: req?.language != null ? String(req.language) : undefined,
+      path: req?.path != null ? String(req.path) : undefined,
+    })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.WORKSPACE_ADD_ROOT, async (_event, path: string) => {
+    const target = assertFilePath(path)
+    const workspace = await workspaceService.addRoot(target)
+    fileWatcherService.addRoot(target)
+    fileWatcherService.notifyTreeChanged()
+    void auditLog('workspace:addRoot', { path: target })
+    return workspace
+  })
+
+  ipcMain.handle(IPC_CHANNELS.AUDIT_EXPORT, async (_event, opts) => {
+    const limit = typeof opts?.limit === 'number' ? opts.limit : 5000
+    const result = await exportAuditLog(limit)
+    void auditLog('audit:export', { path: result.path, lines: result.lines })
+    return result
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SEMANTIC_STATS, () => semanticIndexStats())
+
+  ipcMain.handle(IPC_CHANNELS.SEMANTIC_REINDEX, async (_event, opts) => {
+    const limit = typeof opts?.limit === 'number' ? opts.limit : 80
+    return reindexSemanticWorkspace(limit)
   })
 }

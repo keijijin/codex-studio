@@ -1,4 +1,5 @@
 import {
+  flattenChatContent,
   getProviderInstance,
   isConnectionError,
   isRetryableError,
@@ -14,6 +15,7 @@ import {
   type ChatStreamEvent,
   type LLMProviderId,
   type Message,
+  type TurnTrace,
 } from '@codex/shared'
 import { sessionService, settingsService } from './settings'
 import { agentService } from './agent'
@@ -21,6 +23,9 @@ import {
   formatLlmConnectionError,
   getApiKeyForProvider,
   missingApiKeyMessage,
+  effectiveCompactTokenBudget,
+  effectiveMaxOutputTokens,
+  modelsLlamacppBaseUrl,
   modelsOllamaBaseUrl,
   modelsXaiBaseUrl,
   noteProviderConnectionFailure,
@@ -30,8 +35,11 @@ import {
 import { formatSkillPrompt, formatSkillUserMessage, compactMessageContents, detectReplyLanguage, formatLanguageInstruction, estimateTokens } from '@codex/agent-core'
 import { rulesService } from './rules-service'
 import { skillsService } from './skills-service'
+import { personasService } from './personas-service'
 import { modelCatalogService } from './model-catalog-service'
 import { assertUnderDailyBudget, recordLlmTurn } from './usage-helpers'
+import { langfuseService } from './langfuse-service'
+import { formatAttachments, materializeAttachments } from './attachment-context'
 
 const SYSTEM_PROMPT = `You are Codex Studio, an AI coding assistant integrated into a developer IDE.
 Help the user with code understanding, debugging, refactoring, and general programming questions.
@@ -50,15 +58,17 @@ export class ChatService {
   async listModels(provider: LLMProviderId) {
     const settings = settingsService.get()
     const apiKey = getApiKeyForProvider(provider, settings.models)
-    if (!apiKey && provider !== 'ollama') {
+    if (!apiKey && provider !== 'ollama' && provider !== 'llamacpp') {
       throw new Error(missingApiKeyMessage(provider))
     }
     const baseUrl =
       provider === 'ollama'
         ? modelsOllamaBaseUrl(settings.models)
-        : provider === 'xai'
-          ? modelsXaiBaseUrl(settings.models)
-          : undefined
+        : provider === 'llamacpp'
+          ? modelsLlamacppBaseUrl(settings.models)
+          : provider === 'xai'
+            ? modelsXaiBaseUrl(settings.models)
+            : undefined
     const list = await listModels(provider, apiKey ?? 'ollama', { baseUrl })
     // Refresh cost-routing catalog in the background when models are listed
     void modelCatalogService.refresh(settings).catch(() => undefined)
@@ -73,12 +83,12 @@ export class ChatService {
       return this.sendAskMock(params, webContents)
     }
 
-    if (mode === 'agent' && session && session.mode !== 'agent') {
-      sessionService.setMode(params.sessionId, 'agent')
+    if ((mode === 'agent' || mode === 'plan') && session && session.mode !== mode) {
+      sessionService.setMode(params.sessionId, mode)
     }
 
-    if (mode === 'agent') {
-      return agentService.run({ ...params, mode: 'agent' }, webContents)
+    if (mode === 'agent' || mode === 'plan') {
+      return agentService.run({ ...params, mode }, webContents)
     }
 
     return this.sendAsk(params, webContents)
@@ -103,8 +113,47 @@ export class ChatService {
   }
 
   private async sendAsk(params: ChatSendParams, webContents: WebContents): Promise<void> {
-    const { sessionId, attachments = [] } = params
+    const { sessionId } = params
     let content = params.content
+    const attachments = await materializeAttachments(params.attachments ?? [], content)
+
+    const settings = settingsService.get()
+
+    let personaPrompt = ''
+    let activePersona: { id: string; name: string } | undefined
+    const sessionForPersona = sessionService.getSession(sessionId)
+    const personaMatch = await personasService.matchInvocation(content)
+    if (personaMatch?.clear) {
+      sessionService.setPersona(sessionId, undefined)
+      if (!personaMatch.args) {
+        sessionService.addMessage(sessionId, {
+          sessionId,
+          role: 'user',
+          content: '/persona clear',
+        })
+        const saved = sessionService.addMessage(sessionId, {
+          sessionId,
+          role: 'assistant',
+          content: 'このセッションの Persona を解除しました。',
+        })
+        this.emit(webContents, sessionId, { type: 'done', messageId: saved.id })
+        return
+      }
+      content = personaMatch.args
+    } else if (personaMatch) {
+      personaPrompt = `\n\n${personasService.formatPrompt(personaMatch.persona)}`
+      activePersona = { id: personaMatch.persona.id, name: personaMatch.persona.name }
+      sessionService.setPersona(sessionId, personaMatch.persona.name)
+      content = personaMatch.args || personasService.formatUserMessage(personaMatch.persona, '')
+    } else {
+      const stickyOrDefault =
+        (await personasService.resolveDefault(sessionForPersona?.personaName)) ??
+        (await personasService.resolveDefault(settings.agent.defaultPersona))
+      if (stickyOrDefault) {
+        personaPrompt = `\n\n${personasService.formatPrompt(stickyOrDefault)}`
+        activePersona = { id: stickyOrDefault.id, name: stickyOrDefault.name }
+      }
+    }
 
     const skillMatch = await skillsService.matchInvocation(content)
     let skillPrompt = ''
@@ -113,7 +162,6 @@ export class ChatService {
       content = formatSkillUserMessage(skillMatch.skill, skillMatch.args)
     }
 
-    const settings = settingsService.get()
     const budgetError = await assertUnderDailyBudget(settings)
     if (budgetError) {
       this.emit(webContents, sessionId, { type: 'error', message: budgetError })
@@ -154,18 +202,30 @@ export class ChatService {
       ...(params.contextPaths ?? []),
       ...attachments.map((a) => a.path),
     ]
-    const rulesPrompt = (await rulesService.buildPrompt(contextPaths)) + skillPrompt
+    const rulesPrompt =
+      (await rulesService.buildPrompt(contextPaths)) + personaPrompt + skillPrompt
     let llmMessages = this.buildMessages(history, attachments, rulesPrompt)
 
-    // Soft trim Ask context using the same compact threshold as Agent
-    const askBudget = settings.agent.compactTokenThreshold
+    if (activePersona) {
+      this.emit(webContents, sessionId, {
+        type: 'persona_applied',
+        personaId: activePersona.id,
+        personaName: activePersona.name,
+      })
+    }
+
+    // Soft trim Ask context (llama.cpp: capped below server -c)
+    const askBudget = effectiveCompactTokenBudget(settings, decision.selected.provider, 'chat')
     if (askBudget && askBudget > 0) {
-      const estimated = llmMessages.reduce((sum, m) => sum + estimateTokens(m.content), 0)
+      const estimated = llmMessages.reduce(
+        (sum, m) => sum + estimateTokens(flattenChatContent(m.content)),
+        0,
+      )
       if (estimated > askBudget) {
         const compacted = compactMessageContents(
           llmMessages.filter((m) => m.role !== 'system').map((m) => ({
             role: m.role,
-            content: m.content,
+            content: flattenChatContent(m.content),
           })),
           8,
         )
@@ -219,6 +279,13 @@ export class ChatService {
         let rawStreamError: string | null = null
         let turnUsage: { inputTokens: number; outputTokens: number; cachedInputTokens: number } | undefined
         const startedAt = Date.now()
+        const askTrace = langfuseService.startAskTrace({
+          sessionId,
+          input: content,
+          provider: runtime.provider,
+          model: runtime.model,
+          settings,
+        })
 
         try {
           for await (const chunk of llm.chat(llmMessages, {
@@ -226,7 +293,7 @@ export class ChatService {
             apiKey: runtime.apiKey,
             baseUrl: runtime.baseUrl,
             signal: abortController.signal,
-            maxTokens: settings.cost?.maxOutputTokens ?? 4096,
+            maxTokens: effectiveMaxOutputTokens(settings, runtime.provider, 'chat'),
             enablePromptCache: settings.cost?.enablePromptCache !== false,
           })) {
             if (chunk.type === 'text') {
@@ -253,15 +320,33 @@ export class ChatService {
             latencyMs: Date.now() - startedAt,
             usage: turnUsage,
           })
+          askTrace?.end({
+            output: assistantContent,
+            model: runtime.model,
+            provider: runtime.provider,
+            usage: turnUsage,
+            latencyMs: Date.now() - startedAt,
+          })
+          const trace: TurnTrace = {
+            personaId: activePersona?.id,
+            personaName: activePersona?.name,
+            provider: runtime.provider,
+            model: runtime.model,
+            routeReason: decision.reason,
+            usage: usagePayload,
+            toolCount: 0,
+          }
           const saved = sessionService.addMessage(sessionId, {
             sessionId,
             role: 'assistant',
             content: assistantContent,
+            trace,
           })
           this.emit(webContents, sessionId, {
             type: 'done',
             messageId: saved.id,
             usage: usagePayload,
+            trace,
           })
           return
         }
@@ -279,6 +364,14 @@ export class ChatService {
             isRetryableError(streamError)) &&
           !abortController.signal.aborted
 
+        askTrace?.end({
+          output: assistantContent,
+          model: runtime.model,
+          provider: runtime.provider,
+          usage: turnUsage,
+          error: streamError,
+          latencyMs: Date.now() - startedAt,
+        })
         if (!canRetry) {
           this.emit(webContents, sessionId, { type: 'error', message: streamError })
           return
@@ -290,7 +383,9 @@ export class ChatService {
         message: lastError || 'Chat failed',
       })
     } finally {
-      this.abortControllers.delete(sessionId)
+      if (this.abortControllers.get(sessionId) === abortController) {
+        this.abortControllers.delete(sessionId)
+      }
     }
   }
 
@@ -323,10 +418,7 @@ export class ChatService {
       if (msg.role === 'user' || msg.role === 'assistant') {
         let content = msg.content
         if (msg.role === 'user' && msg.attachments?.length) {
-          const attachmentText = msg.attachments
-            .filter((a) => a.content)
-            .map((a) => `\n\n--- Attached file: ${a.name} (${a.path}) ---\n${a.content}\n--- End ---`)
-            .join('')
+          const attachmentText = formatAttachments(msg.attachments.filter((a) => a.type !== 'image'))
           if (attachmentText) content = content + attachmentText
         }
         messages.push({ role: msg.role, content })
@@ -336,12 +428,22 @@ export class ChatService {
     if (latestAttachments.length > 0) {
       const last = messages[messages.length - 1]
       if (last?.role === 'user') {
-        const extra = latestAttachments
-          .filter((a) => a.content)
-          .map((a) => `\n\n--- Attached file: ${a.name} (${a.path}) ---\n${a.content}\n--- End ---`)
-          .join('')
-        if (extra && !last.content.includes(extra)) {
+        const nonImages = latestAttachments.filter((a) => a.type !== 'image')
+        const images = latestAttachments.filter(
+          (a) => a.type === 'image' && a.content?.startsWith('data:'),
+        )
+        const extra = formatAttachments(nonImages)
+        if (extra && typeof last.content === 'string' && !last.content.includes(extra)) {
           last.content += extra
+        }
+        if (images.length > 0 && typeof last.content === 'string') {
+          last.content = [
+            { type: 'text', text: last.content },
+            ...images.map((img) => ({
+              type: 'image_url' as const,
+              image_url: { url: img.content! },
+            })),
+          ]
         }
       }
     }
@@ -354,7 +456,7 @@ export class ChatService {
     sessionService.updateTitle(sessionId, title)
   }
 
-  /** Compact persisted chat history for a session (manual Compact). */
+  /** Compact persisted chat history for a session (manual 「履歴を圧縮」). */
   compactSession(sessionId: string): Message[] {
     const existing = sessionService.getMessages(sessionId)
     if (existing.length <= 4) return existing
@@ -363,7 +465,10 @@ export class ChatService {
     const compacted = compactMessageContents(
       existing.map((m) => ({
         role: m.role === 'tool' ? 'assistant' : m.role,
-        content: m.content,
+        content:
+          m.content.length > 4_000
+            ? `${m.content.slice(0, 4_000)}\n...(truncated for compact)`
+            : m.content,
       })),
       6,
     )

@@ -31,7 +31,10 @@ export class OllamaProvider implements LLMProvider {
     try {
       const stream = await client.chat.completions.create({
         model: options.model,
-        messages: messages.map((m) => ({ role: m.role, content: m.content })),
+        messages: messages.map((m) => ({
+          role: m.role,
+          content: typeof m.content === 'string' ? m.content : m.content.map((p) => (p.type === 'text' ? p.text : '[image]')).join('\n'),
+        })),
         stream: true,
         ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
       }, { signal: options.signal })
@@ -67,6 +70,8 @@ export class OllamaProvider implements LLMProvider {
         })),
         tool_choice: 'auto',
         stream: true,
+        // Without this, local decode can run unbounded and starve later turns.
+        ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
       }, { signal: options.signal })
 
       const pending: Record<number, { id: string; name: string; arguments: string }> = {}

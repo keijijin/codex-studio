@@ -39,8 +39,11 @@ export interface HooksConfig {
 
 export const DEFAULT_HOOK_COOLDOWN_MS = 1000
 
-/** Named permission profiles for headless / CLI. */
-export type PermissionProfile = 'readonly' | 'ask' | 'allow'
+/** Named permission profiles for UI / headless / CLI. */
+export type PermissionProfile = 'readonly' | 'coding' | 'yolo'
+
+/** Legacy CLI aliases accepted and normalized to PermissionProfile. */
+export type LegacyPermissionProfile = 'ask' | 'allow'
 
 export const PERMISSION_PROFILES = {
   readonly: {
@@ -49,19 +52,53 @@ export const PERMISSION_PROFILES = {
     shell: 'deny',
     network: 'allow',
     media: 'deny',
+    mcp: 'deny',
   },
-  ask: {
+  coding: {
     read: 'allow',
     edit: 'ask',
     shell: 'ask',
-    network: 'ask',
+    network: 'allow',
     media: 'ask',
+    mcp: 'ask',
   },
-  allow: {
+  yolo: {
     read: 'allow',
     edit: 'allow',
     shell: 'allow',
     network: 'allow',
     media: 'allow',
+    mcp: 'allow',
   },
 } as const satisfies Record<PermissionProfile, AgentPermissions>
+
+export function normalizePermissionProfile(
+  name: string,
+): PermissionProfile | null {
+  if (name === 'readonly' || name === 'coding' || name === 'yolo') return name
+  if (name === 'ask') return 'coding'
+  if (name === 'allow') return 'yolo'
+  return null
+}
+
+/** Detect which preset matches current permissions (+ yoloMode). */
+export function matchPermissionProfile(
+  permissions: AgentPermissions,
+  yoloMode = false,
+): PermissionProfile | 'custom' {
+  if (yoloMode) return 'yolo'
+  for (const id of ['readonly', 'coding', 'yolo'] as const) {
+    const preset = PERMISSION_PROFILES[id]
+    if (
+      permissions.read === preset.read &&
+      permissions.edit === preset.edit &&
+      permissions.shell === preset.shell &&
+      permissions.network === preset.network &&
+      permissions.media === preset.media &&
+      (permissions.mcp ?? 'ask') === preset.mcp
+    ) {
+      return id
+    }
+  }
+  return 'custom'
+}

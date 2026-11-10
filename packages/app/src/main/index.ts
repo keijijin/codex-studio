@@ -1,7 +1,11 @@
 import './bootstrap-app'
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, session, shell } from 'electron'
-import { join } from 'path'
+import { dirname, join, resolve } from 'path'
+import { fileURLToPath } from 'url'
 import { APP_NAME, IPC_CHANNELS } from '@codex/shared'
+
+/** electron-vite may emit ESM main (`import.meta.url`); `__dirname` is unavailable then. */
+const mainDirname = dirname(fileURLToPath(import.meta.url))
 import { indexService } from '@codex/indexer'
 import { registerIpcHandlers } from './ipc/handlers'
 import { settingsService } from './services/settings'
@@ -10,6 +14,7 @@ import { probeOllamaAvailable } from './services/ollama-availability'
 import { workspaceService } from './services/workspace'
 import { terminalService } from './services/terminal-service'
 import { fileWatcherService } from './services/file-watcher'
+import { langfuseService } from './services/langfuse-service'
 import { setupApplicationMenu } from './menu'
 import { resolveAppIconPath, resolvePreloadPath } from './utils/paths'
 
@@ -29,10 +34,10 @@ function createWindow(): void {
     ...(icon && !icon.isEmpty() ? { icon } : {}),
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
-      preload: resolvePreloadPath(__dirname),
+      preload: resolvePreloadPath(mainDirname),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   })
 
@@ -66,7 +71,19 @@ function createWindow(): void {
   mainWindow.webContents.on('will-navigate', (event, url) => {
     const isDev = Boolean(process.env.ELECTRON_RENDERER_URL)
     if (isDev && url.startsWith(process.env.ELECTRON_RENDERER_URL!)) return
-    if (url.startsWith('file://')) return
+
+    // Only allow navigating to our own packaged renderer entry — never arbitrary file://
+    // (Mermaid/XSS pages must not keep preload + IPC).
+    if (url.startsWith('file://')) {
+      try {
+        const target = resolve(fileURLToPath(url))
+        const allowed = resolve(join(mainDirname, '../renderer/index.html'))
+        if (target === allowed) return
+      } catch {
+        // fall through to deny
+      }
+    }
+
     event.preventDefault()
     try {
       const parsed = new URL(url)
@@ -81,7 +98,7 @@ function createWindow(): void {
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    mainWindow.loadFile(join(mainDirname, '../renderer/index.html'))
   }
 }
 
@@ -98,7 +115,7 @@ app.whenReady().then(async () => {
         responseHeaders: {
           ...details.responseHeaders,
           'Content-Security-Policy': [
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https: http://localhost:* ws://localhost:*",
+            "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' https: http://localhost:* ws://localhost:*",
           ],
         },
       })
@@ -108,12 +125,21 @@ app.whenReady().then(async () => {
   registerIpcHandlers()
   setupApplicationMenu()
 
+  // Electron 45+: async safeStorage must finish before get() overlays API keys.
+  await settingsService.initSecrets()
+
+  const { initAutoUpdater } = await import('./services/updater')
+  initAutoUpdater()
+
   // Warm Ollama reachability cache so auto-routing can skip a dead local server.
   void probeOllamaAvailable(modelsOllamaBaseUrl(settingsService.get().models)).catch(() => undefined)
 
   const e2eWorkspace = process.env.CODEX_E2E_WORKSPACE
   if (e2eWorkspace) {
     await workspaceService.open(e2eWorkspace)
+    const { pathIgnoreService } = await import('./services/path-ignore-service')
+    await pathIgnoreService.reload(e2eWorkspace)
+    indexService.setIgnoreRules(await pathIgnoreService.reloadForIndexing(e2eWorkspace))
     fileWatcherService.start(e2eWorkspace)
     void indexService.scan(e2eWorkspace)
   }
@@ -150,4 +176,5 @@ app.on('before-quit', () => {
   fileWatcherService.stop()
   terminalService.destroyAll()
   settingsService.save()
+  void langfuseService.shutdown()
 })

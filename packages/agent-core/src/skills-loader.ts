@@ -86,15 +86,19 @@ async function collectFromDir(dir: string, workspaceRoot: string, out: SkillFile
 
 /** Load skills from workspace + optional global shared dir. */
 export async function collectSkills(
-  workspaceRoot: string,
+  workspaceRoot: string | null | undefined,
   options?: { globalSkillsDir?: string },
 ): Promise<SkillFile[]> {
   const out: SkillFile[] = []
+  const root = workspaceRoot?.trim() ? workspaceRoot : null
+  const labelRoot = root ?? options?.globalSkillsDir ?? ''
   if (options?.globalSkillsDir) {
-    await collectFromDir(options.globalSkillsDir, workspaceRoot, out)
+    await collectFromDir(options.globalSkillsDir, labelRoot, out)
   }
-  await collectFromDir(join(workspaceRoot, '.codex', 'skills'), workspaceRoot, out)
-  await collectFromDir(join(workspaceRoot, '.claude', 'skills'), workspaceRoot, out)
+  if (root) {
+    await collectFromDir(join(root, '.codex', 'skills'), root, out)
+    await collectFromDir(join(root, '.claude', 'skills'), root, out)
+  }
   // Prefer .codex over .claude / global for same name
   const byName = new Map<string, SkillFile>()
   for (const skill of out) {

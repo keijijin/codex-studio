@@ -1,30 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
-import {
-  IPC_CHANNELS,
-  API_KEY_REDACTED,
-  DEFAULT_OLLAMA_BASE_URL,
-  DEFAULT_AGENT_PERMISSIONS,
-  DEFAULT_COST_SETTINGS,
-  DEFAULT_FALLBACK_CHAIN,
-  DEFAULT_PRESENTATION_SETTINGS,
-  DEFAULT_VIDEO_SETTINGS,
-  isRedactedApiKey,
-  type AgentPermissions,
-  type CostSettings,
-  type LLMProviderId,
-  type ModelCandidate,
-  type ModelInfo,
-  type PermissionAction,
-  type PresentationSettings,
-  type PresentationThemeId,
-  type RoutingMode,
-  type VideoRenderMode,
-  type VideoSettings,
-} from '@codex/shared'
+import { API_KEY_REDACTED, DEFAULT_LLAMACPP_BASE_URL, DEFAULT_LLAMACPP_CONTEXT_SIZE, DEFAULT_LLAMACPP_MODEL, DEFAULT_OLLAMA_BASE_URL, DEFAULT_OLLAMA_CONTEXT_SIZE, DEFAULT_AGENT_PERMISSIONS, DEFAULT_COST_SETTINGS, DEFAULT_FALLBACK_CHAIN, DEFAULT_PRESENTATION_SETTINGS, DEFAULT_VIDEO_SETTINGS, PERMISSION_PROFILES, isRedactedApiKey, matchPermissionProfile, type AgentPermissions, type CostSettings, type LLMProviderId, type ModelCandidate, type ModelInfo, type PermissionAction, type PermissionProfile, type PresentationSettings, type PresentationThemeId, type RoutingMode, type VideoRenderMode, type VideoSettings } from '@codex/shared'
 import { useAppStore } from '@renderer/store/app-store'
 import { hasCodexApi } from './ErrorBoundary'
 import { RulesSettings } from './RulesSettings'
+import { PersonasSettings } from './PersonasSettings'
+import { FeaturesSettings } from './FeaturesSettings'
 
 const overlayStyle: CSSProperties = {
   position: 'fixed',
@@ -34,8 +15,7 @@ const overlayStyle: CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   backgroundColor: 'rgba(0, 0, 0, 0.75)',
-  padding: 16,
-}
+  padding: 16 }
 
 const panelStyle: CSSProperties = {
   width: '100%',
@@ -47,8 +27,7 @@ const panelStyle: CSSProperties = {
   borderRadius: 8,
   padding: 24,
   color: '#cccccc',
-  boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-}
+  boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }
 
 const inputStyle: CSSProperties = {
   width: '100%',
@@ -59,15 +38,13 @@ const inputStyle: CSSProperties = {
   backgroundColor: '#1e1e1e',
   border: '1px solid #3c3c3c',
   borderRadius: 4,
-  boxSizing: 'border-box',
-}
+  boxSizing: 'border-box' }
 
 const labelStyle: CSSProperties = {
   display: 'block',
   fontSize: 12,
   color: '#858585',
-  marginTop: 16,
-}
+  marginTop: 16 }
 
 const btnPrimary: CSSProperties = {
   padding: '8px 16px',
@@ -76,13 +53,11 @@ const btnPrimary: CSSProperties = {
   backgroundColor: '#0078d4',
   border: 'none',
   borderRadius: 4,
-  cursor: 'pointer',
-}
+  cursor: 'pointer' }
 
 const selectStyle: CSSProperties = {
   ...inputStyle,
-  cursor: 'pointer',
-}
+  cursor: 'pointer' }
 
 const btnSecondary: CSSProperties = {
   padding: '8px 16px',
@@ -91,8 +66,7 @@ const btnSecondary: CSSProperties = {
   backgroundColor: 'transparent',
   border: '1px solid #3c3c3c',
   borderRadius: 4,
-  cursor: 'pointer',
-}
+  cursor: 'pointer' }
 
 interface FetchModelsOptions {
   preferredModel?: string
@@ -106,22 +80,27 @@ interface SettingsFormProps {
 }
 
 export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) {
-  const [tab, setTab] = useState<'models' | 'rules'>('models')
+  const [tab, setTab] = useState<'models' | 'rules' | 'personas' | 'features'>('models')
+  const [personaOptions, setPersonaOptions] = useState<string[]>([])
   const [openaiKey, setOpenaiKey] = useState('')
   const [anthropicKey, setAnthropicKey] = useState('')
   const [xaiKey, setXaiKey] = useState('')
   const [ollamaBaseUrl, setOllamaBaseUrl] = useState(DEFAULT_OLLAMA_BASE_URL)
+  const [ollamaContextSize, setOllamaContextSize] = useState(DEFAULT_OLLAMA_CONTEXT_SIZE)
+  const [llamacppBaseUrl, setLlamacppBaseUrl] = useState(DEFAULT_LLAMACPP_BASE_URL)
+  const [llamacppContextSize, setLlamacppContextSize] = useState(DEFAULT_LLAMACPP_CONTEXT_SIZE)
+  const [showBuildOutputs, setShowBuildOutputs] = useState(true)
   const [yoloMode, setYoloMode] = useState(false)
   const [maxIterations, setMaxIterations] = useState(100)
   const [permissions, setPermissions] = useState<AgentPermissions>({ ...DEFAULT_AGENT_PERMISSIONS })
+  const [defaultPersona, setDefaultPersona] = useState('')
   const [compactTokenThreshold, setCompactTokenThreshold] = useState(40_000)
   const [autoMemory, setAutoMemory] = useState(false)
   const [maxSubagents, setMaxSubagents] = useState(3)
   const [cost, setCost] = useState<CostSettings>({ ...DEFAULT_COST_SETTINGS })
   const [video, setVideo] = useState<VideoSettings>({ ...DEFAULT_VIDEO_SETTINGS })
   const [presentation, setPresentation] = useState<PresentationSettings>({
-    ...DEFAULT_PRESENTATION_SETTINGS,
-  })
+    ...DEFAULT_PRESENTATION_SETTINGS })
   const [runwayKey, setRunwayKey] = useState('')
   const [provider, setProvider] = useState<LLMProviderId>('openai')
   const [model, setModel] = useState('gpt-4o')
@@ -143,23 +122,22 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
     aKey: string,
     ollamaUrl: string,
     xKey: string,
-    options?: FetchModelsOptions,
+    options?: FetchModelsOptions & { llamacppUrl?: string },
   ) => {
     if (!hasCodexApi()) return
     setLoadingModels(true)
     setError(null)
     try {
-      const current = await window.codex.invoke(IPC_CHANNELS.SETTINGS_GET)
-      await window.codex.invoke(IPC_CHANNELS.SETTINGS_SET, {
+      const current = await window.codex.settings.get()
+      await window.codex.settings.set({
         models: {
           ...current.models,
           openaiApiKey: oKey || current.models.openaiApiKey,
           anthropicApiKey: aKey || current.models.anthropicApiKey,
           xaiApiKey: xKey || current.models.xaiApiKey,
           ollamaBaseUrl: ollamaUrl || current.models.ollamaBaseUrl,
-        },
-      })
-      const list = await window.codex.invoke(IPC_CHANNELS.MODELS_LIST, p)
+          llamacppBaseUrl: options?.llamacppUrl || current.models.llamacppBaseUrl } })
+      const list = await window.codex.models.list(p)
       setModels(list)
       if (list.length === 0) return
 
@@ -181,8 +159,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
       return
     }
     setLoading(true)
-    void window.codex
-      .invoke(IPC_CHANNELS.SETTINGS_GET)
+    void window.codex.settings.get()
       .then(async (settings) => {
         const p = settings.models.defaultProvider ?? 'openai'
         const oKey = settings.models.openaiApiKey ?? ''
@@ -190,6 +167,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
         const xKey = settings.models.xaiApiKey ?? ''
         const savedModel = settings.models.defaultChatModel
         const ollamaUrl = settings.models.ollamaBaseUrl ?? DEFAULT_OLLAMA_BASE_URL
+        const llamacppUrl = settings.models.llamacppBaseUrl ?? DEFAULT_LLAMACPP_BASE_URL
         setProvider(p)
         setModel(savedModel)
         setRoutingMode(settings.routing?.mode ?? 'fixed')
@@ -203,12 +181,26 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
         setAnthropicKey(aKey)
         setXaiKey(xKey)
         setOllamaBaseUrl(ollamaUrl)
+        setOllamaContextSize(
+          settings.models.ollamaContextSize ?? DEFAULT_OLLAMA_CONTEXT_SIZE,
+        )
+        setLlamacppBaseUrl(llamacppUrl)
+        setLlamacppContextSize(
+          settings.models.llamacppContextSize ?? DEFAULT_LLAMACPP_CONTEXT_SIZE,
+        )
+        setShowBuildOutputs(Boolean(settings.general?.showBuildOutputs))
         setYoloMode(settings.agent.yoloMode)
         setMaxIterations(settings.agent.maxIterations)
         setPermissions({
           ...DEFAULT_AGENT_PERMISSIONS,
-          ...settings.agent.permissions,
-        })
+          ...settings.agent.permissions })
+        setDefaultPersona(settings.agent.defaultPersona ?? '')
+        try {
+          const list = await window.codex.personas.list()
+          setPersonaOptions(list.map((p) => p.name))
+        } catch {
+          setPersonaOptions([])
+        }
         setCompactTokenThreshold(settings.agent.compactTokenThreshold ?? 40_000)
         setAutoMemory(Boolean(settings.agent.autoMemory))
         setMaxSubagents(settings.agent.maxSubagents ?? 3)
@@ -216,7 +208,9 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
         setVideo({ ...DEFAULT_VIDEO_SETTINGS, ...settings.video })
         setPresentation({ ...DEFAULT_PRESENTATION_SETTINGS, ...settings.presentation })
         setRunwayKey(settings.video?.runwayApiKey ?? '')
-        await fetchModels(p, oKey, aKey, ollamaUrl, xKey, { preferredModel: savedModel })
+        await fetchModels(p, oKey, aKey, ollamaUrl, xKey, {
+          preferredModel: savedModel,
+          llamacppUrl })
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : '設定の読み込みに失敗しました')
@@ -226,7 +220,9 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
 
   const handleProviderChange = (p: LLMProviderId) => {
     setProvider(p)
-    void fetchModels(p, openaiKey, anthropicKey, ollamaBaseUrl, xaiKey, { resetModel: true })
+    void fetchModels(p, openaiKey, anthropicKey, ollamaBaseUrl, xaiKey, {
+      resetModel: true,
+      llamacppUrl: llamacppBaseUrl })
   }
 
   const handleSubmit = async (e: FormEvent) => {
@@ -234,32 +230,42 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
     if (!hasCodexApi()) return
     setError(null)
     try {
-      const current = await window.codex.invoke(IPC_CHANNELS.SETTINGS_GET)
-      await window.codex.invoke(IPC_CHANNELS.SETTINGS_SET, {
+      const current = await window.codex.settings.get()
+      await window.codex.settings.set({
+        general: {
+          ...current.general,
+          showBuildOutputs },
         models: {
           defaultProvider: provider,
           openaiApiKey: openaiKey,
           anthropicApiKey: anthropicKey,
           xaiApiKey: xaiKey,
           ollamaBaseUrl,
+          ollamaContextSize: Math.max(
+            2048,
+            Math.floor(ollamaContextSize) || DEFAULT_OLLAMA_CONTEXT_SIZE,
+          ),
+          llamacppBaseUrl,
+          llamacppContextSize: Math.max(
+            2048,
+            Math.floor(llamacppContextSize) || DEFAULT_LLAMACPP_CONTEXT_SIZE,
+          ),
           defaultChatModel: model,
-          defaultAgentModel: model,
-        },
+          defaultAgentModel: model },
         routing: {
           ...current.routing,
           mode: routingMode,
           fallbackChain: fallbackChain.filter((c) => c.model.trim().length > 0),
-          maxAttempts: Math.min(5, Math.max(1, Math.floor(maxAttempts) || 3)),
-        },
+          maxAttempts: Math.min(5, Math.max(1, Math.floor(maxAttempts) || 3)) },
         agent: {
           ...current.agent,
           yoloMode,
           maxIterations: Math.min(500, Math.max(5, Math.floor(maxIterations) || 100)),
           permissions,
+          defaultPersona: defaultPersona.trim() || undefined,
           compactTokenThreshold: Math.max(0, Math.floor(compactTokenThreshold) || 0),
           autoMemory,
-          maxSubagents: Math.min(8, Math.max(1, Math.floor(maxSubagents) || 3)),
-        },
+          maxSubagents: Math.min(8, Math.max(1, Math.floor(maxSubagents) || 3)) },
         cost: {
           ...current.cost,
           ...cost,
@@ -268,18 +274,14 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
             128_000,
             Math.max(256, Math.floor(cost.maxOutputTokensAgent) || 8192),
           ),
-          dailyBudgetUsd: Math.max(0, Number(cost.dailyBudgetUsd) || 0),
-        },
+          dailyBudgetUsd: Math.max(0, Number(cost.dailyBudgetUsd) || 0) },
         video: {
           ...current.video,
           ...video,
-          runwayApiKey: runwayKey,
-        },
+          runwayApiKey: runwayKey },
         presentation: {
           ...current.presentation,
-          ...presentation,
-        },
-      })
+          ...presentation } })
       setSaved(true)
       onSaved?.()
       setTimeout(() => setSaved(false), 2000)
@@ -292,27 +294,44 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
     ? { ...panelStyle, maxWidth: 560, margin: '0 auto', textAlign: 'left' }
     : panelStyle
 
-  const tabBtn = (id: 'models' | 'rules', _label: string): CSSProperties => ({
+  const tabBtn = (
+    id: 'models' | 'rules' | 'personas' | 'features',
+    _label: string,
+  ): CSSProperties => ({
     flex: 1,
+    minWidth: 72,
     padding: '8px 12px',
     fontSize: 13,
     cursor: 'pointer',
     border: '1px solid #3c3c3c',
     borderRadius: 4,
     backgroundColor: tab === id ? '#0078d4' : 'transparent',
-    color: tab === id ? '#fff' : '#858585',
-  })
+    color: tab === id ? '#fff' : '#858585' })
 
   return (
     <form style={wrapperStyle} onSubmit={(e) => void handleSubmit(e)}>
       <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: '#ffffff' }}>設定</h2>
 
-      <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+      <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
         <button type="button" style={tabBtn('models', 'モデル')} onClick={() => setTab('models')}>
           モデル
         </button>
         <button type="button" style={tabBtn('rules', 'Rules')} onClick={() => setTab('rules')}>
           Rules
+        </button>
+        <button
+          type="button"
+          style={tabBtn('personas', 'Personas')}
+          onClick={() => setTab('personas')}
+        >
+          Personas
+        </button>
+        <button
+          type="button"
+          style={tabBtn('features', '機能')}
+          onClick={() => setTab('features')}
+        >
+          機能
         </button>
       </div>
 
@@ -325,10 +344,28 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
             )}
           </div>
         </div>
+      ) : tab === 'personas' ? (
+        <div style={{ marginTop: 16 }}>
+          <PersonasSettings />
+          <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}>
+            {onCancel && (
+              <button type="button" style={btnSecondary} onClick={onCancel}>閉じる</button>
+            )}
+          </div>
+        </div>
+      ) : tab === 'features' ? (
+        <div style={{ marginTop: 16 }}>
+          <FeaturesSettings />
+          <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}>
+            {onCancel && (
+              <button type="button" style={btnSecondary} onClick={onCancel}>閉じる</button>
+            )}
+          </div>
+        </div>
       ) : (
         <>
           <p style={{ margin: '12px 0 0', fontSize: 13, color: '#858585' }}>
-            API キーとチャットモデルを設定します
+            API キーとチャットモデルを設定します（キーは OS の秘密ストアに保存）
           </p>
 
           {error && (
@@ -396,6 +433,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                 <option value="anthropic">Anthropic</option>
                 <option value="xai">xAI (Grok)</option>
                 <option value="ollama">Ollama (Local)</option>
+                <option value="llamacpp">llama.cpp (Local)</option>
               </select>
 
               {provider === 'ollama' && (
@@ -409,6 +447,52 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                     value={ollamaBaseUrl}
                     onChange={(e) => setOllamaBaseUrl(e.target.value)}
                   />
+                  <label style={labelStyle} htmlFor="ollama-context-size">
+                    Context budget（num_ctx 想定値・プリフィル抑制用）
+                  </label>
+                  <input
+                    id="ollama-context-size"
+                    type="number"
+                    min={2048}
+                    step={1024}
+                    style={inputStyle}
+                    value={ollamaContextSize}
+                    onChange={(e) => setOllamaContextSize(Number(e.target.value))}
+                  />
+                  <p style={{ margin: '6px 0 0', fontSize: 11, color: '#858585' }}>
+                    ローカルはプロンプトが長いほど初速が落ちます。サーバの num_ctx に合わせてください（既定
+                    {DEFAULT_OLLAMA_CONTEXT_SIZE}）。
+                  </p>
+                </>
+              )}
+
+              {provider === 'llamacpp' && (
+                <>
+                  <label style={labelStyle} htmlFor="llamacpp-base-url">llama.cpp Base URL</label>
+                  <input
+                    id="llamacpp-base-url"
+                    type="text"
+                    style={inputStyle}
+                    placeholder={DEFAULT_LLAMACPP_BASE_URL}
+                    value={llamacppBaseUrl}
+                    onChange={(e) => setLlamacppBaseUrl(e.target.value)}
+                  />
+                  <label style={labelStyle} htmlFor="llamacpp-context-size">
+                    Context size（llama-server の -c と同じ値）
+                  </label>
+                  <input
+                    id="llamacpp-context-size"
+                    type="number"
+                    min={2048}
+                    step={1024}
+                    style={inputStyle}
+                    value={llamacppContextSize}
+                    onChange={(e) => setLlamacppContextSize(Number(e.target.value))}
+                  />
+                  <p style={{ margin: '6px 0 0', fontSize: 11, color: '#858585' }}>
+                    llama-server の OpenAI 互換 API（例: {DEFAULT_LLAMACPP_MODEL}）。現在のサーバは
+                    -c 32768。不一致だと Context size exceeded になります。
+                  </p>
                 </>
               )}
 
@@ -418,7 +502,10 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                   type="button"
                   style={{ ...btnSecondary, padding: '4px 10px', fontSize: 12 }}
                   disabled={loadingModels}
-                  onClick={() => void fetchModels(provider, openaiKey, anthropicKey, ollamaBaseUrl, xaiKey)}
+                  onClick={() =>
+                    void fetchModels(provider, openaiKey, anthropicKey, ollamaBaseUrl, xaiKey, {
+                      llamacppUrl: llamacppBaseUrl })
+                  }
                 >
                   {loadingModels ? '取得中...' : 'モデル一覧を更新'}
                 </button>
@@ -456,8 +543,8 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                 <option value="auto">Auto（複雑度・トークン量で課金最適化）</option>
               </select>
               <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6e6e6e' }}>
-                Auto は lite（安価）→ standard → premium の階層で選択し、失敗時に昇格します。
-                モデル ID は各 API の一覧から約 24 時間ごとに自動更新されます（ツール開始後は切替しません）。
+                Auto もまず設定の既定モデルを使い、失敗・未接続時だけ下のフォールバックチェーン →
+                lite/standard/premium カタログの順で切替します（ツール開始後は切替しません）。
               </p>
 
               {routingMode !== 'fixed' && (
@@ -467,8 +554,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                     padding: 12,
                     border: '1px solid #3c3c3c',
                     borderRadius: 6,
-                    backgroundColor: '#1e1e1e',
-                  }}
+                    backgroundColor: '#1e1e1e' }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                     <span style={{ fontSize: 12, color: '#858585' }}>フォールバックチェーン</span>
@@ -481,7 +567,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                     </button>
                   </div>
                   <p style={{ margin: '6px 0 10px', fontSize: 11, color: '#6e6e6e' }}>
-                    上から順に試行します。キー未設定のプロバイダはスキップされます。
+                    既定モデルの次に、上から順に試行します。キー未設定・未起動のプロバイダはスキップされます。
                   </p>
 
                   {fallbackChain.map((row, index) => (
@@ -492,8 +578,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                         gridTemplateColumns: '110px 1fr auto',
                         gap: 6,
                         marginBottom: 8,
-                        alignItems: 'center',
-                      }}
+                        alignItems: 'center' }}
                     >
                       <select
                         aria-label={`フォールバック ${index + 1} プロバイダ`}
@@ -510,6 +595,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                         <option value="anthropic">Anthropic</option>
                         <option value="xai">xAI</option>
                         <option value="ollama">Ollama</option>
+                        <option value="llamacpp">llama.cpp</option>
                       </select>
                       <input
                         aria-label={`フォールバック ${index + 1} モデル`}
@@ -533,8 +619,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                             ...btnSecondary,
                             padding: '4px 6px',
                             fontSize: 11,
-                            opacity: index === 0 ? 0.4 : 1,
-                          }}
+                            opacity: index === 0 ? 0.4 : 1 }}
                           onClick={() => {
                             if (index === 0) return
                             setFallbackChain((prev) => {
@@ -554,8 +639,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                             ...btnSecondary,
                             padding: '4px 6px',
                             fontSize: 11,
-                            opacity: index >= fallbackChain.length - 1 ? 0.4 : 1,
-                          }}
+                            opacity: index >= fallbackChain.length - 1 ? 0.4 : 1 }}
                           onClick={() => {
                             if (index >= fallbackChain.length - 1) return
                             setFallbackChain((prev) => {
@@ -576,8 +660,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                             padding: '4px 6px',
                             fontSize: 11,
                             color: '#f87171',
-                            opacity: fallbackChain.length <= 1 ? 0.4 : 1,
-                          }}
+                            opacity: fallbackChain.length <= 1 ? 0.4 : 1 }}
                           onClick={() => {
                             if (fallbackChain.length <= 1) return
                             setFallbackChain((prev) => prev.filter((_, i) => i !== index))
@@ -616,8 +699,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                           color: '#cccccc',
                           backgroundColor: '#252526',
                           border: '1px solid #3c3c3c',
-                          borderRadius: 4,
-                        }}
+                          borderRadius: 4 }}
                         value={maxAttempts}
                         onChange={(e) => setMaxAttempts(Number(e.target.value) || 3)}
                       />
@@ -625,6 +707,37 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                   </div>
                 </div>
               )}
+
+              <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8, marginTop: 16 }}>
+                <input
+                  type="checkbox"
+                  checked={showBuildOutputs}
+                  onChange={(e) => setShowBuildOutputs(e.target.checked)}
+                />
+                ビルド成果物を Explorer に表示（dist / out / release 等・浅い一覧）
+              </label>
+              <p style={{ margin: '4px 0 0', fontSize: 11, color: '#6e6e6e' }}>
+                オン（既定）で dist などを Explorer に表示します。オフにすると索引・監視・Explorer から除外します
+              </p>
+
+              <div style={{ marginTop: 16 }}>
+                <button
+                  type="button"
+                  style={{
+                    ...inputStyle,
+                    width: 'auto',
+                    cursor: 'pointer',
+                    padding: '6px 12px' }}
+                  onClick={() => {
+                    void window.codex.updater.check()
+                  }}
+                >
+                  更新を確認…
+                </button>
+                <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6e6e6e' }}>
+                  GitHub Releases から新しいバージョンを確認します（パッケージ版のみ）
+                </p>
+              </div>
 
               <label style={labelStyle} htmlFor="max-iterations">最大イテレーション（Agent）</label>
               <input
@@ -641,11 +754,61 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                 1 回の Agent 実行で許可するツール呼び出しループの上限（5〜500）
               </p>
 
+              <p style={{ ...labelStyle, marginTop: 16, marginBottom: 8 }}>
+                権限プリセット
+                {(() => {
+                  const matched = matchPermissionProfile(permissions, yoloMode)
+                  return (
+                    <span style={{ marginLeft: 8, color: matched === 'custom' ? '#fbbf24' : '#858585' }}>
+                      （現在: {matched}）
+                    </span>
+                  )
+                })()}
+              </p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} role="group" aria-label="権限プリセット">
+                {(
+                  [
+                    ['readonly', '調査のみ'],
+                    ['coding', '通常開発'],
+                    ['yolo', '全自動'],
+                  ] as const
+                ).map(([id, label]) => {
+                  const active = matchPermissionProfile(permissions, yoloMode) === id
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      style={{
+                        ...btnSecondary,
+                        padding: '6px 12px',
+                        fontSize: 12,
+                        color: active ? '#fff' : '#cccccc',
+                        backgroundColor: active ? (id === 'yolo' ? '#b45309' : '#0078d4') : 'transparent',
+                        borderColor: active ? 'transparent' : '#3c3c3c' }}
+                      onClick={() => {
+                        const preset = id as PermissionProfile
+                        setPermissions({ ...PERMISSION_PROFILES[preset] })
+                        setYoloMode(preset === 'yolo')
+                      }}
+                    >
+                      {id} · {label}
+                    </button>
+                  )
+                })}
+              </div>
+              <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6e6e6e' }}>
+                readonly = 読取のみ / coding = 編集・Shell は承認 / yolo = すべて自動（自己責任）
+              </p>
+
               <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8, marginTop: 16 }}>
                 <input
                   type="checkbox"
                   checked={yoloMode}
-                  onChange={(e) => setYoloMode(e.target.checked)}
+                  onChange={(e) => {
+                    const on = e.target.checked
+                    setYoloMode(on)
+                    if (on) setPermissions({ ...PERMISSION_PROFILES.yolo })
+                  }}
                 />
                 YOLO モード（Agent の書込・Shell を承認なしで実行）
               </label>
@@ -653,13 +816,37 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                 有効にするとファイル変更やコマンド実行が自動適用されます。自己責任で使用してください。
               </p>
 
-              <p style={{ ...labelStyle, marginTop: 20, marginBottom: 0 }}>ツール権限（YOLO が OFF のとき）</p>
+              <label style={labelStyle} htmlFor="default-persona">
+                既定 Persona（任意・新セッション向け）
+              </label>
+              <select
+                id="default-persona"
+                style={selectStyle}
+                value={defaultPersona}
+                onChange={(e) => setDefaultPersona(e.target.value)}
+              >
+                <option value="">なし</option>
+                {personaOptions.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+                {defaultPersona && !personaOptions.includes(defaultPersona) ? (
+                  <option value={defaultPersona}>{defaultPersona}（未検出）</option>
+                ) : null}
+              </select>
+              <p style={{ margin: '4px 0 0', fontSize: 11, color: '#6e6e6e' }}>
+                セッション固定は AI パネルの Persona ピッカー、または `/persona` を使用
+              </p>
+
+              <p style={{ ...labelStyle, marginTop: 20, marginBottom: 0 }}>ツール権限（詳細・カスタム）</p>
               {([
                 ['read', '読取（Read / Grep / Glob / Task）'],
                 ['edit', '編集（Write / StrReplace / Delete / MemoryAppend）'],
                 ['shell', 'Shell'],
                 ['network', 'ネットワーク（WebSearch）'],
                 ['media', 'メディア（GenerateVideo / GeneratePresentation）'],
+                ['mcp', 'MCP（外部ツール mcp__*）'],
               ] as const).map(([key, label]) => (
                 <label key={key} style={labelStyle} htmlFor={`perm-${key}`}>
                   {label}
@@ -671,8 +858,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                     onChange={(e) =>
                       setPermissions((prev) => ({
                         ...prev,
-                        [key]: e.target.value as PermissionAction,
-                      }))
+                        [key]: e.target.value as PermissionAction }))
                     }
                   >
                     <option value="allow">allow（自動実行）</option>
@@ -695,7 +881,8 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                 onChange={(e) => setCompactTokenThreshold(Number(e.target.value) || 0)}
               />
               <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6e6e6e' }}>
-                Agent 履歴がこの推定トークンを超えると自動 Compact（0 で既定の履歴予算のみ）
+                Agent 履歴がこの推定トークンを超えると自動 Compact。Ollama / llama.cpp では Context
+                budget 側でも上限がかかり、巨大プロンプトによる初速悪化を防ぎます（推奨 6000〜12000）。
               </p>
 
               <p style={{ ...labelStyle, marginTop: 24, marginBottom: 0, color: '#cccccc', fontSize: 13 }}>
@@ -772,8 +959,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                 onChange={(e) =>
                   setPresentation((p) => ({
                     ...p,
-                    themeId: e.target.value as PresentationThemeId,
-                  }))
+                    themeId: e.target.value as PresentationThemeId }))
                 }
               >
                 <option value="midnight">midnight（ダーク・技術）</option>
@@ -794,8 +980,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                 onChange={(e) =>
                   setPresentation((p) => ({
                     ...p,
-                    maxSlides: Number(e.target.value) || 16,
-                  }))
+                    maxSlides: Number(e.target.value) || 16 }))
                 }
               />
               <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -927,8 +1112,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
 export function SettingsDialog({
   open,
   onClose,
-  onSaved,
-}: {
+  onSaved }: {
   open: boolean
   onClose: () => void
   onSaved?: () => void
@@ -961,8 +1145,7 @@ function GearIcon() {
 
 export function SettingsButton({
   variant = 'icon',
-  className = '',
-}: {
+  className = '' }: {
   variant?: 'icon' | 'text'
   className?: string
 }) {
@@ -1001,6 +1184,5 @@ export function useSettingsDialog() {
     openSettings: () => setOpen(true),
     settingsDialog: (
       <SettingsDialog open={open} onClose={() => setOpen(false)} onSaved={() => void loadSettings()} />
-    ),
-  }
+    ) }
 }

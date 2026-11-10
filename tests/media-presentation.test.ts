@@ -35,10 +35,31 @@ CREATE POLICY tenant_isolation ON orders
     // Quality pass: heuristic should not be bullets-only
     expect(
       deck.slides.some((s) =>
-        ['quote', 'section', 'two_column', 'code'].includes(s.layout),
+        ['quote', 'section', 'two_column', 'code', 'diagram'].includes(s.layout),
       ),
     ).toBe(true)
     expect(slugifyDeckTitle(deck.title)).toMatch(/rls|入門/i)
+  })
+
+  it('treats mermaid fences as diagram slides', () => {
+    const md = `# Flow
+
+## 処理流れ
+
+\`\`\`mermaid
+flowchart LR
+  A[Request] --> B[API]
+  B --> C[DB]
+\`\`\`
+`
+    const deck = buildHeuristicDeck(md, { themeId: 'paper', maxSlides: 10 })
+    const diagram = deck.slides.find((s) => s.layout === 'diagram')
+    expect(diagram).toBeTruthy()
+    expect(diagram?.codeLanguage).toBe('mermaid')
+    expect(diagram?.code).toContain('flowchart')
+    expect(deck.slides.every((s) => !(s.layout === 'code' && s.codeLanguage === 'mermaid'))).toBe(
+      true,
+    )
   })
 
   it('parses and normalizes JSON deck', () => {

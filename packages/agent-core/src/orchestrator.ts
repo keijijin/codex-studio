@@ -1,9 +1,10 @@
 import type { LLMProvider, AgentMessage, ToolCall, LlmUsage } from '@codex/llm-adapters'
 import { addUsage, emptyUsage } from '@codex/llm-adapters'
 import type { AgentPermissions, ApprovalRequest } from '@codex/shared'
-import { DEFAULT_AGENT_PERMISSIONS, permissionForTool } from '@codex/shared'
-import type { ToolRegistry, ToolResult } from '@codex/tools'
+import { DEFAULT_AGENT_PERMISSIONS, isToolEnabled, permissionForTool } from '@codex/shared'
+import type { ToolRegistry, ToolResult, WorkspaceFs } from '@codex/tools'
 import type { ToolContext } from '@codex/tools'
+import { createWorkspaceFs, secretReadDecision } from '@codex/tools'
 import { estimateMessagesTokens, trimAgentHistory } from './context-builder'
 import { loadProjectContext } from './project-context'
 import { loadRules } from './rules-loader'
@@ -29,12 +30,27 @@ export interface AgentRunContext {
   signal: AbortSignal
   resolvePath: (path: string) => string
   getRelativePath: (absolutePath: string) => string
+  /** Preferred over creating from workspaceRoot alone (supports multi-root). */
+  fs?: WorkspaceFs
+  /**
+   * Secret-path Read policy (S3 / U-1).
+   * Trusted: `ask`. Untrusted: `deny`. Always-deny paths ignore YOLO.
+   */
+  secretReadPolicy?: ToolContext['secretReadPolicy']
+  /** Skip gitignored / build-output paths in Glob etc. */
+  isIgnoredPath?: (relativePath: string) => boolean
   onFileChanged?: (absolutePath: string) => void
+  /** Workspace may have changed without a specific path (e.g. Shell). */
+  onWorkspaceChanged?: () => void
   requestApproval?: (request: ApprovalRequest) => Promise<boolean>
   /** Prebuilt rules + project context + memory prompt. */
   rulesPrompt?: string
   /** Extra system instructions from an invoked Skill */
   skillPrompt?: string
+  /** Extra system instructions from an active Persona */
+  personaPrompt?: string
+  /** Plan mode: read-only tools, produce an actionable plan (no edits) */
+  planMode?: boolean
   /** Nested subagent depth (0 = top-level parent) */
   subagentDepth?: number
   /** Wired for Task tool */
@@ -53,6 +69,28 @@ export interface AgentRunContext {
   getVideoConfig?: ToolContext['getVideoConfig']
   /** Keys/settings for GeneratePresentation. */
   getPresentationConfig?: ToolContext['getPresentationConfig']
+  /** Optional Langfuse / observability hooks (parent agent turn). */
+  observability?: {
+    onLlmStart: (info: {
+      iteration: number
+      model: string
+      messageCount: number
+    }) => {
+      end: (info: {
+        outputText: string
+        toolCalls?: unknown
+        usage?: LlmUsage
+        error?: string
+      }) => void
+    }
+    onToolStart: (info: {
+      toolCallId: string
+      tool: string
+      args: unknown
+    }) => {
+      end: (info: { output: string; success: boolean }) => void
+    }
+  }
 }
 
 export type AgentOrchestratorEvent =
@@ -72,7 +110,10 @@ const buildSystemPrompt = (
   skillPrompt?: string,
   languageBlock = '',
   isSubagent = false,
+  personaPrompt?: string,
+  planMode = false,
 ) => {
+  const personaBlock = personaPrompt ? `\n\n${personaPrompt}` : ''
   const skillBlock = skillPrompt ? `\n\n${skillPrompt}` : ''
   if (isSubagent) {
     return `You are a read-only Codex Studio subagent.
@@ -81,7 +122,23 @@ Workspace root: ${workspaceRoot}
 
 You may only use Read, Grep, and Glob. Do not attempt to modify files or run shell commands.
 Return a concise factual report for the parent agent.
-Use markdown for formatting.${languageBlock}${rules}${skillBlock}`
+Use markdown for formatting.${languageBlock}${rules}${personaBlock}${skillBlock}`
+  }
+
+  if (planMode) {
+    return `You are Codex Studio in Plan mode.
+
+Workspace root: ${workspaceRoot}
+
+You may use Read, Grep, Glob, and GitStatus only. Do not modify files, run Shell, or call write tools.
+Investigate enough to produce a concrete implementation plan the user can approve.
+Structure the final answer as:
+1. Goal
+2. Findings (key files / constraints)
+3. Step-by-step plan (ordered, actionable)
+4. Risks / open questions
+
+Use markdown. After the user approves, they will switch to Agent mode to execute.${languageBlock}${rules}${personaBlock}${skillBlock}`
   }
 
   return `You are Codex Studio, an AI coding assistant with access to tools for reading, searching, and modifying the codebase.
@@ -89,23 +146,24 @@ Use markdown for formatting.${languageBlock}${rules}${skillBlock}`
 Workspace root: ${workspaceRoot}
 
 Tools available:
-- Read, Grep, Glob — inspect and search the codebase
+- Read, Grep, Glob, GitStatus — inspect and search the codebase / git working tree
 - Write, StrReplace, Delete — modify files (subject to permission policy)
 - Shell — run commands (subject to permission policy). Login profiles (~/.bash_profile, ~/.zshrc, PowerShell $PROFILE, etc.) are sourced automatically — do not prepend source ~/.bash_profile yourself.
 - Task — spawn a read-only subagent for a focused investigation (parallel Tasks allowed)
 - Team — run a local multi-role team from .codex/teams/ (shared BOARD.md)
 - WebSearch — search the public web for external docs / errors
 - MemoryAppend — append durable project notes to .codex/memory/MEMORY.md
-- GenerateVideo — Markdown / 手順書から解説動画を生成（slides+TTS / Runway / hybrid）。出力は .codex/video/
-- GeneratePresentation — Markdown からプレゼン資料（PPTX + SVG）を生成。出力は .codex/presentation/
+- GenerateVideo — Markdown / 手順書から解説動画を生成（slides+TTS / Runway / hybrid）。出力は videos/<slug>/<slug>.mp4
+- GeneratePresentation — Markdown からプレゼン資料（PPTX + Mermaid 図）を生成。出力は presentations/<slug>/<slug>.pptx
 
 For code questions, use Read/Grep/Glob first. For independent research threads, spawn Task subagents then synthesize.
 For multi-perspective reviews, prefer Team when a matching team exists.
+For department-style decisions (sales / marketing / legal / engineering → CEO → execute), prefer Team \`virtual-company\` or /virtual-company.
 To make changes, use Write or StrReplace.
 When the user asks for a tutorial / explainer video from docs or Markdown, use GenerateVideo (or the /video-tutorial skill).
 When the user asks for slides / presentation / PPTX / deck from docs or Markdown, use GeneratePresentation (or the /presentation skill).
 Use workspace-relative paths (e.g. README.md, packages/app/src/main/index.ts).
-Use markdown for formatting.${languageBlock}${rules}${skillBlock}`
+Use markdown for formatting.${languageBlock}${rules}${personaBlock}${skillBlock}`
 }
 
 function resolvePermission(
@@ -115,6 +173,35 @@ function resolvePermission(
 ): 'allow' | 'ask' | 'deny' {
   if (yoloMode) return 'allow'
   return permissionForTool(toolName, permissions)
+}
+
+function isReadTool(name: string): boolean {
+  return name === 'Read' || name.toLowerCase() === 'read'
+}
+
+/** Secret paths can force ask/deny even when category `read` is allow / YOLO. */
+function resolveToolPermission(
+  toolName: string,
+  call: ToolCall,
+  ctx: AgentRunContext,
+  baseToolCtx: Omit<ToolContext, 'executeMode'>,
+  permissions: AgentPermissions,
+): 'allow' | 'ask' | 'deny' {
+  if (isReadTool(toolName)) {
+    const pathArg = String(call.arguments?.path ?? '')
+    if (pathArg) {
+      try {
+        const resolved = baseToolCtx.fs.resolve(pathArg)
+        const rel = baseToolCtx.getRelativePath(resolved)
+        const secret = secretReadDecision(rel, ctx.secretReadPolicy ?? 'ask')
+        if (secret === 'deny') return 'deny'
+        if (secret === 'ask' && !ctx.yoloMode) return 'ask'
+      } catch {
+        // Path resolution errors are handled by the tool itself.
+      }
+    }
+  }
+  return resolvePermission(toolName, ctx.yoloMode, permissions)
 }
 
 function isTaskTool(name: string): boolean {
@@ -155,25 +242,32 @@ export class AgentOrchestrator {
           ctx.skillPrompt,
           languageBlock,
           depth > 0,
+          ctx.personaPrompt,
+          Boolean(ctx.planMode),
         ),
       },
       ...history,
     ]
 
     const tools = this.registry.list(ctx.enabledTools)
+    const fs = ctx.fs ?? createWorkspaceFs(ctx.workspaceRoot)
     const baseToolCtx: Omit<ToolContext, 'executeMode'> = {
       workspaceRoot: ctx.workspaceRoot,
       sessionId: ctx.sessionId,
       signal: ctx.signal,
+      fs,
       resolvePath: ctx.resolvePath,
       getRelativePath: ctx.getRelativePath,
+      isIgnoredPath: ctx.isIgnoredPath,
       onFileChanged: ctx.onFileChanged,
+      onWorkspaceChanged: ctx.onWorkspaceChanged,
       subagentDepth: depth,
       runSubagent: ctx.runSubagent,
       runTeam: ctx.runTeam,
       getShellEnv: ctx.getShellEnv,
       getVideoConfig: ctx.getVideoConfig,
       getPresentationConfig: ctx.getPresentationConfig,
+      secretReadPolicy: ctx.secretReadPolicy ?? 'ask',
     }
 
     const budget =
@@ -197,27 +291,57 @@ export class AgentOrchestrator {
 
       let assistantText = ''
       let pendingToolCalls: ToolCall[] = []
-
-      for await (const chunk of this.llm.agentChat(messages, {
+      let iterationUsage: LlmUsage | undefined
+      const llmObs = ctx.observability?.onLlmStart({
+        iteration: i,
         model: ctx.modelId,
-        apiKey: ctx.apiKey,
-        baseUrl: ctx.baseUrl,
-        tools,
-        signal: ctx.signal,
-        maxTokens: ctx.maxTokens,
-        enablePromptCache: ctx.enablePromptCache,
-      })) {
-        if (chunk.type === 'text') {
-          assistantText += chunk.delta
-          yield { type: 'text_delta', content: chunk.delta }
-        } else if (chunk.type === 'tool_calls') {
-          pendingToolCalls = chunk.calls
-        } else if (chunk.type === 'done') {
-          totalUsage = addUsage(totalUsage, chunk.usage)
-        } else if (chunk.type === 'error') {
-          yield { type: 'error', message: chunk.error }
-          return
+        messageCount: messages.length,
+      })
+
+      try {
+        for await (const chunk of this.llm.agentChat(messages, {
+          model: ctx.modelId,
+          apiKey: ctx.apiKey,
+          baseUrl: ctx.baseUrl,
+          tools,
+          signal: ctx.signal,
+          maxTokens: ctx.maxTokens,
+          enablePromptCache: ctx.enablePromptCache,
+        })) {
+          if (chunk.type === 'text') {
+            assistantText += chunk.delta
+            yield { type: 'text_delta', content: chunk.delta }
+          } else if (chunk.type === 'tool_calls') {
+            pendingToolCalls = chunk.calls
+          } else if (chunk.type === 'done') {
+            iterationUsage = chunk.usage
+            totalUsage = addUsage(totalUsage, chunk.usage)
+          } else if (chunk.type === 'error') {
+            llmObs?.end({
+              outputText: assistantText,
+              toolCalls: pendingToolCalls,
+              usage: iterationUsage,
+              error: chunk.error,
+            })
+            yield { type: 'error', message: chunk.error }
+            return
+          }
         }
+        llmObs?.end({
+          outputText: assistantText,
+          toolCalls: pendingToolCalls,
+          usage: iterationUsage,
+        })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        llmObs?.end({
+          outputText: assistantText,
+          toolCalls: pendingToolCalls,
+          usage: iterationUsage,
+          error: message,
+        })
+        yield { type: 'error', message }
+        return
       }
 
       if (pendingToolCalls.length === 0) {
@@ -335,18 +459,57 @@ export class AgentOrchestrator {
     permissions: AgentPermissions,
     baseToolCtx: Omit<ToolContext, 'executeMode'>,
   ): Promise<ToolResult> {
-    const tool = this.registry.get(call.name)
-    const perm = resolvePermission(call.name, ctx.yoloMode, permissions)
+    const toolObs = ctx.observability?.onToolStart({
+      toolCallId: call.id,
+      tool: call.name,
+      args: call.arguments,
+    })
+    try {
+      const result = await this.executeToolCallInner(call, ctx, permissions, baseToolCtx)
+      toolObs?.end({ output: result.output, success: result.success })
+      return result
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      toolObs?.end({ output: message, success: false })
+      throw err
+    }
+  }
 
-    if (perm === 'deny') {
+  private async executeToolCallInner(
+    call: ToolCall,
+    ctx: AgentRunContext,
+    permissions: AgentPermissions,
+    baseToolCtx: Omit<ToolContext, 'executeMode'>,
+  ): Promise<ToolResult> {
+    const tool = this.registry.get(call.name)
+    const canonicalName = tool?.name ?? call.name
+
+    if (!isToolEnabled(canonicalName, ctx.enabledTools)) {
       return {
         success: false,
-        output: `Error: tool "${call.name}" is denied by permission policy`,
+        output: `Error: tool "${call.name}" is not enabled for this run (plan/readonly allow-list).`,
       }
     }
 
-    if (perm === 'ask' && tool?.requiresApproval) {
-      const preview = await this.registry.execute(call.name, call.arguments, {
+    const perm = resolveToolPermission(canonicalName, call, ctx, baseToolCtx, permissions)
+
+    if (perm === 'deny') {
+      const secretHint =
+        isReadTool(canonicalName) && call.arguments?.path
+          ? ' Secret paths (.env, keys, agent-env.captured) may be denied by workspace trust policy.'
+          : ''
+      return {
+        success: false,
+        output:
+          `Error: tool "${canonicalName}" is denied by permission policy.${secretHint} ` +
+          `Open Settings → Agent → set permission preset to coding (or yolo), ` +
+          `and ensure edit is not deny.`,
+      }
+    }
+
+    // Permission `ask` always requires preview + human approval (do not AND with requiresApproval).
+    if (perm === 'ask') {
+      const preview = await this.registry.execute(canonicalName, call.arguments, {
         ...baseToolCtx,
         executeMode: 'preview',
       })
@@ -358,9 +521,9 @@ export class AgentOrchestrator {
       const meta = preview.metadata ?? {}
       const approvalReq: ApprovalRequest = {
         toolCallId: call.id,
-        tool: call.name,
+        tool: canonicalName,
         path: String(meta.path ?? ''),
-        relativePath: String(meta.relativePath ?? meta.path ?? call.name),
+        relativePath: String(meta.relativePath ?? meta.path ?? canonicalName),
         oldContent: String(meta.oldContent ?? ''),
         newContent: String(meta.newContent ?? ''),
         summary: preview.output,
@@ -374,7 +537,7 @@ export class AgentOrchestrator {
       }
     }
 
-    return this.registry.execute(call.name, call.arguments, {
+    return this.registry.execute(canonicalName, call.arguments, {
       ...baseToolCtx,
       executeMode: 'apply',
     })

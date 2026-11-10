@@ -1,16 +1,8 @@
 import { readdir, stat } from 'fs/promises'
 import { join, relative } from 'path'
-import type { IndexStatus, SearchResult } from '@codex/shared'
+import type { IndexStatus, PathIgnore, SearchResult } from '@codex/shared'
+import { createDefaultPathIgnore } from '@codex/shared'
 import { searchInFiles, searchWithRipgrep } from './ripgrep'
-
-const IGNORED_DIRS = new Set([
-  'node_modules',
-  '.git',
-  'dist',
-  'out',
-  'release',
-  '.codex-studio',
-])
 
 const MAX_FILE_SIZE = 512 * 1024
 const PROGRESS_EVERY = 200
@@ -32,9 +24,14 @@ export class IndexService {
     indexedFiles: 0,
   }
   private onProgress?: (status: IndexStatus) => void
+  private ignoreRules: PathIgnore = createDefaultPathIgnore({ showBuildOutputs: false })
 
   setProgressCallback(cb: (status: IndexStatus) => void): void {
     this.onProgress = cb
+  }
+
+  setIgnoreRules(rules: PathIgnore): void {
+    this.ignoreRules = rules
   }
 
   getStatus(): IndexStatus {
@@ -76,7 +73,14 @@ export class IndexService {
   }
 
   async upsertFile(rootPath: string, filePath: string): Promise<void> {
-    if (this.rootPath !== rootPath) {
+    // Multi-root: allow upsert for any watched root once indexing has started
+    if (!this.rootPath) {
+      return
+    }
+
+    const rel = relative(rootPath, filePath)
+    if (this.ignoreRules.ignores(rel)) {
+      this.removeFile(filePath)
       return
     }
 
@@ -95,7 +99,7 @@ export class IndexService {
 
     const indexed: IndexedFile = {
       path: filePath,
-      relativePath: relative(rootPath, filePath),
+      relativePath: rel,
       size: fileStat.size,
       mtime: fileStat.mtimeMs,
     }
@@ -183,6 +187,9 @@ export class IndexService {
 
     for (const entry of entries) {
       const fullPath = join(dirPath, entry)
+      const rel = relative(root, fullPath)
+      if (this.ignoreRules.ignores(rel)) continue
+
       let entryStat
       try {
         entryStat = await stat(fullPath)
@@ -191,13 +198,11 @@ export class IndexService {
       }
 
       if (entryStat.isDirectory()) {
-        if (!IGNORED_DIRS.has(entry)) {
-          subdirs.push(fullPath)
-        }
+        subdirs.push(fullPath)
       } else if (entryStat.isFile() && entryStat.size <= MAX_FILE_SIZE) {
         this.files.push({
           path: fullPath,
-          relativePath: relative(root, fullPath),
+          relativePath: rel,
           size: entryStat.size,
           mtime: entryStat.mtimeMs,
         })

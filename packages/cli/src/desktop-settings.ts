@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
 import { APP_USER_DATA_DIR, type AppSettings } from '@codex/shared'
 
 /** Path to Electron `electron-store` file (same as the desktop app). */
@@ -17,6 +17,33 @@ export function desktopSettingsStorePath(): string {
   }
   const config = process.env.XDG_CONFIG_HOME || join(homedir(), '.config')
   return join(config, APP_USER_DATA_DIR, 'codex-studio.json')
+}
+
+/** OS-encrypted secrets written by the desktop app (not readable from CLI). */
+export function desktopSecretsEncPath(): string {
+  return join(dirname(desktopSettingsStorePath()), 'secrets.enc.json')
+}
+
+/** True when desktop app migrated API keys into safeStorage (CLI must use env). */
+export function desktopApiKeysInSafeStorage(): boolean {
+  if (!existsSync(desktopSecretsEncPath())) return false
+  const path = desktopSettingsStorePath()
+  if (!existsSync(path)) return true
+  try {
+    const raw = JSON.parse(readFileSync(path, 'utf-8')) as {
+      migratedSecretsToSafeStorage?: boolean
+      settings?: { models?: AppSettings['models'] }
+    }
+    if (raw.migratedSecretsToSafeStorage) return true
+    const models = raw.settings?.models
+    const hasPlain =
+      Boolean(models?.openaiApiKey) ||
+      Boolean(models?.anthropicApiKey) ||
+      Boolean(models?.xaiApiKey)
+    return !hasPlain
+  } catch {
+    return true
+  }
 }
 
 /** Models section saved by Codex Studio Settings (may be missing). */

@@ -20,11 +20,14 @@ export interface Session {
   title: string
   mode: 'ask' | 'agent' | 'plan'
   modelId: string
+  /** Sticky persona name for this session (Personas AI) */
+  personaName?: string
   createdAt: string
   updatedAt: string
 }
 
 import type { ToolCallRecord } from './agent'
+import type { TurnTrace } from './personas'
 
 export interface Message {
   id: string
@@ -33,19 +36,36 @@ export interface Message {
   content: string
   attachments?: Attachment[]
   toolCalls?: ToolCallRecord[]
+  /** Turn-level metadata (persona / model / cost) */
+  trace?: TurnTrace
   createdAt: string
 }
 
 export interface Attachment {
-  type: 'file' | 'folder' | 'selection'
+  type: 'file' | 'folder' | 'codebase' | 'selection' | 'image'
   path: string
   name: string
   content?: string
+  /** MIME type for image attachments */
+  mimeType?: string
 }
 
-export type LLMProviderId = 'openai' | 'anthropic' | 'ollama' | 'xai'
+export type LLMProviderId = 'openai' | 'anthropic' | 'ollama' | 'xai' | 'llamacpp'
 
 export const DEFAULT_OLLAMA_BASE_URL = 'http://localhost:11434'
+export const DEFAULT_LLAMACPP_BASE_URL = 'http://127.0.0.1:8080'
+export const DEFAULT_LLAMACPP_MODEL = 'Qwen-AgentWorld-35B-A3B-UD-Q4_K_M.gguf'
+/** Must match llama-server `-c` (your current server uses 32768). */
+export const DEFAULT_LLAMACPP_CONTEXT_SIZE = 32_768
+/**
+ * Soft context budget for Ollama when the server does not expose `-c`.
+ * Prefill dominates local latency — keep this modest unless the model is large-ctx.
+ */
+export const DEFAULT_OLLAMA_CONTEXT_SIZE = 16_384
+
+export function isLocalLlmProvider(provider: LLMProviderId): boolean {
+  return provider === 'ollama' || provider === 'llamacpp'
+}
 export const DEFAULT_XAI_BASE_URL = 'https://api.x.ai/v1'
 export const DEFAULT_XAI_MODEL = 'grok-4.5'
 
@@ -58,6 +78,17 @@ export interface ModelInfo {
 import type { AgentPermissions } from './permissions'
 import { DEFAULT_AGENT_PERMISSIONS } from './permissions'
 import { DEFAULT_ROUTING, type RoutingSettings } from './routing'
+import {
+  DEFAULT_KEYBINDINGS,
+  DEFAULT_SEMANTIC_SEARCH,
+  DEFAULT_TAB_COMPLETION,
+  DEFAULT_LANGFUSE,
+  type KeybindingMap,
+  type McpServerConfig,
+  type SemanticSearchSettings,
+  type TabCompletionSettings,
+  type LangfuseSettings,
+} from './features'
 
 export interface CostSettings {
   /** Append LLM usage lines to logs/usage.jsonl (default true) */
@@ -104,7 +135,7 @@ export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
   ttsVoice: 'alloy',
   maxShots: 12,
   maxGenerativeShots: 4,
-  outputDir: '.codex/video',
+  outputDir: 'videos',
 }
 
 export type PresentationThemeId = 'midnight' | 'paper' | 'forest' | 'coral'
@@ -123,13 +154,18 @@ export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
   themeId: 'midnight',
   maxSlides: 16,
   includeNotes: true,
-  outputDir: '.codex/presentation',
+  outputDir: 'presentations',
 }
 
 export interface AppSettings {
   general: {
     theme: 'dark' | 'light' | 'system'
     language: 'ja' | 'en'
+    /**
+     * When false, dist/out/release 等を Explorer・索引・監視から除外。
+     * When true (default), Explorer に浅い一覧で表示（深い走査・監視はしない）。
+     */
+    showBuildOutputs: boolean
   }
   models: {
     defaultProvider: LLMProviderId
@@ -140,6 +176,18 @@ export interface AppSettings {
     /** xAI (Grok) API key */
     xaiApiKey?: string
     ollamaBaseUrl?: string
+    /**
+     * Assumed Ollama context window for compact/prefill budgeting
+     * (default 16384). Raise only if the model was started with a larger num_ctx.
+     */
+    ollamaContextSize?: number
+    /** llama-server / llama.cpp OpenAI-compatible base (default http://127.0.0.1:8080) */
+    llamacppBaseUrl?: string
+    /**
+     * llama-server `-c` context size. Used to cap auto-compact so we don't
+     * send prompts larger than the server window (default 32768).
+     */
+    llamacppContextSize?: number
     /** Override xAI OpenAI-compatible base (default https://api.x.ai/v1) */
     xaiBaseUrl?: string
   }
@@ -155,6 +203,8 @@ export interface AppSettings {
     autoMemory: boolean
     /** Max concurrent Task subagents (1–8) */
     maxSubagents: number
+    /** Default persona name (without /persona) when invocation omits one */
+    defaultPersona?: string
   }
   /** Cost controls and usage logging */
   cost: CostSettings
@@ -162,18 +212,32 @@ export interface AppSettings {
   video: VideoSettings
   /** Presentation (PPTX) generation */
   presentation: PresentationSettings
+  /** External MCP servers (stdio) */
+  mcpServers: McpServerConfig[]
+  /** Inline Tab completion */
+  tabCompletion: TabCompletionSettings
+  /** Embedding-based @codebase */
+  semanticSearch: SemanticSearchSettings
+  /** Customizable keybindings (Mod = Cmd on mac / Ctrl elsewhere) */
+  keybindings: KeybindingMap
+  /** Langfuse tracing (self-host localhost:3000 or Cloud) */
+  langfuse: LangfuseSettings
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
   general: {
     theme: 'dark',
     language: 'ja',
+    showBuildOutputs: true,
   },
   models: {
     defaultProvider: 'openai',
     defaultChatModel: 'gpt-5.4-mini',
     defaultAgentModel: 'gpt-5.4-mini',
     ollamaBaseUrl: DEFAULT_OLLAMA_BASE_URL,
+    ollamaContextSize: DEFAULT_OLLAMA_CONTEXT_SIZE,
+    llamacppBaseUrl: DEFAULT_LLAMACPP_BASE_URL,
+    llamacppContextSize: DEFAULT_LLAMACPP_CONTEXT_SIZE,
   },
   routing: { ...DEFAULT_ROUTING, fallbackChain: [...DEFAULT_ROUTING.fallbackChain] },
   agent: {
@@ -187,6 +251,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   cost: { ...DEFAULT_COST_SETTINGS },
   video: { ...DEFAULT_VIDEO_SETTINGS },
   presentation: { ...DEFAULT_PRESENTATION_SETTINGS },
+  mcpServers: [],
+  tabCompletion: { ...DEFAULT_TAB_COMPLETION },
+  semanticSearch: { ...DEFAULT_SEMANTIC_SEARCH },
+  keybindings: { ...DEFAULT_KEYBINDINGS },
+  langfuse: { ...DEFAULT_LANGFUSE },
 }
 
 export type AgentEvent =

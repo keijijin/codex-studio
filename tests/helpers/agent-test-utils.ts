@@ -1,5 +1,6 @@
 import type { AgentRunContext } from '@codex/agent-core'
 import type { AgentStreamChunk, LLMProvider } from '@codex/llm-adapters'
+import { createWorkspaceFs } from '@codex/tools'
 
 export function createMockProvider(responses: AgentStreamChunk[][]): LLMProvider {
   let call = 0
@@ -22,6 +23,7 @@ export function createAgentRunContext(
   workspaceRoot: string,
   overrides: Partial<AgentRunContext> = {},
 ): AgentRunContext {
+  const fs = overrides.fs ?? createWorkspaceFs(workspaceRoot)
   return {
     workspaceRoot,
     sessionId: 'test-session',
@@ -31,9 +33,11 @@ export function createAgentRunContext(
     enabledTools: ['Read', 'Write', 'StrReplace', 'Shell'],
     yoloMode: true,
     signal: new AbortController().signal,
-    resolvePath: (p) => `${workspaceRoot}/${p.replace(/^\//, '')}`,
+    resolvePath: (p) => fs.resolve(p),
     getRelativePath: (p) => p.replace(`${workspaceRoot}/`, ''),
     ...overrides,
+    // Always keep a WorkspaceFs even when overrides replace resolvePath.
+    fs: overrides.fs ?? fs,
   }
 }
 

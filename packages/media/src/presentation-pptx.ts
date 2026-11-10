@@ -99,6 +99,38 @@ function renderSlide(
         color: theme.pptxMuted,
       })
     }
+  } else if (layout === 'diagram') {
+    s.addText(slide.title, {
+      x: 0.6,
+      y: 0.4,
+      w: 8.8,
+      h: 0.45,
+      fontSize: 22,
+      fontFace: PPTX_SANS,
+      bold: true,
+      color: theme.pptxAccent,
+    })
+    if (slide.imagePath) {
+      s.addImage({
+        path: slide.imagePath,
+        x: 0.7,
+        y: 1.0,
+        w: 8.6,
+        h: 3.8,
+        sizing: { type: 'contain', w: 8.6, h: 3.8 },
+      })
+    } else {
+      s.addText(slide.code || '(diagram unavailable)', {
+        x: 0.7,
+        y: 1.2,
+        w: 8.6,
+        h: 3.4,
+        fontSize: 12,
+        fontFace: PPTX_MONO,
+        color: theme.pptxText,
+        valign: 'top',
+      })
+    }
   } else if (layout === 'code') {
     const langLabel = slide.codeLanguage ? `  ·  ${slide.codeLanguage}` : ''
     s.addText(`${slide.title}${langLabel}`, {

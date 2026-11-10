@@ -1,6 +1,6 @@
 import type { ToolDefinition } from '@codex/tools'
 
-export type LLMProviderId = 'openai' | 'anthropic' | 'ollama' | 'xai'
+export type LLMProviderId = 'openai' | 'anthropic' | 'ollama' | 'xai' | 'llamacpp'
 
 export interface ModelInfo {
   id: string
@@ -8,9 +8,20 @@ export interface ModelInfo {
   provider: LLMProviderId
 }
 
+export type ChatContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
-  content: string
+  content: string | ChatContentPart[]
+}
+
+export function flattenChatContent(content: string | ChatContentPart[]): string {
+  if (typeof content === 'string') return content
+  return content
+    .map((p) => (p.type === 'text' ? p.text : '[image attached]'))
+    .join('\n')
 }
 
 export interface ChatOptions {

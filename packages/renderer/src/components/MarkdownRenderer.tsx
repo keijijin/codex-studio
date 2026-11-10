@@ -5,6 +5,7 @@ import mermaid from 'mermaid'
 import { MarkdownLink } from './MarkdownLink'
 
 let mermaidInitialized = false
+let mermaidRenderSeq = 0
 
 function ensureMermaid(): void {
   if (mermaidInitialized) return
@@ -25,23 +26,35 @@ function MermaidBlock({ chart }: { chart: string }) {
     const container = containerRef.current
     if (!container) return
 
-    let cancelled = false
+    const trimmed = chart.trim()
+    if (!trimmed) return
 
-    void (async () => {
-      try {
-        const { svg } = await mermaid.render(`mermaid-${renderId}`, chart.trim())
-        if (!cancelled) {
-          container.innerHTML = svg
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const id = `mermaid-${renderId}-${++mermaidRenderSeq}`
+        try {
+          const { svg } = await mermaid.render(id, trimmed)
+          if (!cancelled) {
+            container.innerHTML = svg
+          }
+        } catch (error) {
+          if (!cancelled) {
+            // Never put error text through innerHTML — Mermaid includes the
+            // diagram source in the message (XSS / IPC pivot via meta refresh).
+            container.replaceChildren()
+            const pre = document.createElement('pre')
+            pre.className = 'mermaid-error'
+            pre.textContent = String(error)
+            container.appendChild(pre)
+          }
         }
-      } catch (error) {
-        if (!cancelled) {
-          container.innerHTML = `<pre class="mermaid-error">${String(error)}</pre>`
-        }
-      }
-    })()
+      })()
+    }, 200)
 
     return () => {
       cancelled = true
+      window.clearTimeout(timer)
     }
   }, [chart, renderId])
 
@@ -62,9 +75,15 @@ interface MarkdownRendererProps {
   content: string
   /** Absolute path of the markdown file being previewed (for relative links). */
   baseFilePath?: string
+  /** When false, mermaid fences stay as code blocks (safer while streaming). */
+  enableMermaid?: boolean
 }
 
-export function MarkdownRenderer({ content, baseFilePath }: MarkdownRendererProps) {
+export function MarkdownRenderer({
+  content,
+  baseFilePath,
+  enableMermaid = true,
+}: MarkdownRendererProps) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -77,9 +96,11 @@ export function MarkdownRenderer({ content, baseFilePath }: MarkdownRendererProp
           )
         },
         pre({ children }) {
-          const child = isValidElement(children) ? (children as ReactElement<{ className?: string; children?: ReactNode }>) : null
+          const child = isValidElement(children)
+            ? (children as ReactElement<{ className?: string; children?: ReactNode }>)
+            : null
           const className = child?.props?.className ?? ''
-          if (className.includes('language-mermaid')) {
+          if (enableMermaid && className.includes('language-mermaid')) {
             const chart = extractMermaidChart(child?.props?.children)
             if (chart) {
               return <MermaidBlock chart={chart} />
@@ -96,19 +117,11 @@ export function MarkdownRenderer({ content, baseFilePath }: MarkdownRendererProp
         },
         code({ className, children, ...props }) {
           const match = /language-(\w+)/.exec(className ?? '')
-          if (match?.[1] === 'mermaid') {
+          if (enableMermaid && match?.[1] === 'mermaid') {
             const chart = extractMermaidChart(children)
             if (chart) {
               return <MermaidBlock chart={chart} />
             }
-          }
-          const isBlock = Boolean(match)
-          if (isBlock) {
-            return (
-              <code className={className} {...props}>
-                {children}
-              </code>
-            )
           }
           return (
             <code className={className} {...props}>

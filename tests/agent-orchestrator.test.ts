@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { AgentOrchestrator } from '@codex/agent-core'
-import type { AgentMessage, AgentStreamChunk, LLMProvider } from '@codex/llm-adapters'
-import { ToolRegistry, readTool } from '@codex/tools'
+import type { AgentStreamChunk, LLMProvider } from '@codex/llm-adapters'
+import { ToolRegistry, createWorkspaceFs, readTool } from '@codex/tools'
 
 function createMockProvider(responses: AgentStreamChunk[][]): LLMProvider {
   let call = 0
@@ -34,6 +34,7 @@ describe('AgentOrchestrator', () => {
     const events: string[] = []
     const tmpDir = process.cwd()
 
+    const fs = createWorkspaceFs(tmpDir)
     for await (const event of orchestrator.run([{ role: 'user', content: 'What is in README?' }], {
       workspaceRoot: tmpDir,
       sessionId: 's1',
@@ -43,7 +44,8 @@ describe('AgentOrchestrator', () => {
       enabledTools: ['Read'],
       yoloMode: true,
       signal: new AbortController().signal,
-      resolvePath: (p) => `${tmpDir}/${p}`,
+      fs,
+      resolvePath: (p) => fs.resolve(p),
       getRelativePath: (p) => p.replace(`${tmpDir}/`, ''),
     })) {
       events.push(event.type)

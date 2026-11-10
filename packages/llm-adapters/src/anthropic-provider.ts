@@ -10,6 +10,7 @@ import type {
   StreamChunk,
   ToolCall,
 } from './types'
+import { flattenChatContent } from './types'
 import { createAnthropicClient } from './create-clients'
 
 function toAnthropicMessages(messages: AgentMessage[]): {
@@ -118,13 +119,38 @@ export class AnthropicProvider implements LLMProvider {
   async *chat(messages: ChatMessage[], options: ChatOptions): AsyncGenerator<StreamChunk> {
     const client = createAnthropicClient({ apiKey: options.apiKey })
 
-    const system = messages.find((m) => m.role === 'system')?.content ?? ''
-    const chatMessages = messages
+    const system = flattenChatContent(messages.find((m) => m.role === 'system')?.content ?? '')
+    const chatMessages: Anthropic.MessageParam[] = messages
       .filter((m) => m.role !== 'system')
-      .map((m) => ({
-        role: m.role as 'user' | 'assistant',
-        content: m.content,
-      }))
+      .map((m) => {
+        const role = m.role as 'user' | 'assistant'
+        if (typeof m.content === 'string') {
+          return { role, content: m.content }
+        }
+        // Vision: Anthropic image blocks (base64 data URLs)
+        const parts: Anthropic.ContentBlockParam[] = []
+        for (const p of m.content) {
+          if (p.type === 'text') {
+            parts.push({ type: 'text', text: p.text })
+            continue
+          }
+          const url = p.image_url.url
+          const match = /^data:([^;]+);base64,(.+)$/.exec(url)
+          if (match) {
+            parts.push({
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: match[1] as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
+                data: match[2]!,
+              },
+            })
+          } else {
+            parts.push({ type: 'text', text: '[image url omitted]' })
+          }
+        }
+        return { role, content: parts }
+      })
     const enableCache = options.enablePromptCache !== false
 
     try {

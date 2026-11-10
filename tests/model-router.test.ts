@@ -131,25 +131,53 @@ describe('model router', () => {
     expect(result.taskKind).toBe('agent_code')
   })
 
-  it('auto picks cost-optimized lite models for simple chat (not user primary first)', () => {
+  it('auto prefers settings primary over fallback chain and catalog', () => {
     const decision = decideRouting({
       mode: 'auto',
-      primary: { provider: 'openai', model: 'gpt-5.5' },
-      fallbackChain: DEFAULT_ROUTING.fallbackChain,
+      primary: { provider: 'llamacpp', model: 'Qwen-AgentWorld.gguf' },
+      fallbackChain: [
+        { provider: 'xai', model: 'grok-4.7' },
+        { provider: 'openai', model: 'gpt-5.4-mini' },
+      ],
       maxAttempts: 3,
-      isAvailable: (c) => c.provider !== 'ollama',
-      runMode: 'chat',
+      isAvailable: () => true,
+      runMode: 'agent',
+      prompt: 'TypeScript のバグを修正して実装する',
+      catalog: createDefaultCatalog(),
+    })
+    expect(decision.mode).toBe('auto')
+    expect(decision.selected).toEqual({
+      provider: 'llamacpp',
+      model: 'Qwen-AgentWorld.gguf',
+    })
+    expect(decision.queue[0]).toEqual({
+      provider: 'llamacpp',
+      model: 'Qwen-AgentWorld.gguf',
+    })
+    expect(decision.queue[1]).toEqual({ provider: 'xai', model: 'grok-4.7' })
+  })
+
+  it('auto uses fallback chain when primary is unavailable', () => {
+    const decision = decideRouting({
+      mode: 'auto',
+      primary: { provider: 'llamacpp', model: 'Qwen-AgentWorld.gguf' },
+      fallbackChain: [
+        { provider: 'xai', model: 'grok-4.7' },
+        { provider: 'openai', model: 'gpt-5.4-mini' },
+      ],
+      maxAttempts: 3,
+      isAvailable: (c) => c.provider !== 'llamacpp',
+      runMode: 'agent',
       prompt: 'hello',
       catalog: createDefaultCatalog(),
     })
-    expect(decision.taskKind).toBe('chat_simple')
-    expect(decision.tier).toBe('lite')
-    // Should start on a cheap model, not the expensive primary
-    expect(decision.selected.model).not.toBe('gpt-5.5')
-    expect(['xai', 'openai', 'anthropic']).toContain(decision.selected.provider)
+    expect(decision.selected).toEqual({ provider: 'xai', model: 'grok-4.7' })
+    expect(decision.queue.map((c) => `${c.provider}:${c.model}`)).not.toContain(
+      'xai:grok-4.3',
+    )
   })
 
-  it('auto agent code prefers Grok mid tier before premium', () => {
+  it('auto fills remaining slots from chain then cost catalog', () => {
     const kind = classifyTaskKind({
       prompt: 'TypeScript のバグを修正して実装する',
       runMode: 'agent',
@@ -159,7 +187,7 @@ describe('model router', () => {
     const decision = decideRouting({
       mode: 'auto',
       primary: { provider: 'openai', model: 'gpt-5.5' },
-      fallbackChain: DEFAULT_ROUTING.fallbackChain,
+      fallbackChain: [{ provider: 'xai', model: 'grok-4.7' }],
       maxAttempts: 4,
       isAvailable: (c) => c.provider !== 'ollama',
       runMode: 'agent',
@@ -168,37 +196,17 @@ describe('model router', () => {
     })
     expect(decision.taskKind).toBe('agent_code')
     expect(decision.tier).toBe('standard')
-    expect(decision.selected.provider).toBe('xai')
-    expect(decision.selected.model).toMatch(/grok/i)
-    expect(decision.queue.length).toBeGreaterThan(1)
-    expect(decision.queue.map((c) => c.provider).slice(0, 3)).toEqual([
-      'xai',
-      'openai',
-      'anthropic',
-    ])
+    expect(decision.selected).toEqual({ provider: 'openai', model: 'gpt-5.5' })
+    expect(decision.queue[1]).toEqual({ provider: 'xai', model: 'grok-4.7' })
+    expect(decision.queue.length).toBeGreaterThan(2)
     expect(decision.reason).toMatch(/Auto \(agent_code\/standard/)
   })
 
-  it('auto light rename starts on Grok for code lite', () => {
+  it('auto hard agent still starts on settings primary', () => {
     const decision = decideRouting({
       mode: 'auto',
       primary: { provider: 'openai', model: 'gpt-5.5' },
-      fallbackChain: DEFAULT_ROUTING.fallbackChain,
-      maxAttempts: 3,
-      isAvailable: (c) => c.provider !== 'ollama',
-      runMode: 'agent',
-      prompt: 'ファイル名をリネームするだけ',
-      catalog: createDefaultCatalog(),
-    })
-    expect(decision.tier).toBe('lite')
-    expect(decision.selected.provider).toBe('xai')
-  })
-
-  it('auto hard agent still prefers Claude premium first', () => {
-    const decision = decideRouting({
-      mode: 'auto',
-      primary: { provider: 'openai', model: 'gpt-5.5' },
-      fallbackChain: DEFAULT_ROUTING.fallbackChain,
+      fallbackChain: [{ provider: 'xai', model: 'grok-4.7' }],
       maxAttempts: 3,
       isAvailable: (c) => c.provider !== 'ollama',
       runMode: 'agent',
@@ -206,22 +214,24 @@ describe('model router', () => {
       catalog: createDefaultCatalog(),
     })
     expect(decision.tier).toBe('premium')
-    expect(decision.selected.provider).toBe('anthropic')
+    expect(decision.selected).toEqual({ provider: 'openai', model: 'gpt-5.5' })
+    expect(decision.queue.some((c) => c.provider === 'anthropic')).toBe(true)
   })
 
-  it('auto skips offline Ollama and uses cloud providers', () => {
+  it('auto skips offline Ollama primary and uses next chain candidate', () => {
     const decision = decideRouting({
       mode: 'auto',
-      primary: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+      primary: { provider: 'ollama', model: 'qwen2.5-coder:14b' },
       fallbackChain: [
         { provider: 'openai', model: 'gpt-4o' },
-        { provider: 'ollama', model: 'qwen2.5-coder:14b' },
+        { provider: 'anthropic', model: 'claude-sonnet-4-6' },
       ],
       maxAttempts: 3,
       isAvailable: (c) => c.provider !== 'ollama',
       runMode: 'chat',
       prompt: 'hello',
     })
+    expect(decision.selected).toEqual({ provider: 'openai', model: 'gpt-4o' })
     expect(decision.queue.map((c) => c.provider)).not.toContain('ollama')
   })
 

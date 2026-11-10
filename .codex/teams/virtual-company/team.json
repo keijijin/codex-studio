@@ -1,0 +1,56 @@
+{
+  "id": "virtual-company",
+  "name": "Virtual Company",
+  "description": "営業・マーケ・法務・技術が並列レポート → 社長判断 → 人間の社長承認 → 実装実行",
+  "board": "BOARD.md",
+  "pipeline": {
+    "requireCeoApproval": true,
+    "executeAfterApprove": true
+  },
+  "roles": [
+    {
+      "id": "sales",
+      "name": "営業部",
+      "goal": "案件を顧客価値・競合・収益・導入ハードルの観点で評価し、営業としての推進可否と条件をレポートする。ワークスペースの文書・コードを根拠に使える範囲で参照する。",
+      "tools": ["Read", "Grep", "Glob"],
+      "persona": "sales-dept"
+    },
+    {
+      "id": "marketing",
+      "name": "マーケティング部",
+      "goal": "案件をポジショニング・メッセージ・需要仮説・チャネル・ブランドリスクの観点で評価し、マーケとしての推進可否と条件（伝え方・対象・禁止表現）をレポートする。営業のクロージング論点と重複しすぎないよう、認知・選好の論点を優先する。",
+      "tools": ["Read", "Grep", "Glob"],
+      "persona": "marketing-dept"
+    },
+    {
+      "id": "legal",
+      "name": "法務部",
+      "goal": "案件の契約・個人情報・ライセンス・コンプライアンス・知財リスクを洗い出し、ブロッカーと緩和策をレポートする。",
+      "tools": ["Read", "Grep", "Glob"],
+      "persona": "legal-dept"
+    },
+    {
+      "id": "engineering",
+      "name": "技術部",
+      "goal": "案件の技術的実現性・アーキ影響・運用負荷・セキュリティを評価し、Go / Conditional Go / No-Go と前提条件をレポートする。具体的なファイルやモジュールに触れてよい。実装はしない（調査のみ）。",
+      "tools": ["Read", "Grep", "Glob"],
+      "persona": "eng-dept"
+    },
+    {
+      "id": "ceo",
+      "name": "社長",
+      "goal": "営業・マーケティング・法務・技術のボードを統合し、承認 / 条件付き承認 / 差し戻し / 見送りのいずれかの最終判断案と、実装チーム向けの次アクションを出す。マーケと営業の意見が分かれる場合は対立点を明示する。",
+      "synthesize": true,
+      "tools": ["Read", "Grep", "Glob"],
+      "persona": "ceo"
+    },
+    {
+      "id": "executor",
+      "name": "実装部",
+      "goal": "人間の社長が承認した内容だけを実装する。最小差分でコード/文書を更新し、確認方法を報告する。",
+      "execute": true,
+      "tools": ["Read", "Grep", "Glob", "Write", "StrReplace", "Delete", "Shell", "MemoryAppend"],
+      "persona": "eng-executor"
+    }
+  ]
+}

@@ -2,10 +2,18 @@ import { mkdir, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { buildDeck } from './presentation-director'
 import { normalizeDeck, slugifyDeckTitle } from './deck'
+import { isMermaidLanguage, renderMermaidToPng } from './mermaid-render'
+import {
+  DEFAULT_PRESENTATION_OUTPUT_DIR,
+  resolveMediaOutput,
+  resolveOutputSlug,
+} from './output-paths'
 import { writePptx } from './presentation-pptx'
 import { writePresentationSlideSvg } from './presentation-svg'
 import { resolveTheme } from './themes'
 import type {
+  Deck,
+  DeckSlide,
   PresentationPipelineOptions,
   PresentationPipelineResult,
   PresentationThemeId,
@@ -13,6 +21,55 @@ import type {
 
 function assertNotAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw new Error('cancelled')
+}
+
+async function materializeDiagrams(
+  deck: Deck,
+  diagramsDir: string,
+  warnings: string[],
+  signal?: AbortSignal,
+): Promise<Deck> {
+  await mkdir(diagramsDir, { recursive: true })
+  const slides: DeckSlide[] = []
+  for (const slide of deck.slides) {
+    assertNotAborted(signal)
+    const mermaidSource =
+      slide.layout === 'diagram' || isMermaidLanguage(slide.codeLanguage)
+        ? slide.code
+        : undefined
+    if (!mermaidSource?.trim()) {
+      slides.push(slide)
+      continue
+    }
+    const pngPath = join(diagramsDir, `${slide.id}-diagram.png`)
+    try {
+      const { method } = await renderMermaidToPng(mermaidSource, pngPath, { signal })
+      if (method === 'fallback') {
+        warnings.push(
+          `Slide ${slide.id}: Mermaid local render failed; used fallback image. Install @mermaid-js/mermaid-cli for best quality.`,
+        )
+      } else if (method === 'mermaid.ink') {
+        warnings.push(`Slide ${slide.id}: Mermaid rendered via mermaid.ink (network).`)
+      }
+      slides.push({
+        ...slide,
+        layout: 'diagram',
+        code: mermaidSource,
+        codeLanguage: 'mermaid',
+        imagePath: pngPath,
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      warnings.push(`Slide ${slide.id}: Mermaid render failed (${msg}); showing source as code.`)
+      slides.push({
+        ...slide,
+        layout: 'code',
+        code: mermaidSource,
+        codeLanguage: 'mermaid',
+      })
+    }
+  }
+  return { ...deck, slides }
 }
 
 export async function runPresentationPipeline(
@@ -45,10 +102,24 @@ export async function runPresentationPipeline(
     deck = normalizeDeck({ ...deck, themeId: deck.themeId || themeId }, options.maxSlides)
   }
 
-  const slug = options.slug?.trim() || slugifyDeckTitle(deck.title)
-  const outputDir = join(options.workspaceRoot, '.codex', 'presentation', slug)
+  const slug = resolveOutputSlug({
+    slug: options.slug?.trim() || slugifyDeckTitle(deck.title),
+    title: deck.title,
+    sourcePath: options.sourcePath,
+    fallbackPrefix: 'deck',
+  })
+  const { workDir: outputDir, artifactPath: outputPptx } = resolveMediaOutput({
+    workspaceRoot: options.workspaceRoot,
+    outputDirRel: options.outputDir || DEFAULT_PRESENTATION_OUTPUT_DIR,
+    slug,
+    artifactFileName: `${slug}.pptx`,
+  })
   const slidesDir = join(outputDir, 'slides')
+  const diagramsDir = join(outputDir, 'diagrams')
   await mkdir(slidesDir, { recursive: true })
+
+  progress('Rendering Mermaid diagrams…')
+  deck = await materializeDiagrams(deck, diagramsDir, warnings, options.signal)
 
   const deckPath = join(outputDir, 'deck.json')
   await writeFile(deckPath, JSON.stringify(deck, null, 2), 'utf-8')
@@ -64,7 +135,6 @@ export async function runPresentationPipeline(
   }
 
   progress('Writing PPTX…')
-  const outputPptx = join(outputDir, 'out.pptx')
   try {
     await writePptx(deck, outputPptx, { includeNotes: options.includeNotes })
   } catch (err) {
@@ -86,6 +156,6 @@ export async function runPresentationPipeline(
     deckPath,
     slideSvgPaths,
     warnings,
-    message: `Presentation ready (${deck.slides.length} slides, theme=${deck.themeId}${usedLlm ? ', LLM director' : ', heuristic'})`,
+    message: `Presentation ready (${deck.slides.length} slides, theme=${deck.themeId}${usedLlm ? ', LLM director' : ', heuristic'}) → ${outputPptx}`,
   }
 }

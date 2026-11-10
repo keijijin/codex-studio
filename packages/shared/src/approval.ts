@@ -6,5 +6,5 @@ export interface ApprovalRequest {
   oldContent: string
   newContent: string
   summary: string
-  action?: 'create' | 'overwrite' | 'replace' | 'delete' | 'shell'
+  action?: 'create' | 'overwrite' | 'replace' | 'delete' | 'shell' | 'read' | 'edit'
 }

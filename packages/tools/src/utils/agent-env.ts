@@ -50,11 +50,144 @@ export function loadEnvFile(path: string): Record<string, string> {
   }
 }
 
+/** Loader / shell-hijack keys — never allowed from workspace overlays. */
+export const BLOCKED_LOADER_ENV_KEYS = new Set([
+  'BASH_ENV',
+  'ENV',
+  'SHELL',
+  'HOME',
+  'USERPROFILE',
+  'ZDOTDIR',
+  'LD_PRELOAD',
+  'DYLD_INSERT_LIBRARIES',
+  'DYLD_LIBRARY_PATH',
+  'LD_LIBRARY_PATH',
+  'NODE_OPTIONS',
+  'PYTHONPATH',
+  'PERL5OPT',
+  'RUBYOPT',
+])
+
+/**
+ * Exact keys allowed from `.codex/agent.env` and terminal sync (S3 allowlist).
+ * Unknown keys are dropped (key names may be logged; values never).
+ */
+export const AGENT_ENV_ALLOWLIST_EXACT = new Set([
+  'KUBECONFIG',
+  'OC_TOKEN',
+  'OC_NAMESPACE',
+  'DOCKER_HOST',
+  'DOCKER_CERT_PATH',
+  'DOCKER_TLS_VERIFY',
+  'NPM_TOKEN',
+  'NPM_CONFIG_REGISTRY',
+  'GH_TOKEN',
+  'GITHUB_TOKEN',
+  'GITLAB_TOKEN',
+  'FFMPEG_PATH',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'NO_PROXY',
+  'ALL_PROXY',
+  'SSL_CERT_FILE',
+  'REQUESTS_CA_BUNDLE',
+  'CURL_CA_BUNDLE',
+  'NODE_EXTRA_CA_CERTS',
+  'JAVA_HOME',
+  'GOPATH',
+  'GOROOT',
+  'CARGO_HOME',
+  'RUSTUP_HOME',
+  'EDITOR',
+  'VISUAL',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'TZ',
+])
+
+/** Prefixes allowed in addition to exact keys (e.g. AWS_*, OC_*). */
+export const AGENT_ENV_ALLOWLIST_PREFIXES = [
+  'OC_',
+  'KUBE_',
+  'AWS_',
+  'AZURE_',
+  'GOOGLE_',
+  'GCP_',
+  'DOCKER_',
+  'GH_',
+  'GITHUB_',
+  'GITLAB_',
+  'NPM_',
+  'PNPM_',
+  'YARN_',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'NO_PROXY',
+  'LC_',
+  'SSL_CERT_',
+] as const
+
+/** Terminal sync may also set PATH (venv / toolchain). agent.env may not. */
+export const TERMINAL_ENV_EXTRA_ALLOW = new Set(['PATH', 'Path'])
+
+export function isAgentEnvKeyAllowed(key: string, options?: { allowPath?: boolean }): boolean {
+  if (BLOCKED_LOADER_ENV_KEYS.has(key)) return false
+  if (options?.allowPath && TERMINAL_ENV_EXTRA_ALLOW.has(key)) return true
+  if (AGENT_ENV_ALLOWLIST_EXACT.has(key)) return true
+  return AGENT_ENV_ALLOWLIST_PREFIXES.some((prefix) => key.startsWith(prefix))
+}
+
+export interface FilterEnvResult {
+  env: Record<string, string>
+  /** Dropped key names only (never values). */
+  droppedKeys: string[]
+}
+
+export function filterEnvByAllowlist(
+  env: Record<string, string>,
+  options?: { allowPath?: boolean },
+): FilterEnvResult {
+  const out: Record<string, string> = {}
+  const droppedKeys: string[] = []
+  for (const [key, value] of Object.entries(env)) {
+    if (isAgentEnvKeyAllowed(key, options)) {
+      out[key] = value
+    } else {
+      droppedKeys.push(key)
+    }
+  }
+  return { env: out, droppedKeys }
+}
+
+/** @deprecated Prefer filterEnvByAllowlist — kept for call-site compatibility. */
+export function scrubEnvKeys(
+  env: Record<string, string>,
+  blocked: Set<string>,
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(env)) {
+    if (blocked.has(key)) continue
+    out[key] = value
+  }
+  return out
+}
+
+/** Terminal sync / captured: allowlist + PATH. */
+export function scrubLoaderEnv(env: Record<string, string>): Record<string, string> {
+  return filterEnvByAllowlist(env, { allowPath: true }).env
+}
+
+/** `.codex/agent.env`: allowlist without PATH. */
+export function scrubAgentEnvFile(env: Record<string, string>): Record<string, string> {
+  return filterEnvByAllowlist(env, { allowPath: false }).env
+}
+
 /** Load `.codex/agent.env` then `.codex/.agent-env.captured` (captured wins on conflict). */
 export function loadWorkspaceAgentEnv(workspaceRoot: string): Record<string, string> {
   return {
-    ...loadEnvFile(agentEnvFilePath(workspaceRoot)),
-    ...loadEnvFile(agentEnvCapturedPath(workspaceRoot)),
+    ...scrubAgentEnvFile(loadEnvFile(agentEnvFilePath(workspaceRoot))),
+    ...scrubLoaderEnv(loadEnvFile(agentEnvCapturedPath(workspaceRoot))),
   }
 }
 
@@ -82,5 +215,9 @@ export function resolveAgentShellEnv(
   overlay?: Record<string, string>,
   base: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
-  return mergeShellEnv(base, loadWorkspaceAgentEnv(workspaceRoot), overlay)
+  return mergeShellEnv(
+    base,
+    loadWorkspaceAgentEnv(workspaceRoot),
+    overlay ? scrubLoaderEnv(overlay) : undefined,
+  )
 }

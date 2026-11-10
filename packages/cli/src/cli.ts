@@ -14,12 +14,16 @@ import { getProviderInstance, decideRouting, isRetryableError, type ModelCandida
 import { defaultToolRegistry, resolveWithinWorkspace } from '@codex/tools'
 import {
   DEFAULT_FALLBACK_CHAIN,
+  DEFAULT_LLAMACPP_BASE_URL,
   DEFAULT_OLLAMA_BASE_URL,
   DEFAULT_XAI_BASE_URL,
   type LLMProviderId,
 } from '@codex/shared'
 import { parseArgs, type CliArgs } from './parse-args.js'
-import { loadDesktopModelsSettings } from './desktop-settings.js'
+import {
+  desktopApiKeysInSafeStorage,
+  loadDesktopModelsSettings,
+} from './desktop-settings.js'
 
 function printHelp(): void {
   console.log(`codex-studio — headless Codex Studio agent / teams
@@ -32,18 +36,21 @@ Usage:
 
 Options:
   -w, --workspace <path>   Workspace root (default: cwd)
-  -p, --provider <id>      openai | anthropic | xai | ollama (default: openai)
+  -p, --provider <id>      openai | anthropic | xai | ollama | llamacpp (default: openai)
   -m, --model <id>         Model id
-  --profile <name>         readonly | ask | allow (default: readonly)
+  --profile <name>         readonly | coding | yolo (default: readonly; ask→coding, allow→yolo)
   --routing <mode>         fixed | auto | fallback-only (default: fixed)
-  --yolo                   Allow all tools (same as --profile allow)
+  --yolo                   Allow all tools (same as --profile yolo)
   --max-iterations <n>     Tool loop limit (default: 50)
   --json                   Print final result as JSON
   -h, --help               Show help
 
 Environment:
-  OPENAI_API_KEY / ANTHROPIC_API_KEY / XAI_API_KEY / OLLAMA_BASE_URL / XAI_BASE_URL
-  (unset keys fall back to Codex Studio Settings: Application Support/codex-studio)
+  OPENAI_API_KEY / ANTHROPIC_API_KEY / XAI_API_KEY / OLLAMA_BASE_URL / LLAMACPP_BASE_URL / XAI_BASE_URL
+  (Desktop Settings の平文キーへフォールバック可。OS 秘密ストア移行後は環境変数必須)
+  CODEX_TRUST_WORKSPACE=1   Trust workspace overlays (.codex/agent.env, hooks, workspace Rules/Skills/Teams)
+  CODEX_CLI_TRUST_WORKSPACE=1   Same as above (CLI alias)
+  (Default: untrusted — workspace agent.env / hooks / local Skills·Teams·Personas are skipped)
 
 Examples:
   pnpm cli -- agent "README を要約して" -w .
@@ -70,6 +77,16 @@ function resolveApiKey(provider: LLMProviderId): { apiKey: string; baseUrl?: str
         DEFAULT_OLLAMA_BASE_URL,
     }
   }
+  if (provider === 'llamacpp') {
+    return {
+      apiKey: 'llamacpp',
+      baseUrl:
+        process.env.LLAMACPP_BASE_URL ||
+        process.env.LLAMA_CPP_BASE_URL ||
+        stored?.llamacppBaseUrl ||
+        DEFAULT_LLAMACPP_BASE_URL,
+    }
+  }
   if (provider === 'anthropic') {
     const apiKey = process.env.ANTHROPIC_API_KEY || stored?.anthropicApiKey
     if (!apiKey) return null
@@ -92,12 +109,21 @@ function missingKeyHint(provider: LLMProviderId): string {
   if (provider === 'ollama') {
     return 'Ollama が利用できません。`ollama serve` と Base URL を確認してください。'
   }
+  if (provider === 'llamacpp') {
+    return 'llama.cpp が利用できません。llama-server と LLAMACPP_BASE_URL（既定 http://127.0.0.1:8080）を確認してください。'
+  }
   const envName =
     provider === 'anthropic'
       ? 'ANTHROPIC_API_KEY'
       : provider === 'xai'
         ? 'XAI_API_KEY'
         : 'OPENAI_API_KEY'
+  if (desktopApiKeysInSafeStorage()) {
+    return (
+      `${provider} の API キーがありません。` +
+      `デスクトップのキーは OS 秘密ストアへ移行済みのため、CLI では環境変数 ${envName} を設定してください。`
+    )
+  }
   return (
     `${provider} の API キーがありません。` +
     `環境変数 ${envName} を設定するか、Codex Studio の設定画面にキーを保存してください。`
@@ -130,7 +156,7 @@ async function runAgentOnce(
     baseUrl: creds.baseUrl,
     maxIterations: args.maxIterations,
     permissionProfile: args.profile,
-    yoloMode: args.yolo || args.profile === 'allow',
+    yoloMode: args.yolo || args.profile === 'yolo',
     onEvent: (event) => {
       if (args.json) return
       if (event.type === 'text_delta') {
@@ -219,8 +245,16 @@ async function runAgent(args: CliArgs): Promise<HeadlessAgentResult & {
   }
 }
 
+function extraTeamsDirs(): string[] {
+  return [
+    join(homedir(), '.codex-studio', 'teams'),
+    // When CLI cwd is the product repo, pick up built-in teams even if -w points elsewhere
+    join(process.cwd(), '.codex', 'teams'),
+  ]
+}
+
 async function listTeams(args: CliArgs): Promise<void> {
-  const teams = await collectTeams(args.workspace)
+  const teams = await collectTeams(args.workspace, { extraTeamsDirs: extraTeamsDirs() })
   const skills = await collectSkills(args.workspace, {
     globalSkillsDir: join(homedir(), '.codex-studio', 'skills'),
   })
@@ -229,7 +263,7 @@ async function listTeams(args: CliArgs): Promise<void> {
     return
   }
   if (teams.length === 0) {
-    console.log('No teams found. Add .codex/teams/<id>/team.json')
+    console.log('No teams found. Add .codex/teams/<id>/team.json or ~/.codex-studio/teams/')
   } else {
     console.log('Teams:')
     for (const t of teams) {
@@ -237,23 +271,25 @@ async function listTeams(args: CliArgs): Promise<void> {
     }
   }
   console.log(`\nSkills (workspace + ~/.codex-studio/skills): ${skills.map((s) => s.name).join(', ') || '(none)'}`)
+  console.log('Teams also load from ~/.codex-studio/teams and the CLI cwd .codex/teams')
 }
 
 async function runTeamCli(args: CliArgs): Promise<void> {
   const creds = resolveApiKey(args.provider)
   if (!creds) {
     throw new Error(
-      args.provider === 'ollama'
-        ? 'Ollama is not configured'
-        : `${args.provider.toUpperCase()} API key is not set`,
+      args.provider === 'ollama' || args.provider === 'llamacpp'
+        ? missingKeyHint(args.provider)
+        : missingKeyHint(args.provider),
     )
   }
   const { apiKey, baseUrl } = creds
   const workspaceRoot = resolve(args.workspace)
-  const teams = await collectTeams(workspaceRoot)
+  const teams = await collectTeams(workspaceRoot, { extraTeamsDirs: extraTeamsDirs() })
   const team = findTeam(teams, args.teamId)
   if (!team) {
-    throw new Error(`Unknown team: ${args.teamId}`)
+    const available = teams.map((t) => t.id).join(', ') || '(none)'
+    throw new Error(`Unknown team: ${args.teamId}. Available: ${available}`)
   }
   const llm = getProviderInstance(args.provider)
   if (!args.json) {

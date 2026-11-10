@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
-import { IPC_CHANNELS, type RuleFile, type RuleSaveParams } from '@codex/shared'
+import { type RuleFile, type RuleSaveParams } from '@codex/shared'
 import { hasCodexApi } from './ErrorBoundary'
 
 const inputStyle: CSSProperties = {
@@ -11,15 +11,13 @@ const inputStyle: CSSProperties = {
   backgroundColor: '#1e1e1e',
   border: '1px solid #3c3c3c',
   borderRadius: 4,
-  boxSizing: 'border-box',
-}
+  boxSizing: 'border-box' }
 
 const labelStyle: CSSProperties = {
   display: 'block',
   fontSize: 12,
   color: '#858585',
-  marginTop: 12,
-}
+  marginTop: 12 }
 
 const btnPrimary: CSSProperties = {
   padding: '8px 16px',
@@ -28,8 +26,7 @@ const btnPrimary: CSSProperties = {
   backgroundColor: '#0078d4',
   border: 'none',
   borderRadius: 4,
-  cursor: 'pointer',
-}
+  cursor: 'pointer' }
 
 const btnSecondary: CSSProperties = {
   padding: '8px 16px',
@@ -38,14 +35,12 @@ const btnSecondary: CSSProperties = {
   backgroundColor: 'transparent',
   border: '1px solid #3c3c3c',
   borderRadius: 4,
-  cursor: 'pointer',
-}
+  cursor: 'pointer' }
 
 const btnDanger: CSSProperties = {
   ...btnSecondary,
   color: '#f87171',
-  borderColor: '#7f1d1d',
-}
+  borderColor: '#7f1d1d' }
 
 function sourceLabel(source: RuleFile['source']): string {
   if (source === 'global') return 'グローバル'
@@ -59,8 +54,7 @@ const emptyDraft = (): Omit<RuleSaveParams, 'scope'> & { scope: RuleSaveParams['
   alwaysApply: true,
   globs: [],
   description: '',
-  scope: 'workspace',
-})
+  scope: 'workspace' })
 
 export function RulesSettings() {
   const [rules, setRules] = useState<RuleFile[]>([])
@@ -76,7 +70,7 @@ export function RulesSettings() {
     setLoading(true)
     setError(null)
     try {
-      const list = await window.codex.invoke(IPC_CHANNELS.RULES_LIST)
+      const list = await window.codex.rules.list()
       setRules(list)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Rules の読み込みに失敗しました')
@@ -103,8 +97,7 @@ export function RulesSettings() {
       globs: rule.meta.globs,
       description: rule.meta.description ?? '',
       scope: rule.source === 'global' ? 'global' : 'workspace',
-      absolutePath: rule.absolutePath,
-    })
+      absolutePath: rule.absolutePath })
     setGlobsText(rule.meta.globs.join(', '))
     setEditing(true)
   }
@@ -118,7 +111,7 @@ export function RulesSettings() {
     setSaving(true)
     setError(null)
     try {
-      await window.codex.invoke(IPC_CHANNELS.RULES_SAVE, {
+      await window.codex.rules.save({
         name: draft.name.trim() || 'rule.md',
         content: draft.content,
         alwaysApply: draft.alwaysApply,
@@ -128,8 +121,7 @@ export function RulesSettings() {
           .filter(Boolean),
         description: draft.description?.trim() || undefined,
         scope: draft.scope,
-        absolutePath: draft.absolutePath,
-      })
+        absolutePath: draft.absolutePath })
       setEditing(false)
       await refresh()
     } catch (err: unknown) {
@@ -144,7 +136,7 @@ export function RulesSettings() {
     if (!window.confirm(`「${rule.name}」を削除しますか？`)) return
     setError(null)
     try {
-      await window.codex.invoke(IPC_CHANNELS.RULES_DELETE, rule.absolutePath)
+      await window.codex.rules.delete(rule.absolutePath)
       if (draft.absolutePath === rule.absolutePath) setEditing(false)
       await refresh()
     } catch (err: unknown) {
@@ -263,8 +255,7 @@ export function RulesSettings() {
                 borderRadius: 6,
                 padding: 12,
                 marginBottom: 8,
-                backgroundColor: '#1e1e1e',
-              }}
+                backgroundColor: '#1e1e1e' }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                 <div style={{ minWidth: 0 }}>
@@ -284,8 +275,7 @@ export function RulesSettings() {
                       color: '#aaaaaa',
                       whiteSpace: 'pre-wrap',
                       maxHeight: 72,
-                      overflow: 'hidden',
-                    }}
+                      overflow: 'hidden' }}
                   >
                     {rule.content.slice(0, 200)}
                     {rule.content.length > 200 ? '…' : ''}

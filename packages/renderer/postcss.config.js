@@ -17,20 +17,20 @@ export default {
         extend: {
           colors: {
             surface: {
-              DEFAULT: '#1e1e1e',
-              raised: '#252526',
-              overlay: '#2d2d2d',
-              border: '#3c3c3c',
+              DEFAULT: 'var(--surface)',
+              raised: 'var(--surface-raised)',
+              overlay: 'var(--surface-overlay)',
+              border: 'var(--surface-border)',
             },
             accent: {
-              DEFAULT: '#0078d4',
-              hover: '#1a86d9',
-              muted: '#264f78',
+              DEFAULT: 'var(--accent)',
+              hover: 'var(--accent-hover)',
+              muted: 'var(--accent-muted)',
             },
             text: {
-              primary: '#cccccc',
-              secondary: '#858585',
-              muted: '#6e6e6e',
+              primary: 'var(--text-primary)',
+              secondary: 'var(--text-secondary)',
+              muted: 'var(--text-muted)',
             },
           },
         },

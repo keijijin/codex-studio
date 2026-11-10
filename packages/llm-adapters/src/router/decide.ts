@@ -115,7 +115,8 @@ export function decideRouting(input: DecideRoutingInput): RoutingDecision {
     }
   }
 
-  // auto — cost-optimized cascade (do not force user's primary first)
+  // auto — Settings primary first (既定モデル), then fallback chain, then catalog.
+  // "フォールバックチェーン" is for when primary is unavailable / fails — not an override.
   const classified = classifyTask({
     prompt: input.prompt ?? '',
     runMode: input.runMode,
@@ -126,7 +127,7 @@ export function decideRouting(input: DecideRoutingInput): RoutingDecision {
     input.profiles?.[taskKind] ??
     builtinProfileFor(taskKind, classified.tier, catalog)
 
-  const raw = dedupe([...profile, ...input.fallbackChain, input.primary])
+  const raw = dedupe([input.primary, ...input.fallbackChain, ...profile])
   const queue = filterAvailable(raw, input.isAvailable).slice(0, maxAttempts)
   const selected = queue[0] ?? input.primary
 
