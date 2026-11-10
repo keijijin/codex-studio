@@ -543,8 +543,8 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                 <option value="auto">Auto（複雑度・トークン量で課金最適化）</option>
               </select>
               <p style={{ margin: '6px 0 0', fontSize: 11, color: '#6e6e6e' }}>
-                Auto は下のフォールバックチェーンを優先して試し、不足分を lite → standard → premium
-                のカタログで補完します。モデル ID は各 API の一覧から約 24 時間ごとに自動更新されます（ツール開始後は切替しません）。
+                Auto もまず設定の既定モデルを使い、失敗・未接続時だけ下のフォールバックチェーン →
+                lite/standard/premium カタログの順で切替します（ツール開始後は切替しません）。
               </p>
 
               {routingMode !== 'fixed' && (
@@ -567,7 +567,7 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
                     </button>
                   </div>
                   <p style={{ margin: '6px 0 10px', fontSize: 11, color: '#6e6e6e' }}>
-                    Auto / フォールバックとも上から順に試行します。キー未設定・未起動のプロバイダはスキップされます。
+                    既定モデルの次に、上から順に試行します。キー未設定・未起動のプロバイダはスキップされます。
                   </p>
 
                   {fallbackChain.map((row, index) => (

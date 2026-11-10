@@ -34,7 +34,7 @@ describe('effectiveCompactTokenBudget', () => {
     expect(chatBudget).toBeLessThan(32_768)
     expect(chatBudget).toBeLessThanOrEqual(40_000)
     expect(agentBudget).toBeLessThanOrEqual(chatBudget)
-    // Local maxOut is clamped to 1024 (chat) / 2048 (agent)
+    // Local maxOut is clamped to 1024 (chat) / 4096 (agent)
     expect(chatBudget).toBe(Math.floor(32_768 * 0.7) - 1024 - 512)
   })
 
@@ -49,7 +49,7 @@ describe('effectiveCompactTokenBudget', () => {
     }
     const budget = effectiveCompactTokenBudget(settings, 'ollama', 'agent')
     expect(budget).toBeLessThan(16_384)
-    expect(budget).toBe(Math.floor(16_384 * 0.7) - 2048 - 512)
+    expect(budget).toBe(Math.floor(16_384 * 0.7) - 4096 - 512)
   })
 
   it('still caps local providers when Compact is set to 0 (off)', () => {
@@ -77,7 +77,7 @@ describe('local runtime clamps', () => {
         maxOutputTokensAgent: 8192,
       },
     }
-    expect(effectiveMaxOutputTokens(settings, 'llamacpp', 'agent')).toBe(2048)
+    expect(effectiveMaxOutputTokens(settings, 'llamacpp', 'agent')).toBe(4096)
     expect(effectiveMaxOutputTokens(settings, 'ollama', 'chat')).toBe(1024)
     expect(effectiveMaxOutputTokens(settings, 'openai', 'agent')).toBe(8192)
     expect(effectiveMaxSubagents(settings, 'ollama')).toBe(1)

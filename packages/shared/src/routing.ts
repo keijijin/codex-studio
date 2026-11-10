@@ -19,9 +19,8 @@ export interface ModelCandidate {
 export interface RoutingSettings {
   mode: RoutingMode
   /**
-   * Preferred try order for Auto / Fallback.
-   * Auto: tried first, then cost-tier catalog, then primary.
-   * Fallback / Fixed (on primary failure): tried after primary.
+   * Tried after the settings primary model.
+   * Auto / Fallback / Fixed(on primary failure): primary → fallbackChain → (Auto only) catalog.
    */
   fallbackChain: ModelCandidate[]
   /** Optional per-task overrides for auto mode. */

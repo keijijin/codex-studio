@@ -117,6 +117,8 @@ export class LlamaCppProvider implements LLMProvider {
 
       const pending: Record<number, { id: string; name: string; arguments: string }> = {}
       let yieldedTools = false
+      let yieldedText = false
+      let reasoningBuf = ''
       let usage: LlmUsage | undefined
 
       for await (const chunk of stream) {
@@ -125,9 +127,15 @@ export class LlamaCppProvider implements LLMProvider {
         const chunkUsage = usageFromOpenAIChunk(chunk)
         if (chunkUsage) usage = chunkUsage
 
-        // Never stream reasoning_content into the agent transcript — it bloats
-        // the next prefill on local models. Ask/chat still shows thinking via textFromDelta.
+        // Prefer final answer tokens. Keep reasoning aside — Qwen/AgentWorld with
+        // --reasoning-format often fills max_tokens with thinking only; dumping it
+        // into every turn would explode the next prefill, but ignoring it entirely
+        // leaves the UI blank when content never arrives.
+        if (delta?.reasoning_content) {
+          reasoningBuf += delta.reasoning_content
+        }
         if (delta?.content) {
+          yieldedText = true
           yield { type: 'text', delta: delta.content }
         }
 
@@ -167,8 +175,14 @@ export class LlamaCppProvider implements LLMProvider {
             arguments: parseToolArguments(p.arguments),
           }))
         if (calls.length > 0) {
+          yieldedTools = true
           yield { type: 'tool_calls', calls }
         }
+      }
+
+      // Fallback: model spent the whole budget on reasoning with no answer/tools.
+      if (!yieldedText && !yieldedTools && reasoningBuf.trim()) {
+        yield { type: 'text', delta: reasoningBuf }
       }
 
       yield { type: 'done', usage }

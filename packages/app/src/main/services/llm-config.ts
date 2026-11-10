@@ -140,12 +140,8 @@ export function localPromptTokenCap(
     provider === 'llamacpp'
       ? modelsLlamacppContextSize(settings.models)
       : modelsOllamaContextSize(settings.models)
-  // Local generation should stay short; reserve less than cloud defaults.
-  const configuredOut =
-    mode === 'agent'
-      ? settings.cost?.maxOutputTokensAgent ?? 2048
-      : settings.cost?.maxOutputTokens ?? 1024
-  const maxOut = Math.min(configuredOut, mode === 'agent' ? 2048 : 1024)
+  // Keep history reserve in sync with the local output clamp.
+  const maxOut = effectiveMaxOutputTokens(settings, provider, mode)
   return Math.max(2_048, Math.floor(ctx * 0.7) - maxOut - 512)
 }
 
@@ -181,7 +177,9 @@ export function effectiveMaxOutputTokens(
       ? settings.cost?.maxOutputTokensAgent ?? 8192
       : settings.cost?.maxOutputTokens ?? 4096
   if (!isLocalLlmProvider(provider)) return configured
-  return Math.min(configured, mode === 'agent' ? 2048 : 1024)
+  // AgentWorld / deepseek-reasoning often spends hundreds of tokens on
+  // reasoning_content before the final answer — keep headroom above chat.
+  return Math.min(configured, mode === 'agent' ? 4096 : 1024)
 }
 
 /** Local GPUs usually have one slot — avoid parallel subagents by default. */
