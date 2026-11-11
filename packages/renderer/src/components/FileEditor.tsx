@@ -49,8 +49,10 @@ export function FileEditor({
             fileName={activeTab.name}
           />
         ) : (
-          <div className="flex h-full items-center justify-center text-sm text-text-secondary">
-            PDF を読み込み中…
+          <div className="flex h-full items-center justify-center whitespace-pre-wrap px-6 text-center text-sm text-text-secondary">
+            {activeTab.content?.trim()
+              ? activeTab.content
+              : 'PDF を読み込み中…'}
           </div>
         )
       ) : isMarkdownFile(activeTab.name) && (activeTab.mdViewMode ?? 'preview') === 'preview' ? (

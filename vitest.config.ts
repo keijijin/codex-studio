@@ -53,6 +53,7 @@ export default defineConfig({
       '@codex/agent-core': resolve(__dirname, 'packages/agent-core/src/index.ts'),
       '@codex/indexer': resolve(__dirname, 'packages/indexer/src/index.ts'),
       '@codex/media': resolve(__dirname, 'packages/media/src/index.ts'),
+      '@codex/mcp-client': resolve(__dirname, 'packages/mcp-client/src/index.ts'),
       // Node 20 (vitest/CI) lacks built-in node:sqlite; Electron 35+ has it.
       'node:sqlite': resolve(__dirname, 'tests/shims/node-sqlite.ts'),
       // Outside Electron the `electron` package is just a binary path string.

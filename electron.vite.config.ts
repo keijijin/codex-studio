@@ -1,6 +1,41 @@
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
-import { resolve } from 'path'
+import { cpSync, existsSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { dirname, join, resolve } from 'path'
+import type { Plugin } from 'vite'
+
+const require = createRequire(import.meta.url)
+
+/** Copy pdf.js cmap / font / wasm dirs with original filenames (hashed ?url breaks pdf.js). */
+function copyPdfjsAssetsPlugin(): Plugin {
+  const dirs = ['cmaps', 'standard_fonts', 'wasm'] as const
+
+  const resolvePdfjsRoot = (): string => {
+    return dirname(require.resolve('pdfjs-dist/package.json'))
+  }
+
+  const copyInto = (targetRoot: string) => {
+    const pdfjsRoot = resolvePdfjsRoot()
+    for (const dir of dirs) {
+      const src = join(pdfjsRoot, dir)
+      if (!existsSync(src)) continue
+      cpSync(src, join(targetRoot, 'pdfjs', dir), { recursive: true })
+    }
+  }
+
+  return {
+    name: 'copy-pdfjs-assets',
+    configureServer() {
+      // Dev: Vite serves `public/` as static files.
+      copyInto(resolve(__dirname, 'packages/renderer/public'))
+    },
+    closeBundle() {
+      // Prod: electron-vite emits renderer into out/renderer
+      copyInto(resolve(__dirname, 'out/renderer'))
+    },
+  }
+}
 
 const sharedAlias = {
   '@codex/shared': resolve(__dirname, 'packages/shared/src/index.ts'),
@@ -82,10 +117,12 @@ export default defineConfig({
         },
       },
     },
-    plugins: [react()],
+    plugins: [react(), copyPdfjsAssetsPlugin()],
     optimizeDeps: {
-      include: ['monaco-editor'],
+      include: ['monaco-editor', 'pdfjs-dist'],
+      exclude: ['pdfjs-dist/build/pdf.worker.min.mjs', 'pdfjs-dist/build/pdf.renderer.min.mjs'],
     },
+    assetsInclude: ['**/*.wasm', '**/*.bcmap', '**/*.pfb'],
     worker: {
       format: 'es',
     },

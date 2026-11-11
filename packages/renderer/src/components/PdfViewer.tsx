@@ -1,8 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from 'pdfjs-dist'
+import {
+  getDocument,
+  GlobalWorkerOptions,
+  type PDFDocumentLoadingTask,
+  type PDFDocumentProxy,
+  type RenderTask,
+} from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import pdfRendererUrl from 'pdfjs-dist/build/pdf.renderer.min.mjs?url'
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl
+GlobalWorkerOptions.rendererSrc = pdfRendererUrl
+
+/**
+ * Asset dirs are copied verbatim (original filenames) by the Vite plugin
+ * `copy-pdfjs-assets` into `pdfjs/{cmaps,standard_fonts,wasm}/`.
+ * Do not use hashed `?url` samples for directory bases — production filenames diverge.
+ */
+const assetBase = import.meta.env.BASE_URL || '/'
+const PDFJS_ASSETS = {
+  wasmUrl: `${assetBase}pdfjs/wasm/`,
+  standardFontDataUrl: `${assetBase}pdfjs/standard_fonts/`,
+  cMapUrl: `${assetBase}pdfjs/cmaps/`,
+  cMapPacked: true as const,
+}
 
 function base64ToUint8Array(base64: string): Uint8Array {
   const binary = atob(base64)
@@ -11,6 +32,18 @@ function base64ToUint8Array(base64: string): Uint8Array {
     bytes[i] = binary.charCodeAt(i)
   }
   return bytes
+}
+
+function formatPdfError(err: unknown): string {
+  if (!(err instanceof Error)) return 'PDF の描画に失敗しました'
+  const msg = err.message || String(err)
+  if (/wasm/i.test(msg) || /Unable to load/i.test(msg) || /Ensure that the/i.test(msg)) {
+    return `PDF アセットの読み込みに失敗しました（${msg}）`
+  }
+  if (/worker/i.test(msg)) {
+    return `PDF Worker の初期化に失敗しました（${msg}）`
+  }
+  return msg
 }
 
 export function PdfViewer({
@@ -33,7 +66,7 @@ export function PdfViewer({
       const bytes = base64ToUint8Array(base64)
       const copy = new Uint8Array(bytes.byteLength)
       copy.set(bytes)
-      return URL.createObjectURL(new Blob([copy.buffer], { type: mimeType }))
+      return URL.createObjectURL(new Blob([copy], { type: mimeType }))
     } catch {
       return null
     }
@@ -48,6 +81,8 @@ export function PdfViewer({
   useEffect(() => {
     let cancelled = false
     let pdf: PDFDocumentProxy | null = null
+    let loadingTask: PDFDocumentLoadingTask | null = null
+    const renderTasks: RenderTask[] = []
 
     const render = async () => {
       setLoading(true)
@@ -57,11 +92,18 @@ export function PdfViewer({
       host.replaceChildren()
 
       try {
-        // pdf.js may transfer/detach the ArrayBuffer — pass a fresh copy.
-        const data = base64ToUint8Array(base64)
-        const task = getDocument({ data: data.slice() })
-        pdf = await task.promise
-        if (cancelled) return
+        // Fresh copy: pdf.js may transfer/detach the ArrayBuffer.
+        const data = base64ToUint8Array(base64).slice()
+        loadingTask = getDocument({
+          data,
+          ...PDFJS_ASSETS,
+          useSystemFonts: true,
+        })
+        pdf = await loadingTask.promise
+        if (cancelled) {
+          await loadingTask.destroy()
+          return
+        }
         setPageCount(pdf.numPages)
 
         for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
@@ -80,11 +122,14 @@ export function PdfViewer({
           host.appendChild(canvas)
           const ctx = canvas.getContext('2d')
           if (!ctx) continue
-          await page.render({ canvasContext: ctx, viewport, canvas }).promise
+          const task = page.render({ canvasContext: ctx, viewport, canvas })
+          renderTasks.push(task)
+          await task.promise
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'PDF の描画に失敗しました')
+          console.error('[PdfViewer]', err)
+          setError(formatPdfError(err))
         }
       } finally {
         if (!cancelled) setLoading(false)
@@ -94,7 +139,18 @@ export function PdfViewer({
     void render()
     return () => {
       cancelled = true
-      void pdf?.destroy()
+      for (const task of renderTasks) {
+        try {
+          task.cancel()
+        } catch {
+          // ignore
+        }
+      }
+      if (loadingTask) {
+        void loadingTask.destroy().catch(() => {})
+      } else if (pdf) {
+        void pdf.cleanup()
+      }
     }
   }, [base64, scale])
 
@@ -129,8 +185,13 @@ export function PdfViewer({
         </div>
       </div>
       {error ? (
-        <div className="flex flex-1 items-center justify-center bg-surface px-4 text-sm text-text-secondary">
-          {error}
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-surface px-4 text-sm text-text-secondary">
+          <p className="max-w-lg text-center">{error}</p>
+          {downloadUrl && (
+            <a href={downloadUrl} download={fileName ?? 'document.pdf'} className="text-accent hover:underline">
+              代わりにダウンロード
+            </a>
+          )}
         </div>
       ) : (
         <div className="relative min-h-0 flex-1 overflow-auto p-4">

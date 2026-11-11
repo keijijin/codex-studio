@@ -372,9 +372,13 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
           >
             画像
           </button>
-          <span className="truncate text-xs text-text-muted">
+          <span
+            className={`truncate text-xs ${
+              isStreaming ? 'font-medium text-amber-300' : 'text-text-muted'
+            }`}
+          >
             {isStreaming
-              ? '生成中... (Esc で中断)'
+              ? '実行中… 完了するまでお待ちください（Esc / 中断で停止）'
               : skills.length > 0 || personas.length > 0
                 ? `Shift+Enter で改行 · / で Skills・Personas（${skills.length + personas.length}）`
                 : 'Shift+Enter で改行'}
@@ -384,7 +388,7 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled }: ChatInput
           <button
             type="button"
             onClick={onCancel}
-            className="rounded bg-surface-overlay px-3 py-1 text-xs hover:bg-white/10"
+            className="rounded border border-amber-600/50 bg-amber-950/40 px-3 py-1 text-xs text-amber-100 hover:bg-amber-900/50"
           >
             中断
           </button>

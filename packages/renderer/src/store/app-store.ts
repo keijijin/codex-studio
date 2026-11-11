@@ -95,6 +95,9 @@ interface AppState {
   settings: AppSettings | null
   indexStatus: IndexStatus
   isStreaming: boolean
+  /** High-level run lifecycle for UI banners (survives briefly after stream ends). */
+  runPhase: 'idle' | 'running' | 'completed' | 'error' | 'cancelled'
+  runPhaseAt: number
   streamingContent: string
   streamingToolCalls: ToolCallRecord[]
   /** Session-scoped tool history for the Tools panel (survives stream end) */
@@ -189,6 +192,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   settings: null,
   indexStatus: { state: 'idle', totalFiles: 0, indexedFiles: 0 },
   isStreaming: false,
+  runPhase: 'idle',
+  runPhaseAt: 0,
   streamingContent: '',
   streamingToolCalls: [],
   sessionToolLog: [],
@@ -324,6 +329,8 @@ export const useAppStore = create<AppState>((set, get) => ({
             messages,
             sessions,
             isStreaming: false,
+            runPhase: 'completed',
+            runPhaseAt: Date.now(),
             streamingContent: '',
             streamingToolCalls: [],
             chatError: null,
@@ -357,6 +364,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         const { pendingApproval, pendingCeoApproval } = get()
         set({
           isStreaming: false,
+          runPhase: 'error',
+          runPhaseAt: Date.now(),
           streamingContent: '',
           streamingToolCalls: [],
           chatError: event.message,
@@ -458,6 +467,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         streamingToolCalls: [],
         sessionToolLog: [],
         isStreaming: false,
+        runPhase: 'idle',
+        runPhaseAt: 0,
         chatError: null,
         pendingApproval: null,
         routingInfo: null,
@@ -591,23 +602,42 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     if (isPdfFile(name) || defaultTabKind(name) === 'pdf') {
-      const binary = await window.codex.file.readBinary(path)
-      set({
-        tabs: [
-          ...tabs,
-          {
-            path,
-            name,
-            content: '',
-            isDirty: false,
-            mdViewMode: 'preview',
-            kind: 'pdf',
-            binaryBase64: binary.base64,
-            mimeType: binary.mimeType,
-          },
-        ],
-        ...panePatch,
-      })
+      try {
+        const binary = await window.codex.file.readBinary(path)
+        set({
+          tabs: [
+            ...tabs,
+            {
+              path,
+              name,
+              content: '',
+              isDirty: false,
+              mdViewMode: 'preview',
+              kind: 'pdf',
+              binaryBase64: binary.base64,
+              mimeType: binary.mimeType,
+            },
+          ],
+          ...panePatch,
+        })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        console.error('[app] open PDF failed:', path, err)
+        set({
+          tabs: [
+            ...tabs,
+            {
+              path,
+              name,
+              content: `PDF を開けませんでした:\n${message}`,
+              isDirty: false,
+              mdViewMode: 'preview',
+              kind: 'pdf',
+            },
+          ],
+          ...panePatch,
+        })
+      }
       return
     }
 
@@ -985,6 +1015,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       messages: [...get().messages, userMessage],
       isStreaming: true,
+      runPhase: 'running',
+      runPhaseAt: Date.now(),
       streamingContent: '',
       streamingToolCalls: [],
       chatError: null,
@@ -1007,7 +1039,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     const { activeSessionId } = get()
     if (!activeSessionId) return
     await window.codex.chat.cancel(activeSessionId)
-    set({ isStreaming: false, streamingContent: '', streamingToolCalls: [] })
+    set({
+      isStreaming: false,
+      runPhase: 'cancelled',
+      runPhaseAt: Date.now(),
+      streamingContent: '',
+      streamingToolCalls: [] })
   },
 
   compactChat: async () => {

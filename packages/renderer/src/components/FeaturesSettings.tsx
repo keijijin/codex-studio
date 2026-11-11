@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { API_KEY_REDACTED, DEFAULT_KEYBINDINGS, DEFAULT_LANGFUSE, isRedactedApiKey, type KeybindingMap, type LangfuseSettings, type McpServerConfig, type SemanticSearchSettings, type TabCompletionSettings } from '@codex/shared'
+import { API_KEY_CLEAR, API_KEY_REDACTED, DEFAULT_KEYBINDINGS, DEFAULT_LANGFUSE, isClearApiKey, isRedactedApiKey, type KeybindingMap, type LangfuseSettings, type McpServerConfig, type SemanticSearchSettings, type TabCompletionSettings } from '@codex/shared'
 import { useAppStore } from '@renderer/store/app-store'
 import { applyTheme } from '@renderer/theme'
 
@@ -367,22 +367,47 @@ export function FeaturesSettings() {
         </label>
         <label style={{ display: 'block', marginTop: 8, fontSize: 11, color: '#858585' }}>
           Secret Key (sk-…)
-          <input
-            style={{ ...inputStyle, marginTop: 2 }}
-            type="password"
-            value={langfuse.secretKey}
-            onChange={(e) =>
-              setLangfuse({
-                ...langfuse,
-                secretKey:
-                  e.target.value ||
-                  (langfuse.secretKey && isRedactedApiKey(langfuse.secretKey)
-                    ? API_KEY_REDACTED
-                    : '') })
-            }
-            placeholder="sk-lf-…"
-            autoComplete="off"
-          />
+          <div style={{ display: 'flex', gap: 8, marginTop: 2, alignItems: 'center' }}>
+            <input
+              style={{ ...inputStyle, flex: 1, marginTop: 0 }}
+              type="password"
+              value={
+                isRedactedApiKey(langfuse.secretKey) || isClearApiKey(langfuse.secretKey)
+                  ? ''
+                  : langfuse.secretKey
+              }
+              onChange={(e) =>
+                setLangfuse({
+                  ...langfuse,
+                  secretKey:
+                    e.target.value ||
+                    (langfuse.secretKey && isRedactedApiKey(langfuse.secretKey)
+                      ? API_KEY_REDACTED
+                      : ''),
+                })
+              }
+              placeholder={
+                isRedactedApiKey(langfuse.secretKey) ? '設定済み（変更時のみ入力）' : 'sk-lf-…'
+              }
+              autoComplete="off"
+            />
+            {(isRedactedApiKey(langfuse.secretKey) ||
+              (langfuse.secretKey && !isClearApiKey(langfuse.secretKey))) && (
+              <button
+                type="button"
+                style={{ ...inputStyle, width: 'auto', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                onClick={() => setLangfuse({ ...langfuse, secretKey: API_KEY_CLEAR })}
+                title="保存済みの Secret Key を削除"
+              >
+                削除
+              </button>
+            )}
+          </div>
+          {langfuse.secretKey === API_KEY_CLEAR && (
+            <p style={{ margin: '4px 0 0', fontSize: 11, color: '#fbbf24' }}>
+              保存するとこのキーは削除されます。
+            </p>
+          )}
         </label>
         <label style={{ display: 'block', marginTop: 8, fontSize: 11, color: '#858585' }}>
           Base URL

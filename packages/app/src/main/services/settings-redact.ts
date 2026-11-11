@@ -2,7 +2,7 @@ import {
   API_KEY_REDACTED,
   DEFAULT_COST_SETTINGS,
   DEFAULT_SETTINGS,
-  isRedactedApiKey,
+  mergeApiKeyField,
   type AppSettings,
 } from '@codex/shared'
 
@@ -26,12 +26,6 @@ export function redactSettingsForRenderer(settings: AppSettings): AppSettings {
   }
 }
 
-function keepOrReplaceKey(current: string | undefined, incoming: string | undefined): string | undefined {
-  if (incoming === undefined) return current
-  if (incoming === '' || isRedactedApiKey(incoming)) return current
-  return incoming
-}
-
 export function mergeSettingsPartial(
   current: AppSettings,
   partial: Partial<AppSettings>,
@@ -39,12 +33,12 @@ export function mergeSettingsPartial(
   const models = {
     ...current.models,
     ...partial.models,
-    openaiApiKey: keepOrReplaceKey(current.models.openaiApiKey, partial.models?.openaiApiKey),
-    anthropicApiKey: keepOrReplaceKey(
+    openaiApiKey: mergeApiKeyField(current.models.openaiApiKey, partial.models?.openaiApiKey),
+    anthropicApiKey: mergeApiKeyField(
       current.models.anthropicApiKey,
       partial.models?.anthropicApiKey,
     ),
-    xaiApiKey: keepOrReplaceKey(current.models.xaiApiKey, partial.models?.xaiApiKey),
+    xaiApiKey: mergeApiKeyField(current.models.xaiApiKey, partial.models?.xaiApiKey),
   }
 
   const cost = {
@@ -72,14 +66,14 @@ export function mergeSettingsPartial(
       ...DEFAULT_SETTINGS.video,
       ...current.video,
       ...partial.video,
-      runwayApiKey: keepOrReplaceKey(current.video?.runwayApiKey, partial.video?.runwayApiKey),
+      runwayApiKey: mergeApiKeyField(current.video?.runwayApiKey, partial.video?.runwayApiKey),
     },
     langfuse: {
       ...DEFAULT_SETTINGS.langfuse,
       ...current.langfuse,
       ...partial.langfuse,
       secretKey:
-        keepOrReplaceKey(current.langfuse?.secretKey, partial.langfuse?.secretKey) ?? '',
+        mergeApiKeyField(current.langfuse?.secretKey, partial.langfuse?.secretKey) ?? '',
     },
     presentation: {
       ...DEFAULT_SETTINGS.presentation,

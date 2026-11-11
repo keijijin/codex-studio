@@ -8,6 +8,7 @@ export function StatusBar() {
   const tabs = useAppStore((s) => s.tabs)
   const indexStatus = useAppStore((s) => s.indexStatus)
   const isStreaming = useAppStore((s) => s.isStreaming)
+  const runPhase = useAppStore((s) => s.runPhase)
   const sessionMode = useAppStore((s) => s.sessionMode)
   const closeWorkspace = useAppStore((s) => s.closeWorkspace)
   const setSidebarView = useAppStore((s) => s.setSidebarView)
@@ -96,7 +97,18 @@ export function StatusBar() {
         )}
       </div>
       <div className="flex items-center gap-4">
-        {isStreaming && <span>AI generating...</span>}
+        {isStreaming || runPhase === 'running' ? (
+          <span className="inline-flex items-center gap-1.5 font-medium">
+            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+            AI 実行中
+          </span>
+        ) : runPhase === 'completed' ? (
+          <span>AI 完了</span>
+        ) : runPhase === 'error' ? (
+          <span>AI エラー</span>
+        ) : runPhase === 'cancelled' ? (
+          <span>AI 中断</span>
+        ) : null}
         <span>{indexStatus.totalFiles > 0 ? `${indexStatus.totalFiles} files` : 'UTF-8'}</span>
         <span>
           {sessionMode === 'agent' ? 'Agent' : sessionMode === 'plan' ? 'Plan' : 'Ask'} Mode

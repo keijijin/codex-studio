@@ -16,7 +16,7 @@
 | 8 | 監査ログ（書込・承認） | ⚠️ | `userData/logs/audit.jsonl`（Shell 詳細は今後強化） |
 | 9 | Shell denylist | ⚠️ | 補助的。権限・承認・タイムアウトが本線 |
 | 10 | Markdown XSS 対策 | ✅ | react-markdown + Mermaid エラーは `textContent` |
-| 11 | OS Keychain 連携 | ✅ | Electron `safeStorage` → `secrets.enc.json` |
+| 11 | OS Keychain 連携 | ✅ | Electron `safeStorage` → `secrets.enc.json`。暗号化不可 / 保存失敗時は **平文ディスク書き込みなし**（メモリ保持のみ）。設定 UI の「削除」で OS ストアから消去。検証: `tests/secret-settings.test.ts`（`stripSecretsForDisk` / `mergeApiKeyField`） |
 | 12 | コード署名・公証 | ⚠️ | Secrets 設定時に CI で公証（未設定時は署名なし） |
 | 13 | ワークスペース信頼 | ✅ | hooks/agent.env ハッシュ再確認、Settings で信頼/解除、StatusBar 表示。未信頼時は Hooks / agent.env / WS Rules·Skills·Teams·Personas 無効 |
 | 14 | enabledTools / 権限の正規化 | ✅ | 実行直前に allow-list + 大小文字無視のカテゴリ判定 |
@@ -30,6 +30,7 @@
 | 2026-11-09 | 再レビュー対応 | preload CJS、Write symlink 親検証、Hooks 環境変数渡し、Team env/承認 |
 | 2026-11-09 | 再々レビュー対応 | ESM 向け electron-store 静的 import、MemoryAppend/Board の path 検証 |
 | 2026-11-09 | 最終確認対応 | Hooks の `bash -c` / `eval` 展開、第 2 ルートの symlink 削除 |
+| 2026-11-11 | レビュー対応 | 秘密の平文フォールバック廃止、キー削除 UI、PDF アセット/Worker 破棄、MCP env/cwd・JSON Schema |
 
 ## 既知の制限
 
@@ -41,3 +42,4 @@
 - `.codex/agent.env` の `0600` は新規作成時のみ。他プロジェクトの `.gitignore` 追記は未対応
 - Grep/Glob など検索系はまだ `resolvePath` 依存（WorkspaceFs 全面化は検索ツールが残）
 - Hooks の変数は `bash -c` / `eval` / `pwsh -c` まで安全に展開する。`ssh host '...${file}...'` など別の経路で再解釈されるコマンドは対象外
+- `safeStorage` が使えない環境では API キーはプロセスメモリのみ。再起動後は再入力が必要（設定 JSON への平文フォールバックは行わない）

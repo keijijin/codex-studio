@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { API_KEY_REDACTED, DEFAULT_LLAMACPP_BASE_URL, DEFAULT_LLAMACPP_CONTEXT_SIZE, DEFAULT_LLAMACPP_MODEL, DEFAULT_OLLAMA_BASE_URL, DEFAULT_OLLAMA_CONTEXT_SIZE, DEFAULT_AGENT_PERMISSIONS, DEFAULT_COST_SETTINGS, DEFAULT_FALLBACK_CHAIN, DEFAULT_PRESENTATION_SETTINGS, DEFAULT_VIDEO_SETTINGS, PERMISSION_PROFILES, isRedactedApiKey, matchPermissionProfile, type AgentPermissions, type CostSettings, type LLMProviderId, type ModelCandidate, type ModelInfo, type PermissionAction, type PermissionProfile, type PresentationSettings, type PresentationThemeId, type RoutingMode, type VideoRenderMode, type VideoSettings } from '@codex/shared'
+import { API_KEY_CLEAR, API_KEY_REDACTED, DEFAULT_LLAMACPP_BASE_URL, DEFAULT_LLAMACPP_CONTEXT_SIZE, DEFAULT_LLAMACPP_MODEL, DEFAULT_OLLAMA_BASE_URL, DEFAULT_OLLAMA_CONTEXT_SIZE, DEFAULT_AGENT_PERMISSIONS, DEFAULT_COST_SETTINGS, DEFAULT_FALLBACK_CHAIN, DEFAULT_PRESENTATION_SETTINGS, DEFAULT_VIDEO_SETTINGS, PERMISSION_PROFILES, isClearApiKey, isRedactedApiKey, matchPermissionProfile, mergeApiKeyField, type AgentPermissions, type CostSettings, type LLMProviderId, type ModelCandidate, type ModelInfo, type PermissionAction, type PermissionProfile, type PresentationSettings, type PresentationThemeId, type RoutingMode, type VideoRenderMode, type VideoSettings } from '@codex/shared'
 import { useAppStore } from '@renderer/store/app-store'
 import { hasCodexApi } from './ErrorBoundary'
 import { RulesSettings } from './RulesSettings'
@@ -132,9 +132,9 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
       await window.codex.settings.set({
         models: {
           ...current.models,
-          openaiApiKey: oKey || current.models.openaiApiKey,
-          anthropicApiKey: aKey || current.models.anthropicApiKey,
-          xaiApiKey: xKey || current.models.xaiApiKey,
+          openaiApiKey: mergeApiKeyField(current.models.openaiApiKey, oKey),
+          anthropicApiKey: mergeApiKeyField(current.models.anthropicApiKey, aKey),
+          xaiApiKey: mergeApiKeyField(current.models.xaiApiKey, xKey),
           ollamaBaseUrl: ollamaUrl || current.models.ollamaBaseUrl,
           llamacppBaseUrl: options?.llamacppUrl || current.models.llamacppBaseUrl } })
       const list = await window.codex.models.list(p)
@@ -379,48 +379,111 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
           ) : (
             <>
               <label style={labelStyle} htmlFor="openai-api-key">OpenAI API Key</label>
-              <input
-                id="openai-api-key"
-                type="password"
-                style={inputStyle}
-                placeholder={isRedactedApiKey(openaiKey) ? '設定済み（変更時のみ入力）' : 'sk-...'}
-                value={isRedactedApiKey(openaiKey) ? '' : openaiKey}
-                onChange={(e) => setOpenaiKey(e.target.value || (openaiKey && isRedactedApiKey(openaiKey) ? API_KEY_REDACTED : ''))}
-                autoComplete="off"
-              />
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input
+                  id="openai-api-key"
+                  type="password"
+                  style={{ ...inputStyle, marginTop: 0, flex: 1 }}
+                  placeholder={isRedactedApiKey(openaiKey) ? '設定済み（変更時のみ入力）' : 'sk-...'}
+                  value={
+                    isRedactedApiKey(openaiKey) || isClearApiKey(openaiKey) ? '' : openaiKey
+                  }
+                  onChange={(e) =>
+                    setOpenaiKey(
+                      e.target.value ||
+                        (openaiKey && isRedactedApiKey(openaiKey) ? API_KEY_REDACTED : ''),
+                    )
+                  }
+                  autoComplete="off"
+                />
+                {(isRedactedApiKey(openaiKey) || (openaiKey && !isClearApiKey(openaiKey))) && (
+                  <button
+                    type="button"
+                    style={{ ...btnSecondary, padding: '6px 10px', fontSize: 11, whiteSpace: 'nowrap' }}
+                    onClick={() => setOpenaiKey(API_KEY_CLEAR)}
+                  >
+                    削除
+                  </button>
+                )}
+              </div>
               {isRedactedApiKey(openaiKey) && (
                 <p style={{ margin: '4px 0 0', fontSize: 11, color: '#6e6e6e' }}>
-                  キーは保存済みです。変更する場合のみ新しいキーを入力してください。
+                  キーは保存済みです。変更する場合のみ新しいキーを入力するか、「削除」で消去できます。
+                </p>
+              )}
+              {isClearApiKey(openaiKey) && openaiKey === API_KEY_CLEAR && (
+                <p style={{ margin: '4px 0 0', fontSize: 11, color: '#fbbf24' }}>
+                  保存するとこのキーは削除されます。
                 </p>
               )}
 
               <label style={labelStyle} htmlFor="anthropic-api-key">Anthropic API Key</label>
-              <input
-                id="anthropic-api-key"
-                type="password"
-                style={inputStyle}
-                placeholder={isRedactedApiKey(anthropicKey) ? '設定済み（変更時のみ入力）' : 'sk-ant-...'}
-                value={isRedactedApiKey(anthropicKey) ? '' : anthropicKey}
-                onChange={(e) =>
-                  setAnthropicKey(
-                    e.target.value || (anthropicKey && isRedactedApiKey(anthropicKey) ? API_KEY_REDACTED : ''),
-                  )
-                }
-                autoComplete="off"
-              />
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input
+                  id="anthropic-api-key"
+                  type="password"
+                  style={{ ...inputStyle, marginTop: 0, flex: 1 }}
+                  placeholder={isRedactedApiKey(anthropicKey) ? '設定済み（変更時のみ入力）' : 'sk-ant-...'}
+                  value={
+                    isRedactedApiKey(anthropicKey) || isClearApiKey(anthropicKey)
+                      ? ''
+                      : anthropicKey
+                  }
+                  onChange={(e) =>
+                    setAnthropicKey(
+                      e.target.value ||
+                        (anthropicKey && isRedactedApiKey(anthropicKey) ? API_KEY_REDACTED : ''),
+                    )
+                  }
+                  autoComplete="off"
+                />
+                {(isRedactedApiKey(anthropicKey) ||
+                  (anthropicKey && !isClearApiKey(anthropicKey))) && (
+                  <button
+                    type="button"
+                    style={{ ...btnSecondary, padding: '6px 10px', fontSize: 11, whiteSpace: 'nowrap' }}
+                    onClick={() => setAnthropicKey(API_KEY_CLEAR)}
+                  >
+                    削除
+                  </button>
+                )}
+              </div>
+              {isClearApiKey(anthropicKey) && anthropicKey === API_KEY_CLEAR && (
+                <p style={{ margin: '4px 0 0', fontSize: 11, color: '#fbbf24' }}>
+                  保存するとこのキーは削除されます。
+                </p>
+              )}
 
               <label style={labelStyle} htmlFor="xai-api-key">xAI (Grok) API Key</label>
-              <input
-                id="xai-api-key"
-                type="password"
-                style={inputStyle}
-                placeholder={isRedactedApiKey(xaiKey) ? '設定済み（変更時のみ入力）' : 'xai-...'}
-                value={isRedactedApiKey(xaiKey) ? '' : xaiKey}
-                onChange={(e) =>
-                  setXaiKey(e.target.value || (xaiKey && isRedactedApiKey(xaiKey) ? API_KEY_REDACTED : ''))
-                }
-                autoComplete="off"
-              />
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input
+                  id="xai-api-key"
+                  type="password"
+                  style={{ ...inputStyle, marginTop: 0, flex: 1 }}
+                  placeholder={isRedactedApiKey(xaiKey) ? '設定済み（変更時のみ入力）' : 'xai-...'}
+                  value={isRedactedApiKey(xaiKey) || isClearApiKey(xaiKey) ? '' : xaiKey}
+                  onChange={(e) =>
+                    setXaiKey(
+                      e.target.value || (xaiKey && isRedactedApiKey(xaiKey) ? API_KEY_REDACTED : ''),
+                    )
+                  }
+                  autoComplete="off"
+                />
+                {(isRedactedApiKey(xaiKey) || (xaiKey && !isClearApiKey(xaiKey))) && (
+                  <button
+                    type="button"
+                    style={{ ...btnSecondary, padding: '6px 10px', fontSize: 11, whiteSpace: 'nowrap' }}
+                    onClick={() => setXaiKey(API_KEY_CLEAR)}
+                  >
+                    削除
+                  </button>
+                )}
+              </div>
+              {isClearApiKey(xaiKey) && xaiKey === API_KEY_CLEAR && (
+                <p style={{ margin: '4px 0 0', fontSize: 11, color: '#fbbf24' }}>
+                  保存するとこのキーは削除されます。
+                </p>
+              )}
 
               <label style={labelStyle} htmlFor="provider">プロバイダ</label>
               <select
@@ -914,15 +977,42 @@ export function SettingsForm({ onSaved, onCancel, compact }: SettingsFormProps) 
               <label style={labelStyle} htmlFor="runway-key">
                 Runway API キー
               </label>
-              <input
-                id="runway-key"
-                type="password"
-                style={inputStyle}
-                value={runwayKey}
-                onChange={(e) => setRunwayKey(e.target.value)}
-                placeholder="未設定時は slides にフォールバック（環境変数 RUNWAYML_API_SECRET 可）"
-                autoComplete="off"
-              />
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input
+                  id="runway-key"
+                  type="password"
+                  style={{ ...inputStyle, marginTop: 0, flex: 1 }}
+                  value={
+                    isRedactedApiKey(runwayKey) || isClearApiKey(runwayKey) ? '' : runwayKey
+                  }
+                  onChange={(e) =>
+                    setRunwayKey(
+                      e.target.value ||
+                        (runwayKey && isRedactedApiKey(runwayKey) ? API_KEY_REDACTED : ''),
+                    )
+                  }
+                  placeholder={
+                    isRedactedApiKey(runwayKey)
+                      ? '設定済み（変更時のみ入力）'
+                      : '未設定時は slides にフォールバック（環境変数 RUNWAYML_API_SECRET 可）'
+                  }
+                  autoComplete="off"
+                />
+                {(isRedactedApiKey(runwayKey) || (runwayKey && !isClearApiKey(runwayKey))) && (
+                  <button
+                    type="button"
+                    style={{ ...btnSecondary, padding: '6px 10px', fontSize: 11, whiteSpace: 'nowrap' }}
+                    onClick={() => setRunwayKey(API_KEY_CLEAR)}
+                  >
+                    削除
+                  </button>
+                )}
+              </div>
+              {isClearApiKey(runwayKey) && runwayKey === API_KEY_CLEAR && (
+                <p style={{ margin: '4px 0 0', fontSize: 11, color: '#fbbf24' }}>
+                  保存するとこのキーは削除されます。
+                </p>
+              )}
               <label style={labelStyle} htmlFor="tts-voice">
                 TTS ボイス（OpenAI）
               </label>

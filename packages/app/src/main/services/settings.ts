@@ -21,7 +21,7 @@ import {
   type Session,
 } from '@codex/shared'
 import { randomUUID } from 'crypto'
-import { API_KEY_REDACTED, isRedactedApiKey } from '@codex/shared'
+import { mergeApiKeyField } from '@codex/shared'
 import { sessionDb } from './session-db'
 import {
   applySecretsToSettings,
@@ -355,38 +355,48 @@ export class SettingsService {
   }
 
   private persistSettings(settings: AppSettings): void {
-    if (this.secretEncryptionAvailable) {
-      const secrets = extractSecretsFromSettings(settings)
-      const toSave: SecretBag = {}
-      for (const key of [
-        'openaiApiKey',
-        'anthropicApiKey',
-        'xaiApiKey',
-        'runwayApiKey',
-        'langfuseSecretKey',
-      ] as SecretKeyName[]) {
-        if (typeof secrets[key] === 'string') {
-          toSave[key] = secrets[key]
-        }
+    const secrets = extractSecretsFromSettings(settings)
+    const toSave: SecretBag = {}
+    for (const key of [
+      'openaiApiKey',
+      'anthropicApiKey',
+      'xaiApiKey',
+      'runwayApiKey',
+      'langfuseSecretKey',
+    ] as SecretKeyName[]) {
+      if (typeof secrets[key] === 'string') {
+        toSave[key] = secrets[key]
       }
-      this.secretBag = { ...this.secretBag, ...toSave }
-      for (const [k, v] of Object.entries(toSave)) {
-        if (v === '') delete this.secretBag[k as SecretKeyName]
-      }
-      void savePlainSecrets(toSave)
-        .then(() => {
-          store.set('settings', stripSecretsForDisk(settings))
-          store.set('migratedSecretsToSafeStorage', true)
-        })
-        .catch((err: unknown) => {
-          console.warn('[settings] failed to persist secrets; keeping plaintext fallback', err)
-          store.set('settings', settings)
-        })
-      // Optimistic disk write without secrets so UI settings don't wait on Keychain.
-      store.set('settings', stripSecretsForDisk(settings))
+    }
+    // Always keep the in-memory overlay up to date (including clears).
+    this.secretBag = { ...this.secretBag, ...toSave }
+    for (const [k, v] of Object.entries(toSave)) {
+      if (v === '') delete this.secretBag[k as SecretKeyName]
+    }
+
+    // Never write API keys into the settings JSON — secrets stay in memory / OS store only.
+    store.set('settings', stripSecretsForDisk(settings))
+
+    const hasSecretPayload = Object.values(toSave).some((v) => typeof v === 'string')
+    if (!hasSecretPayload) return
+
+    if (!this.secretEncryptionAvailable) {
+      console.warn(
+        '[settings] OS secret encryption unavailable; API keys kept in memory only and were not persisted to disk',
+      )
       return
     }
-    store.set('settings', settings)
+
+    void savePlainSecrets(toSave)
+      .then(() => {
+        store.set('migratedSecretsToSafeStorage', true)
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err)
+        console.error(
+          `[settings] failed to persist secrets to OS store (${message}); keys remain in memory only (not written as plaintext)`,
+        )
+      })
   }
 
   set(partial: Partial<AppSettings>): AppSettings {
@@ -402,12 +412,6 @@ export class SettingsService {
     agent.maxIterations = clampMaxIterations(agent.maxIterations)
     if (typeof agent.maxSubagents === 'number') {
       agent.maxSubagents = Math.min(8, Math.max(1, Math.floor(agent.maxSubagents)))
-    }
-
-    const keepKey = (cur: string | undefined, next: string | undefined): string | undefined => {
-      if (next === undefined) return cur
-      if (next === '' || isRedactedApiKey(next) || next === API_KEY_REDACTED) return cur
-      return next
     }
 
     const cost = {
@@ -431,7 +435,7 @@ export class SettingsService {
       ...DEFAULT_VIDEO_SETTINGS,
       ...current.video,
       ...partial.video,
-      runwayApiKey: keepKey(current.video?.runwayApiKey, partial.video?.runwayApiKey),
+      runwayApiKey: mergeApiKeyField(current.video?.runwayApiKey, partial.video?.runwayApiKey),
     }
     video.maxShots = Math.min(30, Math.max(2, Math.floor(video.maxShots) || 12))
     video.maxGenerativeShots = Math.min(
@@ -488,9 +492,12 @@ export class SettingsService {
       models: {
         ...current.models,
         ...partial.models,
-        openaiApiKey: keepKey(current.models.openaiApiKey, partial.models?.openaiApiKey),
-        anthropicApiKey: keepKey(current.models.anthropicApiKey, partial.models?.anthropicApiKey),
-        xaiApiKey: keepKey(current.models.xaiApiKey, partial.models?.xaiApiKey),
+        openaiApiKey: mergeApiKeyField(current.models.openaiApiKey, partial.models?.openaiApiKey),
+        anthropicApiKey: mergeApiKeyField(
+          current.models.anthropicApiKey,
+          partial.models?.anthropicApiKey,
+        ),
+        xaiApiKey: mergeApiKeyField(current.models.xaiApiKey, partial.models?.xaiApiKey),
       },
       routing: normalizeRoutingSettings({
         ...current.routing,
@@ -522,7 +529,8 @@ export class SettingsService {
         ...DEFAULT_LANGFUSE,
         ...current.langfuse,
         ...partial.langfuse,
-        secretKey: keepKey(current.langfuse?.secretKey, partial.langfuse?.secretKey) ?? '',
+        secretKey:
+          mergeApiKeyField(current.langfuse?.secretKey, partial.langfuse?.secretKey) ?? '',
       },
     }
     this.persistSettings(updated)

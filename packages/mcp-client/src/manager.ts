@@ -5,6 +5,8 @@ import type { Tool, ToolResult } from '@codex/tools'
 
 export interface McpServerRuntime {
   config: McpServerConfig
+  /** Workspace root used when config.cwd is empty — part of connection identity. */
+  workspaceRoot?: string
   client: Client
   transport: StdioClientTransport
   tools: Tool[]
@@ -16,24 +18,42 @@ function mcpToolName(serverId: string, toolName: string): string {
   return `mcp__${safeServer}__${safeTool}`
 }
 
-function jsonSchemaToToolParams(inputSchema: unknown): Tool['parameters'] {
-  const schema = (inputSchema ?? { type: 'object', properties: {} }) as {
-    type?: string
-    properties?: Record<string, { type?: string; description?: string }>
-    required?: string[]
-  }
-  const properties: Record<string, { type: string; description?: string }> = {}
-  for (const [key, val] of Object.entries(schema.properties ?? {})) {
-    properties[key] = {
-      type: typeof val?.type === 'string' ? val.type : 'string',
-      description: val?.description,
+/** Keep the provider's JSON Schema intact (items / enum / anyOf / nested properties). */
+export function jsonSchemaToToolParams(inputSchema: unknown): Tool['parameters'] {
+  if (inputSchema && typeof inputSchema === 'object' && !Array.isArray(inputSchema)) {
+    const schema = { ...(inputSchema as Record<string, unknown>) }
+    if (typeof schema.type !== 'string') schema.type = 'object'
+    if (!schema.properties || typeof schema.properties !== 'object' || Array.isArray(schema.properties)) {
+      schema.properties = {}
     }
+    return schema as Tool['parameters']
   }
-  return {
-    type: 'object',
-    properties,
-    required: schema.required,
-  }
+  return { type: 'object', properties: {} }
+}
+
+export function effectiveMcpCwd(config: Pick<McpServerConfig, 'cwd'>, workspaceRoot?: string): string {
+  return config.cwd || workspaceRoot || process.cwd()
+}
+
+export function stableMcpEnvKey(env: Record<string, string> | undefined): string {
+  if (!env) return '{}'
+  const keys = Object.keys(env).sort()
+  const sorted: Record<string, string> = {}
+  for (const k of keys) sorted[k] = env[k]!
+  return JSON.stringify(sorted)
+}
+
+export function sameMcpConnection(
+  existing: Pick<McpServerRuntime, 'config' | 'workspaceRoot'>,
+  config: McpServerConfig,
+  workspaceRoot?: string,
+): boolean {
+  return (
+    existing.config.command === config.command &&
+    JSON.stringify(existing.config.args ?? []) === JSON.stringify(config.args ?? []) &&
+    stableMcpEnvKey(existing.config.env) === stableMcpEnvKey(config.env) &&
+    effectiveMcpCwd(existing.config, existing.workspaceRoot) === effectiveMcpCwd(config, workspaceRoot)
+  )
 }
 
 export class McpManager {
@@ -63,6 +83,7 @@ export class McpManager {
     const enabled = configs.filter((c) => c.enabled && c.command.trim())
     const wanted = new Set(enabled.map((c) => c.id))
     const errors: Array<{ id: string; message: string }> = []
+    const workspaceRoot = opts?.workspaceRoot ?? undefined
 
     for (const id of [...this.servers.keys()]) {
       if (!wanted.has(id)) {
@@ -73,17 +94,13 @@ export class McpManager {
     const connected: string[] = []
     for (const config of enabled) {
       const existing = this.servers.get(config.id)
-      if (
-        existing &&
-        existing.config.command === config.command &&
-        JSON.stringify(existing.config.args ?? []) === JSON.stringify(config.args ?? [])
-      ) {
+      if (existing && sameMcpConnection(existing, config, workspaceRoot)) {
         connected.push(config.id)
         continue
       }
       if (existing) await this.disconnect(config.id)
       try {
-        await this.connect(config, opts?.workspaceRoot ?? undefined)
+        await this.connect(config, workspaceRoot)
         connected.push(config.id)
       } catch (err) {
         errors.push({
@@ -97,11 +114,12 @@ export class McpManager {
   }
 
   async connect(config: McpServerConfig, workspaceRoot?: string): Promise<void> {
+    const cwd = effectiveMcpCwd(config, workspaceRoot)
     const transport = new StdioClientTransport({
       command: config.command,
       args: config.args ?? [],
       env: { ...process.env, ...config.env } as Record<string, string>,
-      cwd: config.cwd || workspaceRoot || process.cwd(),
+      cwd,
     })
     const client = new Client({ name: 'codex-studio', version: '0.1.0' }, { capabilities: {} })
     await client.connect(transport)
@@ -152,7 +170,7 @@ export class McpManager {
       }
     })
 
-    this.servers.set(config.id, { config, client, transport, tools })
+    this.servers.set(config.id, { config, workspaceRoot, client, transport, tools })
   }
 
   async disconnect(serverId: string): Promise<void> {

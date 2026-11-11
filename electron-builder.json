@@ -7,9 +7,12 @@
     "buildResources": "build"
   },
   "files": [
-    "out/**/*",
-    "package.json",
-    "!**/*.map"
+    {
+      "from": "out",
+      "to": "out",
+      "filter": ["**/*", "!**/*.map"]
+    },
+    "package.json"
   ],
   "extraResources": [
     {

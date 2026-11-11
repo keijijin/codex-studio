@@ -1,54 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { AppSettings } from '@codex/shared'
-import { DEFAULT_SETTINGS } from '@codex/shared'
+import { API_KEY_CLEAR, API_KEY_REDACTED, DEFAULT_SETTINGS, mergeApiKeyField, type AppSettings } from '@codex/shared'
+import {
+  applySecretsToSettings,
+  extractSecretsFromSettings,
+  stripSecretsForDisk,
+} from '../packages/app/src/main/services/secret-store'
 
-// Pure helpers re-exported via relative import path under app — duplicate minimal logic for unit test
-// by importing from the same module paths used in Main (vitest resolves workspace packages).
-
-function stripSecretsForDisk(settings: AppSettings): AppSettings {
-  return {
-    ...settings,
-    models: {
-      ...settings.models,
-      openaiApiKey: undefined,
-      anthropicApiKey: undefined,
-      xaiApiKey: undefined,
-    },
-    video: {
-      ...settings.video,
-      runwayApiKey: undefined,
-    },
-    langfuse: {
-      ...settings.langfuse,
-      secretKey: '',
-    },
-  }
-}
-
-function applySecretsToSettings(
-  settings: AppSettings,
-  secrets: Partial<Record<string, string>>,
-): AppSettings {
-  return {
-    ...settings,
-    models: {
-      ...settings.models,
-      openaiApiKey: secrets.openaiApiKey ?? settings.models.openaiApiKey,
-      anthropicApiKey: secrets.anthropicApiKey ?? settings.models.anthropicApiKey,
-      xaiApiKey: secrets.xaiApiKey ?? settings.models.xaiApiKey,
-    },
-    video: {
-      ...settings.video,
-      runwayApiKey: secrets.runwayApiKey ?? settings.video?.runwayApiKey,
-    },
-    langfuse: {
-      ...settings.langfuse,
-      secretKey: secrets.langfuseSecretKey ?? settings.langfuse?.secretKey ?? '',
-    },
-  }
-}
-
-describe('secret settings helpers', () => {
+describe('secret settings helpers (production modules)', () => {
   it('strips API keys for disk persistence', () => {
     const settings: AppSettings = {
       ...DEFAULT_SETTINGS,
@@ -65,6 +23,7 @@ describe('secret settings helpers', () => {
     expect(stripped.models.anthropicApiKey).toBeUndefined()
     expect(stripped.video.runwayApiKey).toBeUndefined()
     expect(stripped.langfuse.secretKey).toBe('')
+    expect(extractSecretsFromSettings(stripped).openaiApiKey).toBeUndefined()
   })
 
   it('overlays decrypted secrets onto settings', () => {
@@ -75,5 +34,13 @@ describe('secret settings helpers', () => {
     })
     expect(hydrated.models.openaiApiKey).toBe('sk-from-keychain')
     expect(hydrated.langfuse.secretKey).toBe('sk-lf-from-keychain')
+  })
+
+  it('mergeApiKeyField keeps redacted, clears sentinel, replaces otherwise', () => {
+    expect(mergeApiKeyField('sk-old', undefined)).toBe('sk-old')
+    expect(mergeApiKeyField('sk-old', API_KEY_REDACTED)).toBe('sk-old')
+    expect(mergeApiKeyField('sk-old', API_KEY_CLEAR)).toBe('')
+    expect(mergeApiKeyField('sk-old', '')).toBe('')
+    expect(mergeApiKeyField('sk-old', 'sk-new')).toBe('sk-new')
   })
 })

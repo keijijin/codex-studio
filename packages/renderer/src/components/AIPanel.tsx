@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useAppStore } from '@renderer/store/app-store'
+import { AiRunStatus } from './AiRunStatus'
 import { ChatInput } from './ChatInput'
 import { MessageList } from './MessageList'
 import { ToolLogPanel } from './ToolLogPanel'
@@ -131,7 +132,14 @@ export function AIPanel() {
       {settingsDialog}
 
       <div className="flex h-9 items-center justify-between border-b border-surface-border px-3">
-        <span className="text-sm font-medium">AI Chat</span>
+        <span className="flex items-center gap-2 text-sm font-medium">
+          AI Chat
+          {isStreaming && (
+            <span className="rounded bg-amber-500/25 px-1.5 py-0.5 text-[10px] font-normal text-amber-200">
+              実行中
+            </span>
+          )}
+        </span>
         <div className="flex items-center gap-1">
           <button
             type="button"
@@ -323,6 +331,8 @@ export function AIPanel() {
           </p>
         )}
       </div>
+
+      <AiRunStatus />
 
       {panelTab === 'chat' ? (
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto p-3">

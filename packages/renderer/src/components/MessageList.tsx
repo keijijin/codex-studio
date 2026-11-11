@@ -61,17 +61,29 @@ export function MessageList({
         </div>
       ))}
 
-          {isStreaming && (streamingToolCalls.length > 0 || streamingContent) && (
+      {isStreaming && (
         <div className="text-sm">
-          <div className="mb-1 text-xs font-medium text-text-secondary">Assistant</div>
+          <div className="mb-1 flex items-center gap-2 text-xs font-medium text-text-secondary">
+            <span>Assistant</span>
+            <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-normal text-amber-200">
+              実行中
+            </span>
+          </div>
           {streamingToolCalls.length > 0 && <ToolCallList toolCalls={streamingToolCalls} />}
-          {streamingContent && (
+          {streamingContent ? (
             // Plain text while streaming — full Markdown/Mermaid on every token freezes the UI.
             <pre className="m-0 whitespace-pre-wrap break-words font-sans text-sm text-text-primary">
               {streamingContent}
             </pre>
+          ) : streamingToolCalls.length === 0 ? (
+            <p className="text-xs text-text-muted">
+              モデルの応答を待っています…
+              <span className="ml-1 inline-block h-3 w-1 animate-pulse bg-accent align-middle" />
+            </p>
+          ) : null}
+          {(streamingContent || streamingToolCalls.length > 0) && (
+            <span className="inline-block h-4 w-1 animate-pulse bg-accent" />
           )}
-          <span className="inline-block h-4 w-1 animate-pulse bg-accent" />
         </div>
       )}
 
